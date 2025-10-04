@@ -315,23 +315,104 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
         avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
         print(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)")
 
-    # Plots
+def generate_report(metrics_list: List[Dict[str, Any]]):
+    """Generate post-training report with averages by prune type/intensity and plots."""
+    if not metrics_list:
+        print("[Report] No metrics to report.")
+        return
+
+    # Overall averages
+    total_time = sum(m['time_ms'] for m in metrics_list)
+    total_ppl = sum(m['ppl'] for m in metrics_list)
+    n = len(metrics_list)
+    print(f"\n[Report] Overall Avg Time: {total_time/n:.2f}ms | Avg PPL: {total_ppl/n:.2f}")
+
+    # Group by target and intensity
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for m in metrics_list:
+        key = (m['target'], m['intensity'])
+        groups[key].append(m)
+
+    print("\n[Report] Averages by Prune Type and Intensity:")
+    for (target, intensity), ms in groups.items():
+        avg_time = sum(m['time_ms'] for m in ms) / len(ms)
+        avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
+        print(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)")
+
+    # Plots: Two separate PNGs for inference time and perplexity
     episodes = [m['episode'] for m in metrics_list]
     times = [m['time_ms'] for m in metrics_list]
     ppls = [m['ppl'] for m in metrics_list]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    ax1.plot(episodes, times, marker='o')
-    ax1.set_title('Inference Time per Episode')
-    ax1.set_xlabel('Episode')
-    ax1.set_ylabel('Time (ms)')
-    ax2.plot(episodes, ppls, marker='o')
-    ax2.set_title('Perplexity per Episode')
-    ax2.set_xlabel('Episode')
-    ax2.set_ylabel('Perplexity')
+    # Function to remove outliers using IQR
+    def remove_outliers(data):
+        import numpy as np
+        q1 = np.percentile(data, 25)
+        q3 = np.percentile(data, 75)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        return [d for d in data if lower_bound <= d <= upper_bound]
+
+    # Inference Time Plot
+    times_filtered = remove_outliers(times)
+    episodes_filtered_time = episodes[:len(times_filtered)]  # Assume order, but to be precise, filter indices
+    # Since we filtered, need to get corresponding episodes
+    indices = [i for i, t in enumerate(times) if times[i] in times_filtered]
+    episodes_filtered_time = [episodes[i] for i in indices]
+    times_filtered = times_filtered
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(episodes_filtered_time, times_filtered, alpha=0.6, label='Data')
+    if len(episodes_filtered_time) > 1:
+        import numpy as np
+        coeff = np.polyfit(episodes_filtered_time, times_filtered, 1)
+        trendline = np.polyval(coeff, episodes_filtered_time)
+        plt.plot(episodes_filtered_time, trendline, color='red', label='Trendline')
+    plt.title('Inference Time per Episode (Outliers Removed)')
+    plt.xlabel('Episode')
+    plt.ylabel('Time (ms)')
+    plt.legend()
     plt.tight_layout()
-    plt.savefig('training_metrics.png')
-    print("[Report] Plots saved to training_metrics.png")
+    plt.savefig('inference_time.png')
+    plt.close()
+    print("[Report] Inference time plot saved to inference_time.png")
+
+    # Perplexity Plot
+    ppls_filtered = remove_outliers(ppls)
+    indices_ppl = [i for i, p in enumerate(ppls) if ppls[i] in ppls_filtered]
+    episodes_filtered_ppl = [episodes[i] for i in indices_ppl]
+    ppls_filtered = ppls_filtered
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(episodes_filtered_ppl, ppls_filtered, alpha=0.6, label='Data')
+    if len(episodes_filtered_ppl) > 1:
+        import numpy as np
+        coeff = np.polyfit(episodes_filtered_ppl, ppls_filtered, 1)
+        trendline = np.polyval(coeff, episodes_filtered_ppl)
+        plt.plot(episodes_filtered_ppl, trendline, color='red', label='Trendline')
+    plt.title('Perplexity per Episode (Outliers Removed)')
+    plt.xlabel('Episode')
+    plt.ylabel('Perplexity')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig('perplexity.png')
+    plt.close()
+    print("[Report] Perplexity plot saved to perplexity.png")
+
+    # Save report to file
+    with open('training_report.txt', 'w') as f:
+        f.write("Training Report\n")
+        f.write(f"Episodes: {n}\n")
+        f.write(f"Overall Avg Time: {total_time/n:.2f}ms\n")
+        f.write(f"Overall Avg PPL: {total_ppl/n:.2f}\n\n")
+        f.write("Averages by Prune Type and Intensity:\n")
+        for (target, intensity), ms in groups.items():
+            avg_time = sum(m['time_ms'] for m in ms) / len(ms)
+            avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
+            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
+    print("[Report] Report saved to training_report.txt")
 
     # Save report to file
     with open('training_report.txt', 'w') as f:

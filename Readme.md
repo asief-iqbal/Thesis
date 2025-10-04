@@ -36,7 +36,7 @@ The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner
 - **Adaptive Pruning**: RL learns to prune more aggressively for complex prompts on constrained hardware.
 - **Structural Speedups**: Magnitude-based slicing rebuilds model layers for real inference speedups (Phase 3).
 - **Standardized Evaluation**: Integrates lm-eval-harness for ARC, HellaSwag, Winogrande, LAMBADA.
-- **Dataset-Driven Training**: Trains on real prompt datasets (Dolly-15k, Alpaca, custom CSV files with 80/20 train/test splits).
+- **Dataset-Driven Training**: Trains on real prompt datasets (Dolly-15k, Alpaca).
 - **Post-Training Reports**: Automatic generation of latency/PPL reports and graphs.
 
 ## Features
@@ -50,7 +50,6 @@ The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner
 - **Modes**: Separate train/test CLI modes with checkpointing.
 - **Safety**: Reversible pruning, no permanent model damage.
 - **Local Everything**: All caches, models, datasets stored in project folder.
-- **Custom Dataset Support**: Load and train/test on custom CSV files with automatic 80/20 splits.
 
 ## Requirements
 
@@ -106,13 +105,6 @@ venv\Scripts\activate
 python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset databricks/databricks-dolly-15k --train-samples 500 --max-new-tokens 20
 ```
 
-### Train on Custom CSV Dataset
-```bash
-venv\Scripts\activate
-python Adaptive_pruning.py --mode train --checkpoint checkpoints/rl_policy.pt --train-dataset "path/to/your/dataset.csv"
-```
-*Note*: For CSV files, the script automatically performs an 80/20 train/test split and trains on all prompts in the train split, generating a report and graph upon completion.
-
 ### Test Trained Agent
 ```bash
 venv\Scripts\activate
@@ -126,12 +118,6 @@ Train the RL agent on a prompt dataset:
 ```bash
 python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/rl_policy.pt --train-dataset databricks/databricks-dolly-15k --train-samples 5000 --max-new-tokens 50
 ```
-
-For custom CSV datasets (e.g., `Prompt Dataset.csv`):
-```bash
-python Adaptive_pruning.py --mode train --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset.csv"
-```
-*Note*: CSV training automatically uses all prompts in the 80% train split, overrides `--episodes` to match the dataset size, and produces `training_metrics.png` and `training_report.txt`.
 
 **Faster Training Options** (for testing/debugging):
 - `--episodes 50` (half episodes).
@@ -188,7 +174,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 - `.env`: Config (HF token, pruning mode).
 - `checkpoints/`: RL policy files.
 - `training_report.txt`: Post-training report.
-- `training_metrics.png`: Graphs (inference time and perplexity per episode).
+- `training_metrics.png`: Graphs.
 
 ## Benchmarks
 

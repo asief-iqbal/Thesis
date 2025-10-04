@@ -1,4 +1,4 @@
-# CAPA: Context-Aware Runtime Adaptive Pruning
+# Structured Adaptive Pruning for LLMs
 
 A rule-based system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using deterministic methodologies.
 
@@ -165,26 +165,48 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 
 ```mermaid
 graph TD
-    A[User Prompt] --> B[NLP Analyzer]
-    B --> C[Complexity Score]
-    D[Hardware Monitor] --> E[CPU/GPU/Memory Stats]
-    C --> F[Structured Controller]
-    E --> F
-    F --> G{Decision Rules}
-    G -->|High Complexity + High GPU Load| H[Prune FFN Neurons]
-    G -->|Medium Complexity + Low Memory| I[Prune Layers]
-    G -->|Low Complexity + High CPU| J[No Pruning]
-    H --> K[Apply Pruning]
-    I --> K
-    J --> K
-    K --> L[Model Engine]
-    L --> M[Generate Response]
-    M --> N[Benchmark]
-    N --> O[Reward Calculation]
-    O --> P[Training Loop / Report]
+    subgraph "Initialization Phase"
+        A1[Load LLaMA-3.2-1B Model]
+        B1[Initialize Pruners: Functional/Structural/KV]
+        C1[Setup NLP Analyzer: spaCy/NLTK]
+        D1[Initialize Hardware Monitor: NVML/psutil]
+    end
+
+    subgraph "Per-Prompt Workflow"
+        A[User Prompt] --> B[NLP Analyzer: Tokenize & Extract Features]
+        B --> C[Normalize Features: llm_norm, q_norm, v_norm, etc.]
+        C --> D[Calculate Complexity Score: Weighted Sum]
+        E[Hardware Monitor] --> F[Collect CPU/GPU/Memory Stats]
+        D --> G[Structured Controller: Evaluate Rules]
+        F --> G
+        G --> H{Decision Rules}
+        H -->|High Complexity + High Load| I[Select Aggressive Pruning: FFN/Layers]
+        H -->|Medium Complexity| J[Select Balanced Pruning: Heads/KV]
+        H -->|Low Complexity| K[Select Minimal/No Pruning]
+        I --> L[Apply Pruning to Model]
+        J --> L
+        K --> L
+        L --> M[Model Engine: Generate Response]
+        M --> N[Benchmark System: PPL, Latency, Tokens/sec]
+        N --> O[Log Metrics & Reward]
+        O --> P[Restore Model State]
+    end
+
+    subgraph "Training/Evaluation Loop"
+        Q[Dataset Split: 80% Train / 20% Test] --> R{For Each Prompt}
+        R --> S[Process Prompt → Decide → Apply → Generate → Benchmark]
+        S --> T[Aggregate Metrics & Generate Reports]
+        T --> U[Produce Graphs: Inference Time vs. Episode, Perplexity vs. Episode]
+    end
+
+    A1 --> A
+    B1 --> A
+    C1 --> B
+    D1 --> E
+    P --> R
 ```
 
-This diagram illustrates the structured flow: prompt analysis, hardware monitoring, rule-based decisions, pruning application, response generation, and evaluation.
+This expanded diagram illustrates the full system workflow, from initialization to training/evaluation loops, incorporating detailed prompt processing, rule-based decisions, pruning application, response generation, and benchmarking.
 
 ## Modules
 
@@ -219,21 +241,70 @@ This section provides a comprehensive, step-by-step explanation of the system's 
 - **NLP Analyzer**: Load spaCy/NLTK models for prompt analysis.
 - **Hardware Monitor**: Initialize NVML (if GPU) and psutil for telemetry.
 
-### 2. Prompt Processing
-For each input prompt:
-- **Complexity Analysis**:
-  - Tokenize prompt using NLTK/spaCy.
-  - Calculate features: number of tokens, verbs, questions, noun chunks, dependency spans.
-  - Complexity Score = Weighted sum (e.g., 0.2 * tokens/100 + 0.3 * verbs/tokens + 0.5 * questions_present).
-  - Range: 0.0 (simple) to 1.0+ (complex).
-- **Hardware State Collection**:
-  - CPU utilization (%).
-  - Memory available (GB).
-  - GPU utilization (%) and free VRAM (GB).
-  - Battery (%) if applicable.
+### 2. Prompt Processing (Workflow)
 
-### 3. Pruning Decision-Making (Structured Rules)
-The system uses deterministic if-else rules based on complexity and hardware:
+```mermaid
+flowchart TD
+    A[Input Prompt] --> B[Tokenize with NLTK/spaCy]
+    B --> C[Extract Features]
+    C --> D[Normalize Features]
+    D --> E[Calculate Complexity Score]
+    E --> F[Collect Hardware State]
+    F --> G[Output Complexity + Hardware Metrics]
+```
+
+**Step-by-step breakdown**:
+
+1. **Tokenization**:
+   - Use NLTK for basic word/POS tagging.
+   - Use spaCy (if available) for noun chunks, sentence segmentation, dependency parsing.
+   - Count LLM tokens using model's tokenizer.
+
+2. **Feature Extraction**:
+   - LLM tokens: Total tokens from model's tokenizer.
+   - Verbs: Count of POS tags starting with 'V'.
+   - Questions: Count of interrogative words + '?' characters.
+   - Noun chunks: Number of noun phrases.
+   - Dependency span: Max distance between token and head in dependency tree.
+   - Sentence length: Average sentence length.
+
+3. **Normalization**:
+   - llm_norm = min(1.0, llm_tokens / 200.0)
+   - q_norm = min(1.0, interrogative_count / 2.0)
+   - v_norm = min(1.0, verb_count / 5.0)
+   - sent_norm = min(1.0, avg_sent_len / 30.0)
+   - noun_norm = min(1.0, noun_chunks / 20.0)
+   - dep_norm = min(1.0, dep_span / 20.0)
+
+4. **Complexity Score Calculation**:
+   - Complexity Score = 0.4 * llm_norm + 0.05 * q_norm + 0.20 * v_norm + 0.10 * sent_norm + 0.25 * noun_norm + 0.10 * dep_norm
+   - Range: 0.0 (simple prompts) to 1.0+ (highly complex prompts).
+
+5. **Hardware State Collection**:
+   - CPU utilization (%).
+   - Memory available (GB).
+   - GPU utilization (%) and free VRAM (GB).
+   - Battery (%) if applicable.
+
+### 3. Pruning Decision-Making (Structured Rules) (Workflow)
+
+```mermaid
+flowchart TD
+    A[Complexity Score + Hardware State] --> B{Evaluate Rules}
+    B -->|High Complexity + High GPU Load| C[Prune FFN Neurons]
+    B -->|Medium Complexity + Low Memory| D[Prune Layers]
+    B -->|Low Complexity + High CPU| E[No Pruning]
+    B -->|Other Conditions| F[Prune Attention Heads or KV Cache]
+    C --> G[Apply Pruning]
+    D --> G
+    E --> G
+    F --> G
+    G --> H[Output Pruning Action]
+```
+
+**Deterministic Decision Rules**:
+
+The system uses if-else logic based on complexity and hardware thresholds:
 
 ```python
 # Decision rules based on complexity and hardware constraints
@@ -369,3 +440,4 @@ If you use this work in your research, please cite:
 - Hugging Face Transformers and Datasets for model and data handling.
 - PyTorch for deep learning framework.
 - lm-eval-harness for standardized evaluation.
+

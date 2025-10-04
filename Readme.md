@@ -1,6 +1,6 @@
-# Runtime-Adaptive Pruning via RL
+# Structured Adaptive Pruning for LLMs
 
-An RL-driven system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions.
+A rule-based system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using deterministic methodologies.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -27,38 +27,36 @@ An RL-driven system for adaptive LLM pruning that balances inference speed, accu
 
 ## Description
 
-This project implements a reinforcement learning (RL) controller using a Deep Q-Network (DQN) to dynamically select structured pruning actions (attention heads, FFN channels, layers) for LLaMA models. The RL agent observes hardware telemetry (CPU/GPU utilization, memory, power via NVML) and prompt complexity (analyzed via spaCy/NLTK POS tagging) to optimize trade-offs between latency, perplexity, and energy.
+This project implements a **structured adaptive pruning system** for LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using rule-based methodologies.
 
-The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner, PAT, RAP, with real pruning effects, standardized evaluation (lm-eval-harness), and rigorous RL training (replay buffer, target net).
+### Key Improvements
+- **Structured Pruning**: Deterministic rules replace random RL exploration for interpretable decisions.
+- **KV Cache Pruning**: Runtime reduction of generation length to limit cache usage.
+- **Enhanced Evaluation**: Separate graphs (inference time & perplexity) with outliers removed and trendlines.
+- **Comprehensive Training**: Automatic 80/20 split on custom CSV datasets, training on all 80% prompts.
+
+The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner, PAT, RAP, with real pruning effects, standardized evaluation (lm-eval-harness), and rigorous training.
 
 ## Key Innovations
 
-- **Adaptive Pruning**: RL learns to prune more aggressively for complex prompts on constrained hardware.
-- **Structural Speedups**: Magnitude-based slicing rebuilds model layers for real inference speedups (Phase 3).
-- **Standardized Evaluation**: Integrates lm-eval-harness for ARC, HellaSwag, Winogrande, LAMBADA.
-- **Dataset-Driven Training**: Trains on real prompt datasets (Dolly-15k, Alpaca).
-- **Post-Training Reports**: Automatic generation of latency/PPL reports and graphs.
+- **Structured Pruning**: Rule-based decisions based on prompt complexity and hardware state for interpretable, deterministic pruning.
+- **Multi-Level Pruning**: Supports attention heads, FFN neurons, transformer layers, and KV cache pruning.
+- **Enhanced Visualization**: Separate scatter plots with trendlines and outlier removal for inference time and perplexity.
+- **Dataset Flexibility**: Automatic 80/20 splits for custom CSV datasets, training on all prompts in the split.
+- **Custom Dataset Support**: Load and train/test on custom CSV files with automatic 80/20 splits.
 
 ## Features
 
-- **RL Controller**: Double DQN with replay buffer, target network, epsilon-greedy exploration.
+- **Structured Controller**: Rule-based pruning decisions using prompt complexity and hardware telemetry.
 - **NLP Analysis**: Hybrid spaCy/NLTK for rich prompt features (POS, noun chunks, dependency span).
 - **Pruning Methods**:
   - Functional masking (hooks for validation).
   - Structural slicing (rebuilds Linear layers for speedups).
+  - Runtime KV cache pruning (reduces generation length).
 - **Benchmarks**: WikiText-2 perplexity, lm-eval-harness tasks, latency/tokens/sec metrics.
 - **Modes**: Separate train/test CLI modes with checkpointing.
 - **Safety**: Reversible pruning, no permanent model damage.
 - **Local Everything**: All caches, models, datasets stored in project folder.
-
-## Requirements
-
-- **OS**: Windows/Linux/Mac (tested on Windows)
-- **Python**: 3.9+
-- **Hardware**: GPU recommended (CUDA), CPU fallback
-- **Memory**: 8GB+ RAM, 16GB+ VRAM for LLaMA-3.2-1B
-- **Disk**: 20GB+ for models/datasets
-
 ## Installation
 
 ### 1. Clone Repository
@@ -158,10 +156,35 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 
 ### Pruning Actions
 - 0: `none` (0.0) - No pruning.
-- 1: `kv_cache` (0.3) - KV cache pruning.
+- 1: `kv_cache` (0.3) - KV cache pruning (reduces generation length).
 - 2: `attention_heads` (0.4) - Attention head pruning.
 - 3: `ffn_neurons` (0.5) - FFN channel pruning.
 - 4: `transformer_layers` (0.3) - Layer pruning.
+
+### System Architecture Diagram
+
+```mermaid
+graph TD
+    A[User Prompt] --> B[NLP Analyzer]
+    B --> C[Complexity Score]
+    D[Hardware Monitor] --> E[CPU/GPU/Memory Stats]
+    C --> F[Structured Controller]
+    E --> F
+    F --> G{Decision Rules}
+    G -->|High Complexity + High GPU Load| H[Prune FFN Neurons]
+    G -->|Medium Complexity + Low Memory| I[Prune Layers]
+    G -->|Low Complexity + High CPU| J[No Pruning]
+    H --> K[Apply Pruning]
+    I --> K
+    J --> K
+    K --> L[Model Engine]
+    L --> M[Generate Response]
+    M --> N[Benchmark]
+    N --> O[Reward Calculation]
+    O --> P[Training Loop / Report]
+```
+
+This diagram illustrates the structured flow: prompt analysis, hardware monitoring, rule-based decisions, pruning application, response generation, and evaluation.
 
 ## Modules
 
@@ -248,18 +271,17 @@ MIT License. See LICENSE file for details.
 If you use this work in your research, please cite:
 
 ```bibtex
-@misc{runtime_adaptive_pruning_rl,
-  title={Runtime-Adaptive Pruning for LLMs via Reinforcement Learning},
+@misc{structured_adaptive_pruning_llm,
+  title={Structured Adaptive Pruning for Large Language Models},
   author={Asief Iqbal},
   year={2025},
   howpublished={\url{https://github.com/asief-iqbal/Thesis}},
-  note={An RL-driven system for adaptive LLM pruning balancing inference speed, accuracy, and resource usage.}
+  note={A rule-based system for adaptive LLM pruning balancing inference speed, accuracy, and resource usage with deterministic methodologies.}
 }
 ```
 
 ## Acknowledgments
 
 - Hugging Face Transformers and Datasets for model and data handling.
-- spaCy and NLTK for NLP analysis.
 - PyTorch for deep learning framework.
 - lm-eval-harness for standardized evaluation.

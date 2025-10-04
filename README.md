@@ -1,9 +1,8 @@
-# Structured Adaptive Pruning for LLMs
+# CASRAP: Context Aware Structured Runtime Adaptive Pruning
 
 A rule-based system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using deterministic methodologies.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 ## Table of Contents
 
 - [Description](#description)
@@ -164,39 +163,49 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ### System Architecture Diagram
 
 ```mermaid
-flowchart TD
-    subgraph Initialization
-        A1[Load Model & Pruners]
-        B1[Setup NLP Analyzer & Hardware Monitor]
+graph TD
+    subgraph "Initialization Phase"
+        A1[Load LLaMA-3.2-1B Model]
+        B1[Initialize Pruners: Functional/Structural/KV]
+        C1[Setup NLP Analyzer: spaCy/NLTK]
+        D1[Initialize Hardware Monitor: NVML/psutil]
     end
 
-    subgraph Runtime
-        A[User Prompt] --> B[NLP Analyzer]
-        B --> C[Complexity Score]
-        D[Hardware State] --> E[CPU/GPU/Memory]
-        C --> F[Structured Controller]
-        E --> F
-        F --> G{Decision Rules}
-        G --> H[Prune Action: Heads/FFN/Layers/KV/None]
-        H --> I[Apply Pruning]
-        I --> J[Generate Response]
-        J --> K[Benchmark Metrics]
-        K --> L[Restore Model]
+    subgraph "Per-Prompt Workflow"
+        A[User Prompt] --> B[NLP Analyzer: Tokenize & Extract Features]
+        B --> C[Normalize Features: llm_norm, q_norm, v_norm, etc.]
+        C --> D[Calculate Complexity Score: Weighted Sum]
+        E[Hardware Monitor] --> F[Collect CPU/GPU/Memory Stats]
+        D --> G[Structured Controller: Evaluate Rules]
+        F --> G
+        G --> H{Decision Rules}
+        H -->|High Complexity + High Load| I[Select Aggressive Pruning: FFN/Layers]
+        H -->|Medium Complexity| J[Select Balanced Pruning: Heads/KV]
+        H -->|Low Complexity| K[Select Minimal/No Pruning]
+        I --> L[Apply Pruning to Model]
+        J --> L
+        K --> L
+        L --> M[Model Engine: Generate Response]
+        M --> N[Benchmark System: PPL, Latency, Tokens/sec]
+        N --> O[Log Metrics & Reward]
+        O --> P[Restore Model State]
     end
 
-    subgraph Training
-        M[Dataset] --> N{For Each Prompt}
-        N --> O[Runtime Workflow]
-        O --> P[Aggregate Results]
-        P --> Q[Reports & Graphs]
+    subgraph "Training/Evaluation Loop"
+        Q[Dataset Split: 80% Train / 20% Test] --> R{For Each Prompt}
+        R --> S[Process Prompt → Decide → Apply → Generate → Benchmark]
+        S --> T[Aggregate Metrics & Generate Reports]
+        T --> U[Produce Graphs: Inference Time vs. Episode, Perplexity vs. Episode]
     end
 
     A1 --> A
-    B1 --> D
-    L --> N
+    B1 --> A
+    C1 --> B
+    D1 --> E
+    P --> R
 ```
 
-This cleaner diagram provides a high-level overview of the system's architecture, focusing on the key phases and data flow without excessive detail.
+This expanded diagram illustrates the full system workflow, from initialization to training/evaluation loops, incorporating detailed prompt processing, rule-based decisions, pruning application, response generation, and benchmarking.
 
 ## Modules
 

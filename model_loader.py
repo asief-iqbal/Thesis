@@ -9,6 +9,7 @@ from pruners.ffn_pruner import FFNPruner
 from pruners.layer_skipper import LayerSkipper
 from pruners.structured_ffn_slicer import StructuredFFNSlicer
 from pruners.structured_head_slicer import StructuredHeadSlicer
+from pruners.kv_cache_pruner import KVCachePruner
 
 
 def _load_hf_token_from_env(env_path: str = ".env") -> str:
@@ -54,6 +55,8 @@ class RealModelEngine:
         # Phase 3 (structural): FFN & Head slicers that rebuild layers for real speedups
         self.structured_ffn = StructuredFFNSlicer(self.model)
         self.structured_head = StructuredHeadSlicer(self.model)
+        # KV Cache pruner for runtime cache size reduction
+        self.kv_pruner = KVCachePruner(self.model)
 
     def apply_pruning(self, action) -> None:
         """Apply pruning according to the action. Currently supports head masking scaffold."""
@@ -170,8 +173,10 @@ class RealModelEngine:
             to_skip = list(range(L - k, L))
             print(f"[Engine] Skipping {k}/{L} transformer layers (scaffold).")
             self.layer_skipper.apply(to_skip)
+        elif target == "kv_cache" and intensity > 0.0:
+            self.kv_pruner.apply_prune(intensity)
         else:
-            # Other targets (kv_cache, ffn_neurons, transformer_layers) will be implemented structurally in Phase 2/3
+            # Other targets (ffn_neurons, transformer_layers) will be implemented structurally in Phase 2/3
             print(f"[Engine] Pruning target '{target}' not yet implemented structurally; no-op for now.")
 
     def restore_model(self) -> None:
@@ -182,10 +187,13 @@ class RealModelEngine:
         # Restore structural slicing (if any)
         self.structured_ffn.restore()
         self.structured_head.restore()
+        # Restore KV cache pruning
+        self.kv_pruner.restore()
 
     def generate_response(self, prompt: str, max_length: int = 50) -> str:
+        effective_max = self.kv_pruner.get_effective_max_length(max_length)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        outputs = self.model.generate(**inputs, max_new_tokens=max_length, pad_token_id=self.tokenizer.eos_token_id)
+        outputs = self.model.generate(**inputs, max_new_tokens=effective_max, pad_token_id=self.tokenizer.eos_token_id)
         return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
     def save_pretrained(self, out_dir: str) -> None:

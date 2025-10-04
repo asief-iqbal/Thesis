@@ -1,4 +1,4 @@
-# Structured Adaptive Pruning for LLMs
+# CAPA: Context-Aware Runtime Adaptive Pruning
 
 A rule-based system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using deterministic methodologies.
 

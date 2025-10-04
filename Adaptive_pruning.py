@@ -202,16 +202,35 @@ class RLControllerAgent:
         return torch.FloatTensor(state).unsqueeze(0)
 
     def get_action(self, prompt: str) -> PruningAction:
-        state = self._get_state_vector(prompt)
-        if random.random() < self.epsilon:
-            action_index = random.randrange(self.action_dim)
-            print(f"[RL Agent] Choosing random action (Explore): {action_index}")
-        else:
-            with torch.no_grad():
-                q_values = self.policy_net(state)
-                action_index = q_values.argmax().item()
-            print(f"[RL Agent] Choosing best action (Exploit): {action_index} (Q-Vals: {[f'{v:.2f}' for v in q_values.squeeze().tolist()]})")
-        return self.action_space.get_action(action_index)
+        # Structured methodology for pruning decision based on prompt complexity and hardware state
+        complexity = self.prompt_analyzer.analyze_complexity(prompt).complexity_score
+        device_state = self.device_monitor.get_state()
+        
+        cpu_util = device_state.cpu_utilization / 100.0
+        mem_gb = device_state.memory_available_gb
+        gpu_util = device_state.gpu_utilization / 100.0
+        gpu_mem_gb = device_state.gpu_memory_free_gb
+        
+        # Decision rules based on complexity and hardware constraints
+        if complexity > 0.8:  # High complexity prompts
+            if gpu_util > 0.8 or gpu_mem_gb < 2.0:  # High GPU load or low VRAM
+                action_index = 3  # ffn_neurons (aggressive pruning for speed)
+            else:
+                action_index = 2  # attention_heads (balanced pruning)
+        elif complexity > 0.5:  # Medium complexity
+            if mem_gb < 4.0:  # Low memory
+                action_index = 4  # transformer_layers (memory-efficient)
+            else:
+                action_index = 1  # kv_cache (light pruning)
+        else:  # Low complexity
+            if cpu_util > 0.7:  # High CPU usage
+                action_index = 0  # none (no pruning needed)
+            else:
+                action_index = 1  # kv_cache (minimal pruning)
+        
+        action = self.action_space.get_action(action_index)
+        print(f"[Structured Pruner] Complexity: {complexity:.3f}, CPU: {cpu_util:.2f}, Mem: {mem_gb:.1f}GB, GPU Util: {gpu_util:.2f}, GPU Mem: {gpu_mem_gb:.1f}GB -> Prune: {action.target} ({action.intensity})")
+        return action
         
     def train_step(self, state, action_index, reward, next_state):
         """Store transition and optimize using Double DQN when enough samples exist."""
@@ -543,6 +562,11 @@ def main(num_episodes: int = 50,
     # Generate report
     generate_report(metrics_list)
     
+    # Save metrics for later report generation
+    import json
+    with open('training_metrics.json', 'w') as f:
+        json.dump(metrics_list, f)
+    
     if checkpoint_path:
         rl_agent.save(checkpoint_path)
     return rl_agent
@@ -661,7 +685,7 @@ def run_lm_eval_harness(model_engine, tasks_list: List[str], batch_size: int = 1
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Adaptive Pruning RL Controller")
-    parser.add_argument('--mode', choices=['train','test'], default='test')
+    parser.add_argument('--mode', choices=['train','test','report'], default='test')
     parser.add_argument('--checkpoint', type=str, default=os.path.join('checkpoints','rl_policy.pt'))
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--max-new-tokens', type=int, default=50)
@@ -675,6 +699,11 @@ if __name__ == "__main__":
     if args.mode == 'train':
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
              train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train')
+    elif args.mode == 'report':
+        import json
+        with open('training_metrics.json', 'r') as f:
+            metrics_list = json.load(f)
+        generate_report(metrics_list)
     else:
         engine = RealModelEngine()
         agent = RLControllerAgent(engine.tokenizer)

@@ -171,6 +171,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 - `pruners/`: 
   - `head_pruner.py`, `ffn_pruner.py`, `layer_skipper.py` (functional masks).
   - `structured_ffn_slicer.py`, `structured_head_slicer.py` (structural slicing).
+  - `kv_cache_pruner.py` (runtime KV cache size reduction).
 - `.env`: Config (HF token, pruning mode).
 - `checkpoints/`: RL policy files.
 - `training_report.txt`: Post-training report.

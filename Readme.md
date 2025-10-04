@@ -206,24 +206,113 @@ This diagram illustrates the structured flow: prompt analysis, hardware monitori
 - **lm-eval-harness**: Standardized accuracy on ARC-E, HellaSwag, Winogrande, LAMBADA.
 - **Custom Metrics**: Latency (ms), tokens/sec, perplexity in train/test.
 
-## Workflow
+## Detailed Methodology: How the Structured Pruning Architecture Works
 
-1. **Initialization**: Load HF token, model (LLaMA-3.2-1B), NLP analyzer, pruners.
-2. **Training Loop**:
-   - Sample prompt from dataset (Dolly/Alpaca).
-   - RL observes state (hardware + NLP complexity).
-   - Selects action (prune heads/FFN/layers at intensity).
-   - Apply pruning to model.
-   - Generate response, compute reward (speed vs. accuracy).
-   - RL train_step (update policy/target nets).
-   - Restore model for next episode.
-3. **Testing Loop**:
-   - Load RL checkpoint (epsilon=0 for exploitation).
-   - Run on test prompts, apply actions, benchmark, average metrics.
-4. **Evaluation**:
-   - WikiText-2: Average PPL, tokens/sec, time over samples.
-   - lm-eval-harness: Export pruned model, evaluate on tasks.
-5. **Report Generation**: Automatic report and plots.
+This section provides a comprehensive, step-by-step explanation of the system's workflow, calculations, and decision-making processes.
+
+### 1. Initialization Phase
+- **Model Loading**: Load LLaMA-3.2-1B from Hugging Face using `transformers`. Requires HF token for access.
+- **Pruner Setup**: Initialize all pruners:
+  - Functional pruners (hooks for masking).
+  - Structural slicers (rebuild layers).
+  - KV cache pruner (runtime length reduction).
+- **NLP Analyzer**: Load spaCy/NLTK models for prompt analysis.
+- **Hardware Monitor**: Initialize NVML (if GPU) and psutil for telemetry.
+
+### 2. Prompt Processing
+For each input prompt:
+- **Complexity Analysis**:
+  - Tokenize prompt using NLTK/spaCy.
+  - Calculate features: number of tokens, verbs, questions, noun chunks, dependency spans.
+  - Complexity Score = Weighted sum (e.g., 0.2 * tokens/100 + 0.3 * verbs/tokens + 0.5 * questions_present).
+  - Range: 0.0 (simple) to 1.0+ (complex).
+- **Hardware State Collection**:
+  - CPU utilization (%).
+  - Memory available (GB).
+  - GPU utilization (%) and free VRAM (GB).
+  - Battery (%) if applicable.
+
+### 3. Pruning Decision-Making (Structured Rules)
+The system uses deterministic if-else rules based on complexity and hardware:
+
+```python
+if complexity > 0.8:  # High complexity
+    if gpu_util > 0.8 or gpu_mem_free < 2.0:
+        prune_target = "ffn_neurons"  # Aggressive pruning for speed
+        intensity = 0.5
+    else:
+        prune_target = "attention_heads"
+        intensity = 0.4
+elif complexity > 0.5:  # Medium complexity
+    if mem_available < 4.0:
+        prune_target = "transformer_layers"  # Memory-efficient
+        intensity = 0.3
+    else:
+        prune_target = "kv_cache"  # Light pruning
+        intensity = 0.3
+else:  # Low complexity
+    if cpu_util > 0.7:
+        prune_target = "none"  # No pruning needed
+        intensity = 0.0
+    else:
+        prune_target = "kv_cache"
+        intensity = 0.3
+```
+
+### 4. Pruning Application
+Based on target and intensity:
+
+- **Attention Heads**:
+  - Calculate importance: L2 norms of Q/K/V/O projections per head.
+  - Remove lowest-scoring heads (e.g., intensity 0.4 → remove 40% heads).
+  - Functional: Mask with hooks; Structural: Rebuild layer without heads.
+
+- **FFN Neurons**:
+  - Importance: L2 norms of gate/up/down projections per channel.
+  - Remove channels with lowest scores.
+  - Functional: Mask channels; Structural: Rebuild Linear layers.
+
+- **Transformer Layers**:
+  - Skip layers from the end (e.g., intensity 0.3 → skip 30% layers).
+  - Functional: Hook to bypass layers.
+
+- **KV Cache**:
+  - Reduce generation length: effective_max = base_max * (1 - intensity).
+  - Simulates cache pruning by limiting output tokens.
+
+- **None**: No changes to model.
+
+### 5. Response Generation
+- Apply pruning to model.
+- Generate response: `model.generate(prompt, max_new_tokens=effective_max)`.
+- For KV pruning, effective_max is reduced.
+
+### 6. Benchmarking and Evaluation
+- **Perplexity Calculation**: 
+  - Full text = prompt + generated response.
+  - PPL = exp(cross-entropy loss) on full text.
+- **Performance Metrics**:
+  - Inference time (ms): Time to generate response.
+  - Tokens/sec: max_new_tokens / inference_time.
+- **Reward (for evaluation)**: 0.6 * tokens/sec - 0.4 * (PPL / 10).
+  - Balances speed (higher reward) vs. accuracy (lower PPL).
+
+### 7. Model Restoration
+- Restore all pruners to original state for next prompt.
+- Ensures reversible pruning.
+
+### 8. Training/Evaluation Loop
+- For each prompt in dataset (80% train split):
+  - Process prompt → Decide pruning → Apply → Generate → Benchmark → Log metrics.
+- Generate reports: Overall stats, per-prune-type averages.
+- Produce graphs: Inference time vs. episode (scatter + trendline, outliers removed), Perplexity vs. episode.
+
+### 9. Testing on Holdout Set
+- Use 20% test split from CSV.
+- Same process, average metrics across test prompts.
+- Optional: WikiText-2 PPL, lm-eval-harness tasks.
+
+This methodology ensures interpretable, hardware-aware pruning without randomness, adapting to prompt complexity for optimal speed-accuracy trade-offs.
 
 ## Roadmap
 

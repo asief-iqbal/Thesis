@@ -236,27 +236,22 @@ For each input prompt:
 The system uses deterministic if-else rules based on complexity and hardware:
 
 ```python
-if complexity > 0.8:  # High complexity
-    if gpu_util > 0.8 or gpu_mem_free < 2.0:
-        prune_target = "ffn_neurons"  # Aggressive pruning for speed
-        intensity = 0.5
+# Decision rules based on complexity and hardware constraints
+if complexity > 0.8:  # High complexity prompts
+    if gpu_util > 0.8 or gpu_mem_gb < 2.0:  # High GPU load or low VRAM
+        action_index = 3  # ffn_neurons (aggressive pruning for speed)
     else:
-        prune_target = "attention_heads"
-        intensity = 0.4
+        action_index = 2  # attention_heads (balanced pruning)
 elif complexity > 0.5:  # Medium complexity
-    if mem_available < 4.0:
-        prune_target = "transformer_layers"  # Memory-efficient
-        intensity = 0.3
+    if mem_gb < 4.0:  # Low memory
+        action_index = 4  # transformer_layers (memory-efficient)
     else:
-        prune_target = "kv_cache"  # Light pruning
-        intensity = 0.3
+        action_index = 1  # kv_cache (light pruning)
 else:  # Low complexity
-    if cpu_util > 0.7:
-        prune_target = "none"  # No pruning needed
-        intensity = 0.0
+    if cpu_util > 0.7:  # High CPU usage
+        action_index = 0  # none (no pruning needed)
     else:
-        prune_target = "kv_cache"
-        intensity = 0.3
+        action_index = 1  # kv_cache (minimal pruning)
 ```
 
 ### 4. Pruning Application

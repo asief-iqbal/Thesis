@@ -94,11 +94,11 @@ class NlpPromptAnalyzer:
         q_norm = min(1.0, interrogative_count / 2.0)
         v_norm = min(1.0, verb_count / 5.0)
         sent_norm = min(1.0, avg_sent_len / 30.0)
-        chunk_norm = min(1.0, noun_chunks / 20.0)
+        noun_norm = min(1.0, noun_chunks / 20.0)
         dep_norm = min(1.0, dep_span / 20.0)
 
         # Weighted complexity (can be tuned)
-        complexity_score = 0.25*llm_norm + 0.35*q_norm + 0.20*v_norm + 0.10*sent_norm + 0.10*dep_norm
+        complexity_score = 0.4*llm_norm + 0.05*q_norm + 0.20*v_norm + 0.10*sent_norm + 0.25*noun_norm + 0.10*dep_norm
 
         # Feature vector used in RL state
         features = [
@@ -107,7 +107,7 @@ class NlpPromptAnalyzer:
             q_norm,
             v_norm,
             sent_norm,
-            chunk_norm,
+            noun_norm,
             dep_norm,
             complexity_score,
         ]

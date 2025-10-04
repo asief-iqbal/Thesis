@@ -25,6 +25,12 @@ from collections import deque
 import matplotlib.pyplot as plt
 import argparse
 import os
+import warnings
+try:
+    import nltk
+    nltk.data.path.append('nltk_data')
+except ImportError:
+    pass
 try:
     import pynvml as nvml
     _NVML_AVAILABLE = True
@@ -268,11 +274,13 @@ class RealBenchmark:
 
     def benchmark_and_get_reward(self, engine: RealModelEngine, prompt: str, validation_text: str, max_new_tokens: int = 50, return_metrics: bool = False):
         start_time = time.time()
-        _ = engine.generate_response(prompt, max_length=max_new_tokens)
+        generated_response = engine.generate_response(prompt, max_length=max_new_tokens)
         elapsed_s = (time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
         tokens_per_sec = (max_new_tokens / elapsed_s) if elapsed_s > 0 else 0.0
-        perplexity = self._calculate_perplexity(engine, validation_text)
+        # Compute perplexity on the generated response (prompt + response) for relevance
+        full_text = prompt + " " + generated_response
+        perplexity = self._calculate_perplexity(engine, full_text)
         # Use tokens/sec as speed bonus for better interpretability
         speed_bonus = tokens_per_sec
         accuracy_penalty = perplexity / 10.0
@@ -337,9 +345,10 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
             avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
             f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
     print("[Report] Report saved to training_report.txt")
-def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000) -> List[str]:
+def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
     """Load a proper prompt dataset to train the RL controller.
-    Supported: 'databricks/databricks-dolly-15k', 'tatsu-lab/alpaca', fallback to WikiText-2.
+    Supported: 'databricks/databricks-dolly-15k', 'tatsu-lab/alpaca', CSV files with 80/20 split, fallback to WikiText-2.
+    split_type: 'train' or 'test' for CSV split.
     Returns a list of prompt strings.
     """
     try:
@@ -355,7 +364,20 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     name = dataset_name.strip()
     print(f"[Train] Loading dataset: {name} ({split}) ...")
     try:
-        ds = load_dataset(name, split=split)
+        if name.endswith('.csv'):
+            ds = load_dataset('csv', data_files=name)
+            prompts = [r['Prompt'] for r in ds['train'] if r['Prompt'] and r['Prompt'].strip()]
+            random.shuffle(prompts)
+            # 80/20 split
+            split_idx = int(0.8 * len(prompts))
+            train_prompts = prompts[:split_idx]
+            test_prompts = prompts[split_idx:]
+            if split_type == 'test':
+                return test_prompts[:samples]
+            else:
+                return train_prompts[:samples]
+        else:
+            ds = load_dataset(name, split=split)
     except Exception as e:
         print(f"[Train] Failed to load {name}: {e}. Falling back to WikiText-2.")
         try:
@@ -366,27 +388,28 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
         except Exception:
             return ["Describe the water cycle.", "Who wrote 'Hamlet'?", "Define photosynthesis."]
 
-    prompts: List[str] = []
-    # Map fields for known datasets
-    if 'databricks' in name:
-        # databricks/databricks-dolly-15k
-        for r in ds:
-            instr = (r.get('instruction') or '').strip()
-            ctx = (r.get('context') or '').strip()
-            if instr:
-                prompts.append(instr if not ctx else f"{instr}\n\nContext: {ctx}")
-    elif 'alpaca' in name:
-        for r in ds:
-            instr = (r.get('instruction') or '').strip()
-            ipt = (r.get('input') or '').strip()
-            if instr:
-                prompts.append(instr if not ipt else f"{instr}\n\nInput: {ipt}")
-    else:
-        # Generic fallback: use any 'text' field
-        for r in ds:
-            t = (r.get('text') or '').strip()
-            if t:
-                prompts.append(t)
+    if not name.endswith('.csv'):
+        prompts: List[str] = []
+        # Map fields for known datasets
+        if 'databricks' in name:
+            # databricks/databricks-dolly-15k
+            for r in ds:
+                instr = (r.get('instruction') or '').strip()
+                ctx = (r.get('context') or '').strip()
+                if instr:
+                    prompts.append(instr if not ctx else f"{instr}\n\nContext: {ctx}")
+        elif 'alpaca' in name:
+            for r in ds:
+                instr = (r.get('instruction') or '').strip()
+                ipt = (r.get('input') or '').strip()
+                if instr:
+                    prompts.append(instr if not ipt else f"{instr}\n\nInput: {ipt}")
+        else:
+            # Generic fallback: use any 'text' field
+            for r in ds:
+                t = (r.get('text') or '').strip()
+                if t:
+                    prompts.append(t)
     random.shuffle(prompts)
     if not prompts:
         prompts = ["Explain quantum computing in simple terms."]
@@ -396,20 +419,21 @@ def main(num_episodes: int = 50,
          max_new_tokens: int = 50,
          train_dataset: str = 'databricks/databricks-dolly-15k',
          train_split: str = 'train',
-         train_samples: int = 5000):
+         train_samples: int = 5000,
+         split_type: str = 'train'):
     model_engine = RealModelEngine()
     rl_agent = RLControllerAgent(model_engine.tokenizer)
     benchmark = RealBenchmark()
     
     validation_text = "The field of artificial intelligence has seen rapid advancements."
     # Load a proper training prompt pool from the specified dataset
-    prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples)
+    prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
+    num_episodes = len(prompt_pool)  # Train on every prompt in the pool
     
     print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
     metrics_list = []  # Collect metrics for report
     
-    for i in range(num_episodes):
-        prompt = random.choice(prompt_pool)
+    for i, prompt in enumerate(prompt_pool):
         print("\n" + "#"*80 + f"\n# EPISODE {i+1}/{num_episodes}\n" + "#"*80)
         print(f"[System] Using prompt: '{prompt[:80]}...'")
         
@@ -442,7 +466,7 @@ def main(num_episodes: int = 50,
         rl_agent.save(checkpoint_path)
     return rl_agent
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, dataset_name: str = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -450,13 +474,16 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     original_epsilon = rl_agent.epsilon
     rl_agent.epsilon = 0.0
     
-    test_prompts = [
-        "Explain quantum computing in simple terms.",
-        "What are the benefits of renewable energy?",
-        "How does machine learning work?",
-        "Describe the water cycle.",
-        "Why is exercise important for health?"
-    ]
+    if dataset_name and dataset_name.endswith('.csv'):
+        test_prompts = load_training_prompts(dataset_name, split_type='test', samples=num_test_episodes)
+    else:
+        test_prompts = [
+            "Explain quantum computing in simple terms.",
+            "What are the benefits of renewable energy?",
+            "How does machine learning work?",
+            "Describe the water cycle.",
+            "Why is exercise important for health?"
+        ]
     
     total_reward = 0.0
     total_time = 0.0
@@ -464,8 +491,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     total_ppl = 0.0
     validation_text = "The field of artificial intelligence has seen rapid advancements."
     
-    for i in range(num_test_episodes):
-        prompt = random.choice(test_prompts)
+    for i in range(min(num_test_episodes, len(test_prompts))):
+        prompt = test_prompts[i]
         print(f"\n[Test Episode {i+1}/{num_test_episodes}]")
         print(f"[Test] Prompt: '{prompt}'")
         
@@ -566,14 +593,14 @@ if __name__ == "__main__":
 
     if args.mode == 'train':
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
-             train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples)
+             train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train')
     else:
         engine = RealModelEngine()
         agent = RLControllerAgent(engine.tokenizer)
         if os.path.exists(args.checkpoint):
             agent.load(args.checkpoint)
         bench = RealBenchmark()
-        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens)
+        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens, dataset_name=args.train_dataset)
         run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
         if args.lm_eval:
             run_lm_eval_harness(engine, tasks_list=['arc_easy','hellaswag','winogrande','lambada'], batch_size=1)

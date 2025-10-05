@@ -513,7 +513,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     return prompts[:samples]
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
-         max_new_tokens: int = 10000,
+         max_new_tokens: int = 1000,
          train_dataset: str = 'Prompt Dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,

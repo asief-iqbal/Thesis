@@ -517,7 +517,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
          max_new_tokens: int = 50,
-         train_dataset: str = 'databricks/databricks-dolly-15k',
+         train_dataset: str = 'Prompt Dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
          split_type: str = 'train'):
@@ -690,7 +690,7 @@ if __name__ == "__main__":
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--max-new-tokens', type=int, default=50)
     parser.add_argument('--wikitext-samples', type=int, default=200)
-    parser.add_argument('--train-dataset', type=str, default='databricks/databricks-dolly-15k')
+    parser.add_argument('--train-dataset', type=str, default='Prompt Dataset.csv')
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
     parser.add_argument('--lm-eval', action='store_true', help='Run lm-eval-harness tasks after test')

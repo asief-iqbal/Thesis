@@ -90,8 +90,9 @@ STRUCTURAL_PRUNING=0  # 1 for structural pruning
 ### Train RL Agent (Fast Mode)
 ```bash
 venv\Scripts\activate
-python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset databricks/databricks-dolly-15k --train-samples 500 --max-new-tokens 20
+python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset.csv" --train-samples 500 --max-new-tokens 20
 ```
+Uses the custom `Prompt Dataset.csv` (80% for training, 20% for testing).
 
 ### Test Trained Agent
 ```bash
@@ -104,8 +105,9 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ### Training
 Train the RL agent on a prompt dataset:
 ```bash
-python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/rl_policy.pt --train-dataset databricks/databricks-dolly-15k --train-samples 5000 --max-new-tokens 50
+python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset.csv" --train-samples 5000 --max-new-tokens 50
 ```
+Uses 80% of the dataset for training.
 
 **Faster Training Options** (for testing/debugging):
 - `--episodes 50` (half episodes).
@@ -114,7 +116,7 @@ python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/
 
 Example fast run:
 ```bash
-python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset databricks/databricks-dolly-15k --train-samples 500 --max-new-tokens 20
+python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset.csv" --train-samples 500 --max-new-tokens 20
 ```
 
 ### Testing
@@ -130,7 +132,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 | `--mode` | - | `train` or `test` |
 | `--episodes` | 50 | Number of training episodes |
 | `--checkpoint` | - | Path to save/load RL policy |
-| `--train-dataset` | databricks/databricks-dolly-15k | Dataset for training |
+| `--train-dataset` | Prompt Dataset.csv | Dataset for training (supports CSV with 80/20 split for train/test) |
 | `--train-samples` | 5000 | Number of training prompts |
 | `--max-new-tokens` | 50 | Generation length |
 | `--wikitext-samples` | 200 | WikiText-2 eval samples |

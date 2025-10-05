@@ -98,12 +98,21 @@ class PruningAction:
     level: int; intensity: float; target: str; action_index: int
 class ActionSpace:
     def __init__(self):
+        # Varying, safer intensities; emphasize mild pruning options
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            PruningAction(level=1, intensity=0.3, target="kv_cache", action_index=1),
-            PruningAction(level=2, intensity=0.4, target="attention_heads", action_index=2),
-            PruningAction(level=2, intensity=0.5, target="ffn_neurons", action_index=3),
-            PruningAction(level=3, intensity=0.3, target="transformer_layers", action_index=4),
+            # KV cache (runtime length reduction)
+            PruningAction(level=1, intensity=0.2, target="kv_cache", action_index=1),
+            PruningAction(level=1, intensity=0.3, target="kv_cache", action_index=2),
+            # Attention heads (GQA-safe masking/slicing)
+            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=3),
+            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=4),
+            # FFN channels (use calibration-aware scoring)
+            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=5),
+            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=6),
+            # Transformer layers (skip very few; capped in engine)
+            PruningAction(level=3, intensity=0.06, target="transformer_layers", action_index=7),
+            PruningAction(level=3, intensity=0.12, target="transformer_layers", action_index=8),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -171,13 +180,13 @@ class RLControllerAgent:
         self.epsilon = 0.0  # exploitation by default when loading
         print(f"[RL Agent] Checkpoint loaded from {path}")
 
-    def _get_state_vector(self, prompt: str) -> torch.Tensor:
+    def _get_state_vector(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None) -> torch.Tensor:
         device_state = self.device_monitor.get_state()
         
-        # Simple prompt complexity: token length normalized + placeholder PPL
-        tokens = len(self.tokenizer.encode(prompt))
+        # Simple prompt complexity: token length normalized + prompt perplexity if provided
+        tokens = token_len if token_len is not None else len(self.tokenizer.encode(prompt))
         llm_norm = min(1.0, tokens / 200.0)
-        ppl_norm = 0.5  # Average assumption
+        ppl_norm = min(1.0, prompt_ppl / 50.0) if prompt_ppl is not None else 0.5
         complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
         
         state = [
@@ -191,12 +200,12 @@ class RLControllerAgent:
         ]
         return torch.FloatTensor(state).unsqueeze(0)
 
-    def get_action(self, prompt: str) -> PruningAction:
+    def get_action(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None) -> PruningAction:
         # RL-driven action selection: epsilon-greedy
         if random.random() < self.epsilon:
             action_index = random.randint(0, self.action_dim - 1)
         else:
-            state = self._get_state_vector(prompt)
+            state = self._get_state_vector(prompt, prompt_ppl, token_len)
             with torch.no_grad():
                 q_values = self.policy_net(state)
                 action_index = q_values.argmax().item()
@@ -269,17 +278,19 @@ class RealBenchmark:
         generated_response = engine.generate_response(prompt, max_length=max_new_tokens)
         elapsed_s = (time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
-        tokens_per_sec = (max_new_tokens / elapsed_s) if elapsed_s > 0 else 0.0
+        # Use actual generated token count for tokens/sec
+        gen_token_count = len(engine.tokenizer.encode(generated_response))
+        tokens_per_sec = (gen_token_count / elapsed_s) if elapsed_s > 0 else 0.0
         # Compute perplexity on the generated response (prompt + response) for relevance
         full_text = prompt + " " + generated_response
         perplexity = self._calculate_perplexity(engine, full_text)
-        # Use tokens/sec as speed bonus for better interpretability
+        # Reward balances speed and accuracy
         speed_bonus = tokens_per_sec
         accuracy_penalty = perplexity / 10.0
         reward = (0.6 * speed_bonus) - (0.4 * accuracy_penalty)
-        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, Tok/s: {tokens_per_sec:.2f} (Bonus: {speed_bonus:.2f}), PPL: {perplexity:.2f} (Penalty: {accuracy_penalty:.2f}) -> Reward: {reward:.3f}")
+        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> Reward: {reward:.3f}")
         if return_metrics:
-            return reward, { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity }
+            return reward, { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count }
         return reward
 
 def generate_report(metrics_list: List[Dict[str, Any]]):
@@ -510,32 +521,149 @@ def main(num_episodes: int = 50,
         print("\n" + "#"*80 + f"\n# EPISODE {i+1}/{num_episodes}\n" + "#"*80)
         print(f"[System] Using prompt: '{prompt[:80]}...'")
         
-        state_tensor = rl_agent._get_state_vector(prompt)
-        pruning_action = rl_agent.get_action(prompt)
+        # Phase 1.1: Token length and prompt perplexity (no pruning)
+        token_len = len(rl_agent.tokenizer.encode(prompt))
+        prompt_ppl = benchmark._calculate_perplexity(model_engine, prompt)
+        print(f"[Episode {i+1}] Token length: {token_len}, Prompt PPL: {prompt_ppl:.2f}")
+
+        # Ensure clean (no-prune) state and measure baseline metrics
+        model_engine.restore_model()
+        _reward_base, base_metrics = benchmark.benchmark_and_get_reward(
+            model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
+        )
+        print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
+
+        # Phase 1.3: Compute and print complexity score
+        llm_norm = min(1.0, token_len / 200.0)
+        ppl_norm = min(1.0, prompt_ppl / 50.0)
+        complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
+        print(f"[Complexity] Score: {complexity_score:.3f} (llm_norm={llm_norm:.3f}, ppl_norm={ppl_norm:.3f})")
+
+        # Phase 1.4: RL-based pruning and pruned metrics
+        state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
+        pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         model_engine.apply_pruning(pruning_action)
-        reward, metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True)
-        next_state_tensor = rl_agent._get_state_vector(prompt)
-        rl_agent.train_step(state_tensor, pruning_action.action_index, reward, next_state_tensor)
+        reward_pruned, pruned_metrics = benchmark.benchmark_and_get_reward(
+            model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
+        )
+        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
+
+        next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
+        rl_agent.train_step(state_tensor, pruning_action.action_index, reward_pruned, next_state_tensor)
         
-        # Collect metrics
+        # Collect detailed metrics for analysis and plots
         metrics_list.append({
             'episode': i+1,
+            'token_len': token_len,
+            'prompt_ppl': prompt_ppl,
+            'complexity': complexity_score,
+            'baseline_time_ms': base_metrics['time_ms'],
+            'baseline_tok_s': base_metrics['tok_s'],
+            'baseline_ppl': base_metrics['perplexity'],
+            'baseline_gen_tokens': base_metrics.get('gen_tokens', None),
+            'time_ms': pruned_metrics['time_ms'],
+            'tok_s': pruned_metrics['tok_s'],
+            'ppl': pruned_metrics['perplexity'],
+            'gen_tokens': pruned_metrics.get('gen_tokens', None),
             'action_index': pruning_action.action_index,
             'target': pruning_action.target,
             'intensity': pruning_action.intensity,
-            'time_ms': metrics['time_ms'],
-            'ppl': metrics['perplexity'],
-            'reward': reward
+            'reward': reward_pruned
         })
         
         model_engine.restore_model()
 
     print("\n[System] ✓ RL training loop completed!")
     
-    # Generate report
+    # Generate reports and comparative plots
     generate_report(metrics_list)
     
-    # Save metrics for later report generation
+    # Phase 2: Create comparative scatter plots (baseline vs pruned) and correlation plot
+    def generate_comparative_plots(metrics: List[Dict[str, Any]]):
+        import numpy as np
+        def remove_outliers_xy(xs, ys):
+            if not ys:
+                return xs, ys
+            q1, q3 = np.percentile(ys, 25), np.percentile(ys, 75)
+            iqr = q3 - q1
+            lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            filt = [(x, y) for x, y in zip(xs, ys) if lb <= y <= ub]
+            if not filt:
+                return xs, ys
+            fx, fy = zip(*filt)
+            return list(fx), list(fy)
+
+        episodes = [m['episode'] for m in metrics]
+        # 1) Token speed comparison
+        base_tok_s = [m['baseline_tok_s'] for m in metrics]
+        pruned_tok_s = [m['tok_s'] for m in metrics]
+        e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
+        e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
+        plt.figure(figsize=(10,6))
+        plt.scatter(e_b, base_tok_s, color='red', alpha=0.6, label='Baseline Tok/s')
+        plt.scatter(e_p, pruned_tok_s, color='blue', alpha=0.6, label='Pruned Tok/s')
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_tok_s, 1)
+            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_tok_s, 1)
+            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        plt.title('Token Speed per Episode (Baseline vs Pruned)')
+        plt.xlabel('Episode'); plt.ylabel('Tokens/sec'); plt.grid(True); plt.legend(); plt.tight_layout()
+        plt.savefig('token_speed_compare.png'); plt.close(); print('[Report] Saved token_speed_compare.png')
+
+        # 2) Inference time comparison
+        base_time = [m['baseline_time_ms'] for m in metrics]
+        pruned_time = [m['time_ms'] for m in metrics]
+        e_b, base_time = remove_outliers_xy(episodes, base_time)
+        e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
+        plt.figure(figsize=(10,6))
+        plt.scatter(e_b, base_time, color='red', alpha=0.6, label='Baseline Time (ms)')
+        plt.scatter(e_p, pruned_time, color='blue', alpha=0.6, label='Pruned Time (ms)')
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_time, 1)
+            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_time, 1)
+            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        plt.title('Inference Time per Episode (Baseline vs Pruned)')
+        plt.xlabel('Episode'); plt.ylabel('Time (ms)'); plt.grid(True); plt.legend(); plt.tight_layout()
+        plt.savefig('inference_time_compare.png'); plt.close(); print('[Report] Saved inference_time_compare.png')
+
+        # 3) Perplexity comparison
+        base_ppl = [m['baseline_ppl'] for m in metrics]
+        pruned_ppl = [m['ppl'] for m in metrics]
+        e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
+        e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
+        plt.figure(figsize=(10,6))
+        plt.scatter(e_b, base_ppl, color='red', alpha=0.6, label='Baseline PPL')
+        plt.scatter(e_p, pruned_ppl, color='blue', alpha=0.6, label='Pruned PPL')
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_ppl, 1)
+            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_ppl, 1)
+            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        plt.title('Perplexity per Episode (Baseline vs Pruned)')
+        plt.xlabel('Episode'); plt.ylabel('Perplexity'); plt.grid(True); plt.legend(); plt.tight_layout()
+        plt.savefig('perplexity_compare.png'); plt.close(); print('[Report] Saved perplexity_compare.png')
+
+        # 4) Token length vs prompt perplexity correlation
+        token_lens = [m['token_len'] for m in metrics]
+        prompt_ppls = [m['prompt_ppl'] for m in metrics]
+        x, y = remove_outliers_xy(token_lens, prompt_ppls)
+        plt.figure(figsize=(10,6))
+        plt.scatter(x, y, color='purple', alpha=0.6, label='TokenLen vs Prompt PPL')
+        if len(x) > 1:
+            coeff = np.polyfit(x, y, 1)
+            plt.plot(x, np.polyval(coeff, x), color='purple')
+        plt.title('Correlation: Token Length vs Prompt Perplexity')
+        plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
+        plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
+
+    generate_comparative_plots(metrics_list)
+
+    # Save metrics for later report generation and analysis
     import json
     with open('training_metrics.json', 'w') as f:
         json.dump(metrics_list, f)

@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-Final Production Adaptive Pruning Architecture (V4 - NLP Prompt Analysis)
-Implements:
-1. An upgrade to the prompt analyzer using spaCy for linguistic feature extraction.
-2. The complexity score is now based on Part-of-Speech (POS) tagging, not simple keywords.
-3. The RL Agent now receives a more nuanced and accurate signal about prompt complexity.
+RL-Driven Adaptive Pruning System
+Implements reinforcement learning for dynamic LLM pruning based on hardware state and prompt complexity.
 """
 
 # --- Dependencies ---
-# pip install torch transformers psutil numpy accelerate pynvml spacy
-# python -m spacy download en_core_web_sm
+# pip install torch transformers psutil numpy accelerate nvidia-ml-py datasets lm-eval matplotlib
 
 # --- Standard Library Imports ---
 import torch
@@ -27,12 +23,7 @@ import argparse
 import os
 import warnings
 try:
-    import nltk
-    nltk.data.path.append('nltk_data')
-except ImportError:
-    pass
-try:
-    import pynvml as nvml
+    import nvidia_ml_py as nvml
     _NVML_AVAILABLE = True
     try:
         nvml.nvmlInit()
@@ -45,15 +36,12 @@ warnings.filterwarnings("ignore")
 
 try:
     from model_loader import RealModelEngine
-    from nlp_analyzer import NlpPromptAnalyzer, PromptComplexityMetrics
-    print("[System] Model and NLP components loaded successfully.")
+    print("[System] Model components loaded successfully.")
 except ImportError as e:
-    print(f"[Error] Failed to load components: {e}")
-    print("Please ensure model_loader.py and nlp_analyzer.py are in the same folder and dependencies are downloaded.")
+    print(f"[Error] Failed to load model_loader.py: {e}")
     exit(1)
 
-print("ADAPTIVE PRUNING ARCHITECTURE (V4 - WITH NLP PROMPT ANALYSIS)")
-print("Prompt Analyzer using NLTK for POS tagging.")
+print("RL-DRIVEN ADAPTIVE PRUNING SYSTEM")
 print("="*80)
 # ============================================================================
 @dataclass
@@ -137,8 +125,6 @@ class DQN(nn.Module):
 class RLControllerAgent:
     def __init__(self, tokenizer):
         self.device_monitor = EnhancedDeviceMonitor()
-        # **MODIFICATION**: Instantiate the new NLP-based analyzer.
-        self.prompt_analyzer = NlpPromptAnalyzer(tokenizer)
         self.action_space = ActionSpace()
 
         self.state_dim = 7
@@ -186,8 +172,12 @@ class RLControllerAgent:
 
     def _get_state_vector(self, prompt: str) -> torch.Tensor:
         device_state = self.device_monitor.get_state()
-        # The key change is here: we now call the NLP analyzer.
-        prompt_complexity = self.prompt_analyzer.analyze_complexity(prompt)
+        
+        # Simple prompt complexity: token length normalized + placeholder PPL
+        tokens = len(tokenizer.encode(prompt))
+        llm_norm = min(1.0, tokens / 200.0)
+        ppl_norm = 0.5  # Average assumption
+        complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
         
         state = [
             device_state.cpu_utilization / 100.0,
@@ -196,40 +186,22 @@ class RLControllerAgent:
             float(device_state.gpu_available),
             device_state.gpu_memory_free_gb / 24.0,
             device_state.gpu_utilization / 100.0,
-            # We use the new, more accurate complexity score in our state vector.
-            prompt_complexity.complexity_score
+            complexity_score
         ]
         return torch.FloatTensor(state).unsqueeze(0)
 
     def get_action(self, prompt: str) -> PruningAction:
-        # Structured methodology for pruning decision based on prompt complexity and hardware state
-        complexity = self.prompt_analyzer.analyze_complexity(prompt).complexity_score
-        device_state = self.device_monitor.get_state()
-        
-        cpu_util = device_state.cpu_utilization / 100.0
-        mem_gb = device_state.memory_available_gb
-        gpu_util = device_state.gpu_utilization / 100.0
-        gpu_mem_gb = device_state.gpu_memory_free_gb
-        
-        # Decision rules based on complexity and hardware constraints
-        if complexity > 0.8:  # High complexity prompts
-            if gpu_util > 0.8 or gpu_mem_gb < 2.0:  # High GPU load or low VRAM
-                action_index = 3  # ffn_neurons (aggressive pruning for speed)
-            else:
-                action_index = 2  # attention_heads (balanced pruning)
-        elif complexity > 0.5:  # Medium complexity
-            if mem_gb < 4.0:  # Low memory
-                action_index = 4  # transformer_layers (memory-efficient)
-            else:
-                action_index = 1  # kv_cache (light pruning)
-        else:  # Low complexity
-            if cpu_util > 0.7:  # High CPU usage
-                action_index = 0  # none (no pruning needed)
-            else:
-                action_index = 1  # kv_cache (minimal pruning)
+        # RL-driven action selection: epsilon-greedy
+        if random.random() < self.epsilon:
+            action_index = random.randint(0, self.action_dim - 1)
+        else:
+            state = self._get_state_vector(prompt)
+            with torch.no_grad():
+                q_values = self.policy_net(state)
+                action_index = q_values.argmax().item()
         
         action = self.action_space.get_action(action_index)
-        print(f"[Structured Pruner] Complexity: {complexity:.3f}, CPU: {cpu_util:.2f}, Mem: {mem_gb:.1f}GB, GPU Util: {gpu_util:.2f}, GPU Mem: {gpu_mem_gb:.1f}GB -> Prune: {action.target} ({action.intensity})")
+        print(f"[RL Agent] Epsilon: {self.epsilon:.3f}, Action: {action.target} ({action.intensity})")
         return action
         
     def train_step(self, state, action_index, reward, next_state):

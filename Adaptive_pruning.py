@@ -124,6 +124,7 @@ class DQN(nn.Module):
 
 class RLControllerAgent:
     def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
         self.device_monitor = EnhancedDeviceMonitor()
         self.action_space = ActionSpace()
 
@@ -174,7 +175,7 @@ class RLControllerAgent:
         device_state = self.device_monitor.get_state()
         
         # Simple prompt complexity: token length normalized + placeholder PPL
-        tokens = len(tokenizer.encode(prompt))
+        tokens = len(self.tokenizer.encode(prompt))
         llm_norm = min(1.0, tokens / 200.0)
         ppl_norm = 0.5  # Average assumption
         complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm

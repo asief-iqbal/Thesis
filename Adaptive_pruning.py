@@ -513,7 +513,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     return prompts[:samples]
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
-         max_new_tokens: int = 50,
+         max_new_tokens: int = 10000,
          train_dataset: str = 'Prompt Dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
@@ -689,7 +689,7 @@ def main(num_episodes: int = 50,
         rl_agent.save(checkpoint_path)
     return rl_agent
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, dataset_name: str = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 10000, dataset_name: str = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -741,7 +741,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     # Restore original epsilon
     rl_agent.epsilon = original_epsilon
 
-def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int = 200, max_new_tokens: int = 50):
+def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int = 200, max_new_tokens: int = 10000):
     try:
         from datasets import load_dataset
     except Exception:
@@ -806,7 +806,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', choices=['train','test','report'], default='test')
     parser.add_argument('--checkpoint', type=str, default=os.path.join('checkpoints','rl_policy.pt'))
     parser.add_argument('--episodes', type=int, default=50)
-    parser.add_argument('--max-new-tokens', type=int, default=50)
+    parser.add_argument('--max-new-tokens', type=int, default=10000)
     parser.add_argument('--wikitext-samples', type=int, default=200)
     parser.add_argument('--train-dataset', type=str, default='Prompt Dataset.csv')
     parser.add_argument('--train-split', type=str, default='train')

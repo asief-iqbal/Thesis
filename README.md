@@ -25,6 +25,8 @@ A reinforcement learning (RL)-driven system for adaptive LLM pruning that balanc
 
 ## Description
 
+CASRAP is an RL-driven adaptive LLM pruning system. Components: (1) RL Controller (Double DQN agent) selects pruning actions based on state (hardware telemetry + prompt complexity). State features: CPU/GPU utilization, memory/battery, token length, perplexity. Actions: prune attention heads, FFN neurons, transformer layers, KV cache at intensities 0.1-0.5, or none. (2) RealModelEngine loads LLaMA-3.2-1B from Hugging Face (cached locally), applies functional masking or structural slicing for pruning. (3) Benchmarking evaluates speed (tokens/sec) vs accuracy (PPL) relative to baseline. (4) Training loop on CSV prompts, calibrates importances, trains DQN, generates reports/plots. (5) Pruners: HeadPruner (masking/slicing), FFNPruner, LayerSkipper, KVCachePruner. Supports both functional (fast exploration) and structural (real speedups) pruning modes.
+
 This project implements an RL-driven adaptive pruning system for LLMs that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. It bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using a learnable controller (Double DQN).
 
 ### Key Improvements

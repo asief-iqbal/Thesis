@@ -31,3 +31,4 @@ nltk_data/
 spacy_data/
 .env
 *.pt
+*.png

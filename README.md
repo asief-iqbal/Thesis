@@ -155,7 +155,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ## Architecture
 
 ### Core Components
-- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 0.6 * tokens/sec - 0.4 * (PPL/10).
+- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 0.6 * (pruned_tok_s / base_tok_s) - 0.4 * (pruned_ppl / base_ppl) (relative to baseline).
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
 - **Calibration System**: Pre-training activation statistics for head/FFN importance.
@@ -164,14 +164,10 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 
 ### Pruning Actions
 - 0: `none` (0.0) - No pruning.
-- 1: `kv_cache` (0.2) - Sliding-window KV cache pruning.
-- 2: `kv_cache` (0.3) - Sliding-window KV cache pruning.
-- 3: `attention_heads` (0.2) - Attention head pruning.
-- 4: `attention_heads` (0.3) - Attention head pruning.
-- 5: `ffn_neurons` (0.1) - FFN channel pruning.
-- 6: `ffn_neurons` (0.2) - FFN channel pruning.
-- 7: `transformer_layers` (0.06) - Layer pruning.
-- 8: `transformer_layers` (0.12) - Layer pruning.
+- 1-5: `kv_cache` (0.1 to 0.5) - Sliding-window KV cache pruning.
+- 6-10: `attention_heads` (0.1 to 0.5) - Attention head pruning.
+- 11-15: `ffn_neurons` (0.1 to 0.5) - FFN channel pruning.
+- 16-20: `transformer_layers` (0.1 to 0.5) - Layer pruning (capped at 12.5% max).
 
 ### System Architecture Diagram
 
@@ -318,8 +314,7 @@ Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_laye
 - **Performance Metrics**:
   - Inference time (ms): Time to generate response.
   - Tokens/sec: generated_tokens / inference_time (uses actual generated length).
-- **Reward (for evaluation)**: 0.6 * tokens/sec - 0.4 * (PPL / 10).
-  - Balances speed (higher reward) vs. accuracy (lower PPL).
+- **Reward (for training)**: alpha * (pruned_tok_s / base_tok_s) - beta * (pruned_ppl / base_ppl), with alpha=0.6, beta=0.4. Balances relative speed gain vs accuracy loss.
 
 ### 7. Model Restoration
 - Restore all pruners to original state for next prompt.

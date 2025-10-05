@@ -23,14 +23,22 @@ import argparse
 import os
 import warnings
 try:
-    import nvidia_ml_py as nvml
+    import pynvml as nvml
     _NVML_AVAILABLE = True
     try:
         nvml.nvmlInit()
     except Exception:
         _NVML_AVAILABLE = False
 except Exception:
-    _NVML_AVAILABLE = False
+    try:
+        import nvidia_ml_py as nvml
+        _NVML_AVAILABLE = True
+        try:
+            nvml.nvmlInit()
+        except Exception:
+            _NVML_AVAILABLE = False
+    except Exception:
+        _NVML_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
 
@@ -43,7 +51,13 @@ except ImportError as e:
 
 print("RL-DRIVEN ADAPTIVE PRUNING SYSTEM")
 print("="*80)
-# ============================================================================
+# Reproducibility seeds
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
 @dataclass
 class DeviceState:
     cpu_utilization: float
@@ -159,7 +173,8 @@ class RLControllerAgent:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=1e-4)
         self.loss_fn = nn.MSELoss()
         
-        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 0.9, 0.995, 0.05, 0.95
+        # Full exploration by default; decay disabled in train_step
+        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 1.0, 1.0, 0.95
 
         # Replay buffer and training params
         self.replay_buffer = deque(maxlen=10000)
@@ -301,11 +316,95 @@ class RealBenchmark:
         speed_bonus = tokens_per_sec
         accuracy_penalty = perplexity / 10.0
         reward = (0.6 * speed_bonus) - (0.4 * accuracy_penalty)
-        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> Reward: {reward:.3f}")
+        # Note: this prints absolute reward (training uses relative reward elsewhere)
+        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> AbsReward: {reward:.3f}")
         if return_metrics:
             return reward, { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count }
         return reward
 
+def generate_comparative_plots(metrics: List[Dict[str, Any]]):
+    """Generate comparative scatter plots (baseline vs pruned) and correlation plots."""
+    import numpy as np
+    def remove_outliers_xy(xs, ys):
+        if not ys:
+            return xs, ys
+        q1, q3 = np.percentile(ys, 25), np.percentile(ys, 75)
+        iqr = q3 - q1
+        lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+        filt = [(x, y) for x, y in zip(xs, ys) if lb <= y <= ub]
+        if not filt:
+            return xs, ys
+        fx, fy = zip(*filt)
+        return list(fx), list(fy)
+
+    episodes = [m['episode'] for m in metrics]
+    # 1) Token speed comparison
+    base_tok_s = [m['baseline_tok_s'] for m in metrics]
+    pruned_tok_s = [m['tok_s'] for m in metrics]
+    e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
+    e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
+    plt.figure(figsize=(10,6))
+    plt.scatter(e_b, base_tok_s, color='red', alpha=0.6, label='Baseline Tok/s')
+    plt.scatter(e_p, pruned_tok_s, color='blue', alpha=0.6, label='Pruned Tok/s')
+    if len(e_b) > 1:
+        coeff = np.polyfit(e_b, base_tok_s, 1)
+        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+    if len(e_p) > 1:
+        coeff = np.polyfit(e_p, pruned_tok_s, 1)
+        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    plt.title('Token Speed per Episode (Baseline vs Pruned)')
+    plt.xlabel('Episode'); plt.ylabel('Tokens/sec'); plt.grid(True); plt.legend(); plt.tight_layout()
+    plt.savefig('token_speed_compare.png'); plt.close(); print('[Report] Saved token_speed_compare.png')
+
+    # 2) Inference time comparison
+    base_time = [m['baseline_time_ms'] for m in metrics]
+    pruned_time = [m['time_ms'] for m in metrics]
+    e_b, base_time = remove_outliers_xy(episodes, base_time)
+    e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
+    plt.figure(figsize=(10,6))
+    plt.scatter(e_b, base_time, color='red', alpha=0.6, label='Baseline Time (ms)')
+    plt.scatter(e_p, pruned_time, color='blue', alpha=0.6, label='Pruned Time (ms)')
+    if len(e_b) > 1:
+        coeff = np.polyfit(e_b, base_time, 1)
+        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+    if len(e_p) > 1:
+        coeff = np.polyfit(e_p, pruned_time, 1)
+        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    plt.title('Inference Time per Episode (Baseline vs Pruned)')
+    plt.xlabel('Episode'); plt.ylabel('Time (ms)'); plt.grid(True); plt.legend(); plt.tight_layout()
+    plt.savefig('inference_time_compare.png'); plt.close(); print('[Report] Saved inference_time_compare.png')
+
+    # 3) Perplexity comparison
+    base_ppl = [m['baseline_ppl'] for m in metrics]
+    pruned_ppl = [m['ppl'] for m in metrics]
+    e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
+    e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
+    plt.figure(figsize=(10,6))
+    plt.scatter(e_b, base_ppl, color='red', alpha=0.6, label='Baseline PPL')
+    plt.scatter(e_p, pruned_ppl, color='blue', alpha=0.6, label='Pruned PPL')
+    if len(e_b) > 1:
+        coeff = np.polyfit(e_b, base_ppl, 1)
+        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+    if len(e_p) > 1:
+        coeff = np.polyfit(e_p, pruned_ppl, 1)
+        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    plt.title('Perplexity per Episode (Baseline vs Pruned)')
+    plt.xlabel('Episode'); plt.ylabel('Perplexity'); plt.grid(True); plt.legend(); plt.tight_layout()
+    plt.savefig('perplexity_compare.png'); plt.close(); print('[Report] Saved perplexity_compare.png')
+
+    # 4) Token length vs prompt perplexity correlation
+    token_lens = [m['token_len'] for m in metrics]
+    prompt_ppls = [m['prompt_ppl'] for m in metrics]
+    x, y = remove_outliers_xy(token_lens, prompt_ppls)
+    plt.figure(figsize=(10,6))
+    plt.scatter(x, y, color='purple', alpha=0.6, label='TokenLen vs Prompt PPL')
+    if len(x) > 1:
+        coeff = np.polyfit(x, y, 1)
+        plt.plot(x, np.polyval(coeff, x), color='purple')
+    plt.title('Correlation: Token Length vs Prompt Perplexity')
+    plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
+    plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
+
 def generate_report(metrics_list: List[Dict[str, Any]]):
     """Generate post-training report with averages by prune type/intensity and plots."""
     if not metrics_list:
@@ -331,32 +430,27 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
         avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
         print(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)")
 
-def generate_report(metrics_list: List[Dict[str, Any]]):
-    """Generate post-training report with averages by prune type/intensity and plots."""
-    if not metrics_list:
-        print("[Report] No metrics to report.")
-        return
+    # Pruning Summary Bar Chart
+    import numpy as np
+    action_labels = [f"{target} {intensity}" for (target, intensity), _ in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
+    avg_times = [sum(m['time_ms'] for m in ms) / len(ms) for _, ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
+    avg_ppls = [sum(m['ppl'] for m in ms) / len(ms) for _, ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
+    x = np.arange(len(action_labels))
+    plt.figure(figsize=(15, 8))
+    bar_width = 0.35
+    plt.bar(x - bar_width/2, avg_times, bar_width, label='Avg Time (ms)', color='skyblue')
+    plt.bar(x + bar_width/2, avg_ppls, bar_width, label='Avg PPL', color='salmon')
+    plt.xlabel('Pruning Action')
+    plt.ylabel('Value')
+    plt.title('Pruning Summary: Average Time and PPL per Action')
+    plt.xticks(x, action_labels, rotation=45, ha='right')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig('pruning_summary.png')
+    plt.close()
+    print("[Report] Pruning summary bar chart saved to pruning_summary.png")
 
-    # Overall averages
-    total_time = sum(m['time_ms'] for m in metrics_list)
-    total_ppl = sum(m['ppl'] for m in metrics_list)
-    n = len(metrics_list)
-    print(f"\n[Report] Overall Avg Time: {total_time/n:.2f}ms | Avg PPL: {total_ppl/n:.2f}")
 
-    # Group by target and intensity
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for m in metrics_list:
-        key = (m['target'], m['intensity'])
-        groups[key].append(m)
-
-    print("\n[Report] Averages by Prune Type and Intensity:")
-    for (target, intensity), ms in groups.items():
-        avg_time = sum(m['time_ms'] for m in ms) / len(ms)
-        avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
-        print(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)")
-
-    # Plots: Two separate PNGs for inference time and perplexity
     episodes = [m['episode'] for m in metrics_list]
     times = [m['time_ms'] for m in metrics_list]
     ppls = [m['ppl'] for m in metrics_list]
@@ -416,19 +510,6 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
     plt.savefig('perplexity.png')
     plt.close()
     print("[Report] Perplexity plot saved to perplexity.png")
-
-    # Save report to file
-    with open('training_report.txt', 'w') as f:
-        f.write("Training Report\n")
-        f.write(f"Episodes: {n}\n")
-        f.write(f"Overall Avg Time: {total_time/n:.2f}ms\n")
-        f.write(f"Overall Avg PPL: {total_ppl/n:.2f}\n\n")
-        f.write("Averages by Prune Type and Intensity:\n")
-        for (target, intensity), ms in groups.items():
-            avg_time = sum(m['time_ms'] for m in ms) / len(ms)
-            avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
-            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
-    print("[Report] Report saved to training_report.txt")
 
     # Save report to file
     with open('training_report.txt', 'w') as f:
@@ -513,7 +594,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     return prompts[:samples]
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
-         max_new_tokens: int = 1000,
+         max_new_tokens: int = 50,
          train_dataset: str = 'Prompt Dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
@@ -526,6 +607,13 @@ def main(num_episodes: int = 50,
     # Load a proper training prompt pool from the specified dataset
     prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
     num_episodes = len(prompt_pool)  # Train on every prompt in the pool
+
+    # Calibrate importance scores for heads/FFN using a small subset
+    try:
+        calib_samples = min(64, len(prompt_pool))
+        model_engine.calibrate_importances(prompt_pool, max_samples=calib_samples, max_seq_len=128)
+    except Exception as e:
+        print(f"[Calib] Warning: calibration skipped due to error: {e}")
     
     print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
     metrics_list = []  # Collect metrics for report
@@ -565,6 +653,17 @@ def main(num_episodes: int = 50,
         alpha, beta = 0.6, 0.4
         relative_reward = alpha * (pruned_metrics['tok_s'] / base_metrics['tok_s']) - beta * (pruned_metrics['perplexity'] / base_metrics['perplexity'])
 
+        # Track effective layer-skip intensity (post-cap) for fair analysis
+        effective_intensity = pruning_action.intensity
+        if pruning_action.target == 'transformer_layers':
+            layers = getattr(model_engine.model.model, 'layers', [])
+            L = len(layers)
+            if L > 0:
+                k = max(1, int(round(L * pruning_action.intensity)))
+                k = min(k, max(1, L // 8))
+                k = min(k, L)
+                effective_intensity = k / float(L)
+
         next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
         
@@ -585,6 +684,7 @@ def main(num_episodes: int = 50,
             'action_index': pruning_action.action_index,
             'target': pruning_action.target,
             'intensity': pruning_action.intensity,
+            'effective_intensity': effective_intensity,
             'reward': relative_reward
         })
         
@@ -594,90 +694,6 @@ def main(num_episodes: int = 50,
     
     # Generate reports and comparative plots
     generate_report(metrics_list)
-    
-    # Phase 2: Create comparative scatter plots (baseline vs pruned) and correlation plot
-    def generate_comparative_plots(metrics: List[Dict[str, Any]]):
-        import numpy as np
-        def remove_outliers_xy(xs, ys):
-            if not ys:
-                return xs, ys
-            q1, q3 = np.percentile(ys, 25), np.percentile(ys, 75)
-            iqr = q3 - q1
-            lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-            filt = [(x, y) for x, y in zip(xs, ys) if lb <= y <= ub]
-            if not filt:
-                return xs, ys
-            fx, fy = zip(*filt)
-            return list(fx), list(fy)
-
-        episodes = [m['episode'] for m in metrics]
-        # 1) Token speed comparison
-        base_tok_s = [m['baseline_tok_s'] for m in metrics]
-        pruned_tok_s = [m['tok_s'] for m in metrics]
-        e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
-        e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
-        plt.figure(figsize=(10,6))
-        plt.scatter(e_b, base_tok_s, color='red', alpha=0.6, label='Baseline Tok/s')
-        plt.scatter(e_p, pruned_tok_s, color='blue', alpha=0.6, label='Pruned Tok/s')
-        if len(e_b) > 1:
-            coeff = np.polyfit(e_b, base_tok_s, 1)
-            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
-        if len(e_p) > 1:
-            coeff = np.polyfit(e_p, pruned_tok_s, 1)
-            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-        plt.title('Token Speed per Episode (Baseline vs Pruned)')
-        plt.xlabel('Episode'); plt.ylabel('Tokens/sec'); plt.grid(True); plt.legend(); plt.tight_layout()
-        plt.savefig('token_speed_compare.png'); plt.close(); print('[Report] Saved token_speed_compare.png')
-
-        # 2) Inference time comparison
-        base_time = [m['baseline_time_ms'] for m in metrics]
-        pruned_time = [m['time_ms'] for m in metrics]
-        e_b, base_time = remove_outliers_xy(episodes, base_time)
-        e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
-        plt.figure(figsize=(10,6))
-        plt.scatter(e_b, base_time, color='red', alpha=0.6, label='Baseline Time (ms)')
-        plt.scatter(e_p, pruned_time, color='blue', alpha=0.6, label='Pruned Time (ms)')
-        if len(e_b) > 1:
-            coeff = np.polyfit(e_b, base_time, 1)
-            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
-        if len(e_p) > 1:
-            coeff = np.polyfit(e_p, pruned_time, 1)
-            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-        plt.title('Inference Time per Episode (Baseline vs Pruned)')
-        plt.xlabel('Episode'); plt.ylabel('Time (ms)'); plt.grid(True); plt.legend(); plt.tight_layout()
-        plt.savefig('inference_time_compare.png'); plt.close(); print('[Report] Saved inference_time_compare.png')
-
-        # 3) Perplexity comparison
-        base_ppl = [m['baseline_ppl'] for m in metrics]
-        pruned_ppl = [m['ppl'] for m in metrics]
-        e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
-        e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
-        plt.figure(figsize=(10,6))
-        plt.scatter(e_b, base_ppl, color='red', alpha=0.6, label='Baseline PPL')
-        plt.scatter(e_p, pruned_ppl, color='blue', alpha=0.6, label='Pruned PPL')
-        if len(e_b) > 1:
-            coeff = np.polyfit(e_b, base_ppl, 1)
-            plt.plot(e_b, np.polyval(coeff, e_b), color='red')
-        if len(e_p) > 1:
-            coeff = np.polyfit(e_p, pruned_ppl, 1)
-            plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-        plt.title('Perplexity per Episode (Baseline vs Pruned)')
-        plt.xlabel('Episode'); plt.ylabel('Perplexity'); plt.grid(True); plt.legend(); plt.tight_layout()
-        plt.savefig('perplexity_compare.png'); plt.close(); print('[Report] Saved perplexity_compare.png')
-
-        # 4) Token length vs prompt perplexity correlation
-        token_lens = [m['token_len'] for m in metrics]
-        prompt_ppls = [m['prompt_ppl'] for m in metrics]
-        x, y = remove_outliers_xy(token_lens, prompt_ppls)
-        plt.figure(figsize=(10,6))
-        plt.scatter(x, y, color='purple', alpha=0.6, label='TokenLen vs Prompt PPL')
-        if len(x) > 1:
-            coeff = np.polyfit(x, y, 1)
-            plt.plot(x, np.polyval(coeff, x), color='purple')
-        plt.title('Correlation: Token Length vs Prompt Perplexity')
-        plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
-        plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
-
     generate_comparative_plots(metrics_list)
 
     # Save metrics for later report generation and analysis
@@ -689,7 +705,7 @@ def main(num_episodes: int = 50,
         rl_agent.save(checkpoint_path)
     return rl_agent
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 10000, dataset_name: str = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, dataset_name: str = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -741,7 +757,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     # Restore original epsilon
     rl_agent.epsilon = original_epsilon
 
-def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int = 200, max_new_tokens: int = 10000):
+def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int = 200, max_new_tokens: int = 50):
     try:
         from datasets import load_dataset
     except Exception:
@@ -806,7 +822,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', choices=['train','test','report'], default='test')
     parser.add_argument('--checkpoint', type=str, default=os.path.join('checkpoints','rl_policy.pt'))
     parser.add_argument('--episodes', type=int, default=50)
-    parser.add_argument('--max-new-tokens', type=int, default=10000)
+    parser.add_argument('--max-new-tokens', type=int, default=50)
     parser.add_argument('--wikitext-samples', type=int, default=200)
     parser.add_argument('--train-dataset', type=str, default='Prompt Dataset.csv')
     parser.add_argument('--train-split', type=str, default='train')
@@ -822,6 +838,7 @@ if __name__ == "__main__":
         with open('training_metrics.json', 'r') as f:
             metrics_list = json.load(f)
         generate_report(metrics_list)
+        generate_comparative_plots(metrics_list)
     else:
         engine = RealModelEngine()
         agent = RLControllerAgent(engine.tokenizer)

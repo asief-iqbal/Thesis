@@ -98,21 +98,33 @@ class PruningAction:
     level: int; intensity: float; target: str; action_index: int
 class ActionSpace:
     def __init__(self):
-        # Varying, safer intensities; emphasize mild pruning options
+        # Expanded to include intensities 0.1,0.2,0.3,0.4,0.5 for all pruning categories
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
             # KV cache (runtime length reduction)
-            PruningAction(level=1, intensity=0.2, target="kv_cache", action_index=1),
-            PruningAction(level=1, intensity=0.3, target="kv_cache", action_index=2),
+            PruningAction(level=1, intensity=0.1, target="kv_cache", action_index=1),
+            PruningAction(level=1, intensity=0.2, target="kv_cache", action_index=2),
+            PruningAction(level=1, intensity=0.3, target="kv_cache", action_index=3),
+            PruningAction(level=1, intensity=0.4, target="kv_cache", action_index=4),
+            PruningAction(level=1, intensity=0.5, target="kv_cache", action_index=5),
             # Attention heads (GQA-safe masking/slicing)
-            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=3),
-            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=4),
+            PruningAction(level=2, intensity=0.1, target="attention_heads", action_index=6),
+            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=7),
+            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=8),
+            PruningAction(level=2, intensity=0.4, target="attention_heads", action_index=9),
+            PruningAction(level=2, intensity=0.5, target="attention_heads", action_index=10),
             # FFN channels (use calibration-aware scoring)
-            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=5),
-            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=6),
+            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=11),
+            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=12),
+            PruningAction(level=2, intensity=0.3, target="ffn_neurons", action_index=13),
+            PruningAction(level=2, intensity=0.4, target="ffn_neurons", action_index=14),
+            PruningAction(level=2, intensity=0.5, target="ffn_neurons", action_index=15),
             # Transformer layers (skip very few; capped in engine)
-            PruningAction(level=3, intensity=0.06, target="transformer_layers", action_index=7),
-            PruningAction(level=3, intensity=0.12, target="transformer_layers", action_index=8),
+            PruningAction(level=3, intensity=0.1, target="transformer_layers", action_index=16),
+            PruningAction(level=3, intensity=0.2, target="transformer_layers", action_index=17),
+            PruningAction(level=3, intensity=0.3, target="transformer_layers", action_index=18),
+            PruningAction(level=3, intensity=0.4, target="transformer_layers", action_index=19),
+            PruningAction(level=3, intensity=0.5, target="transformer_layers", action_index=20),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -255,8 +267,9 @@ class RLControllerAgent:
         self.optimizer.step()
 
         # Epsilon decay and target update
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        # Disabled for full exploration at ε=1.0
+        # if self.epsilon > self.epsilon_min:
+        #     self.epsilon *= self.epsilon_decay
         self.train_steps += 1
         if self.train_steps % self.target_update_interval == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -543,13 +556,17 @@ def main(num_episodes: int = 50,
         state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         model_engine.apply_pruning(pruning_action)
-        reward_pruned, pruned_metrics = benchmark.benchmark_and_get_reward(
+        _reward_pruned, pruned_metrics = benchmark.benchmark_and_get_reward(
             model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
+        # Compute relative reward: alpha * (pruned_tok_s / base_tok_s) - beta * (pruned_ppl / base_ppl)
+        alpha, beta = 0.6, 0.4
+        relative_reward = alpha * (pruned_metrics['tok_s'] / base_metrics['tok_s']) - beta * (pruned_metrics['perplexity'] / base_metrics['perplexity'])
+
         next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
-        rl_agent.train_step(state_tensor, pruning_action.action_index, reward_pruned, next_state_tensor)
+        rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
         
         # Collect detailed metrics for analysis and plots
         metrics_list.append({
@@ -568,7 +585,7 @@ def main(num_episodes: int = 50,
             'action_index': pruning_action.action_index,
             'target': pruning_action.target,
             'intensity': pruning_action.intensity,
-            'reward': reward_pruned
+            'reward': relative_reward
         })
         
         model_engine.restore_model()

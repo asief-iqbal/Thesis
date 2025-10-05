@@ -1,6 +1,6 @@
 # CASRAP: Context Aware Structured Runtime Adaptive Pruning
 
-A reinforcement learning (RL)-driven system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using an interpretable yet learnable controller.
+A reinforcement learning (RL)-driven system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using an interpretable yet learnable controller. Includes detailed per-episode logging (baseline vs pruned metrics) and comparative plots showing pruning effectiveness.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ## Table of Contents
@@ -30,7 +30,8 @@ This project implements an RL-driven adaptive pruning system for LLMs that balan
 ### Key Improvements
 - **RL Controller**: Epsilon-greedy policy over Q-network (Double DQN) replaces hand-written rules.
 - **Real KV Pruning**: Sliding-window trimming of past_key_values during generation (reduces KV footprint).
-- **Enhanced Evaluation**: Tokens/sec uses actual generated tokens; separate graphs with outlier removal.
+- **Enhanced Evaluation**: Tokens/sec uses actual generated tokens; separate graphs with outlier removal; comparative baseline vs pruned plots.
+- **Detailed Logging**: Per-episode terminal prints and JSON storage of baseline/pruned metrics, token length, prompt PPL, complexity.
 
 The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner, PAT, RAP, with real pruning effects, standardized evaluation (lm-eval-harness), and rigorous training.
 
@@ -53,6 +54,7 @@ The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner
 - **Modes**: Separate train/test CLI modes with checkpointing.
 - **Safety**: Reversible pruning, no permanent model damage.
 - **Local Everything**: All caches, models, datasets stored in project folder.
+- **Detailed Logging & Plots**: Per-episode baseline vs pruned metrics printed and saved; comparative scatter plots (token speed, inference time, perplexity) with trendlines; correlation plot (token length vs prompt PPL).
 ## Installation
 
 ### 1. Clone Repository
@@ -109,6 +111,16 @@ python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/
 ```
 Uses 80% of the dataset for training.
 
+**Training Outputs**:
+- **Per-Episode Logs**: Terminal prints token length, prompt PPL, complexity score, baseline metrics (no-prune), pruned metrics (with RL action).
+- **Saved Files**:
+  - `training_metrics.json`: Detailed metrics for all episodes.
+  - `token_speed_compare.png`: Baseline vs pruned token speed scatter + trendlines.
+  - `inference_time_compare.png`: Baseline vs pruned inference time scatter + trendlines.
+  - `perplexity_compare.png`: Baseline vs pruned perplexity scatter + trendlines.
+  - `length_vs_ppl.png`: Correlation between token length and prompt perplexity.
+- **Reports**: `training_report.txt` with averages by prune type.
+
 **Faster Training Options** (for testing/debugging):
 - `--episodes 50` (half episodes).
 - `--train-samples 1000` (fewer prompts).
@@ -144,7 +156,8 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 - **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets/intensities. Reward: 0.6 * tokens/sec - 0.4 * (PPL/10).
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
-- **Benchmark System**: Measures latency (ms), tokens/sec (actual generated tokens), PPL.
+- **Benchmark System**: Measures latency (ms), tokens/sec (actual generated tokens), PPL. Logs baseline vs pruned per-episode.
+- **Plot Generator**: Post-training comparative scatter plots with trendlines and outlier removal.
 
 ### Pruning Actions
 - 0: `none` (0.0) - No pruning.
@@ -186,7 +199,11 @@ RL-driven with prompt-centric complexity; pruning includes GQA-safe heads, slidi
 - `.env`: Config (HF token, pruning mode).
 - `checkpoints/`: RL policy files.
 - `training_report.txt`: Post-training report.
-- `training_metrics.png`: Graphs.
+- `training_metrics.json`: Detailed per-episode metrics.
+- `token_speed_compare.png`: Baseline vs pruned token speed plot.
+- `inference_time_compare.png`: Baseline vs pruned inference time plot.
+- `perplexity_compare.png`: Baseline vs pruned perplexity plot.
+- `length_vs_ppl.png`: Token length vs prompt perplexity correlation.
 
 ## Benchmarks
 
@@ -299,16 +316,23 @@ Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_laye
 - Restore all pruners to original state for next prompt.
 - Ensures reversible pruning.
 
-### 8. Training/Evaluation Loop
+### 8. Training/Evaluation Loop (Phase 1 - During Training)
 - For each prompt in dataset (80% train split):
+  - **Step 1**: Compute token length and prompt perplexity (print and save).
+  - **Step 2**: Measure baseline metrics (no pruning): inference time, tokens/sec, perplexity (print and save).
+  - **Step 3**: Compute complexity score (print and save).
+  - **Step 4**: RL selects action, apply pruning, measure pruned metrics (print and save).
   - Process prompt → Decide pruning → Apply → Generate → Benchmark → Log metrics.
-- Generate reports: Overall stats, per-prune-type averages.
-- Produce graphs: Inference time vs. episode (scatter + trendline, outliers removed), Perplexity vs. episode.
+- Reward update and policy training on baseline vs pruned difference.
 
-### 9. Testing on Holdout Set
-- Use 20% test split from CSV.
-- Same process, average metrics across test prompts.
-- Optional: WikiText-2 PPL, lm-eval-harness tasks.
+### 9. Post-Training Analysis (Phase 2 - After Training)
+- Generate reports: Overall stats, per-prune-type averages.
+- Produce comparative scatter plots (baseline red vs pruned blue, with trendlines, outliers removed):
+  - Token speed per episode.
+  - Inference time per episode.
+  - Perplexity per episode.
+- Produce correlation plot: Token length vs prompt perplexity.
+- All plots saved as PNGs.
 
 This methodology ensures learnable, hardware-aware pruning without randomness, adapting to prompt complexity for optimal speed-accuracy trade-offs.
 

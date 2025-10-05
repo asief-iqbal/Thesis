@@ -182,7 +182,7 @@ flowchart TD
     C --> D[Compute Complexity: Tokens + PPL]
     D --> E[Collect Hardware State: CPU/GPU/Memory]
     E --> F[RL Controller: Selects Action from Varying Intensities]
-    F --> G[Apply Pruning: Heads/FFN/Layers/KV (Calibration-Aware)]
+    F --> G["Apply Pruning: Heads/FFN/Layers/KV (Calibration-Aware)"]
     G --> H[Generate Response]
     H --> I[Benchmark: Tok/s, PPL]
     I --> J[Compute Reward & Train Policy]

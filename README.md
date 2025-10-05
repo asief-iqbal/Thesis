@@ -29,9 +29,11 @@ This project implements an RL-driven adaptive pruning system for LLMs that balan
 
 ### Key Improvements
 - **RL Controller**: Epsilon-greedy policy over Q-network (Double DQN) replaces hand-written rules.
+- **Data-Aware Calibration**: Activation statistics for head/FFN importance; safer than pure magnitude.
 - **Real KV Pruning**: Sliding-window trimming of past_key_values during generation (reduces KV footprint).
 - **Enhanced Evaluation**: Tokens/sec uses actual generated tokens; separate graphs with outlier removal; comparative baseline vs pruned plots.
 - **Detailed Logging**: Per-episode terminal prints and JSON storage of baseline/pruned metrics, token length, prompt PPL, complexity.
+- **Varying Pruning Intensities**: Mild options (e.g., 0.1 FFN) to avoid catastrophic degradation; layer skipping capped at 12.5%.
 
 The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner, PAT, RAP, with real pruning effects, standardized evaluation (lm-eval-harness), and rigorous training.
 
@@ -153,44 +155,49 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ## Architecture
 
 ### Core Components
-- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets/intensities. Reward: 0.6 * tokens/sec - 0.4 * (PPL/10).
+- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 0.6 * tokens/sec - 0.4 * (PPL/10).
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
+- **Calibration System**: Pre-training activation statistics for head/FFN importance.
 - **Benchmark System**: Measures latency (ms), tokens/sec (actual generated tokens), PPL. Logs baseline vs pruned per-episode.
 - **Plot Generator**: Post-training comparative scatter plots with trendlines and outlier removal.
 
 ### Pruning Actions
 - 0: `none` (0.0) - No pruning.
-- 1: `kv_cache` (0.3) - Sliding-window KV cache pruning.
-- 2: `attention_heads` (0.4) - Attention head pruning.
-- 3: `ffn_neurons` (0.5) - FFN channel pruning.
-- 4: `transformer_layers` (0.3) - Layer pruning.
+- 1: `kv_cache` (0.2) - Sliding-window KV cache pruning.
+- 2: `kv_cache` (0.3) - Sliding-window KV cache pruning.
+- 3: `attention_heads` (0.2) - Attention head pruning.
+- 4: `attention_heads` (0.3) - Attention head pruning.
+- 5: `ffn_neurons` (0.1) - FFN channel pruning.
+- 6: `ffn_neurons` (0.2) - FFN channel pruning.
+- 7: `transformer_layers` (0.06) - Layer pruning.
+- 8: `transformer_layers` (0.12) - Layer pruning.
 
 ### System Architecture Diagram
 
 ```mermaid
 flowchart TD
-    A[Load Model & Components] --> B[User Prompt]
-    B --> C[Analyze Complexity tokens + PPL]
-    C --> D[Collect Hardware State CPU GPU Memory]
-    D --> E[RL Controller Selects Action epsilon-greedy]
-    E --> F[Apply Pruning Heads FFN Layers KV]
-    F --> G[Generate Response]
-    G --> H[Benchmark tok/s PPL]
-    H --> I[Compute Reward & Update Policy]
-    I --> J[Restore Model]
-    J --> B
+    A[Load Model & Components] --> B[Calibration: Activation Stats for Heads/FFN]
+    B --> C[User Prompt]
+    C --> D[Compute Complexity: Tokens + PPL]
+    D --> E[Collect Hardware State: CPU/GPU/Memory]
+    E --> F[RL Controller: Selects Action from Varying Intensities]
+    F --> G[Apply Pruning: Heads/FFN/Layers/KV (Calibration-Aware)]
+    G --> H[Generate Response]
+    H --> I[Benchmark: Tok/s, PPL]
+    I --> J[Compute Reward & Train Policy]
+    J --> K[Restore Model]
+    K --> C
 
-    K[Dataset] --> L[Batch Evaluation]
-    L --> M[Aggregate Results & Reports]
+    L[Dataset] --> M[Batch Evaluation]
+    M --> N[Aggregate Results & Comparative Plots]
 ```
 
-RL-driven with prompt-centric complexity; pruning includes GQA-safe heads, sliding-window KV. Evaluation on datasets.
+RL-driven with prompt-centric complexity; pruning includes activation-aware heads/FFN, sliding-window KV, capped layer skipping. Evaluation on datasets.
 
 ## Modules
 
-- `Adaptive_pruning.py`: Main script (RL agent, loops, eval runners).
-- `model_loader.py`: HF loading, token auth, pruning apply/restore, save_pretrained.
+- `model_loader.py`: HF loading, token auth, pruning apply/restore, save_pretrained, activation calibration.
 - `nlp_analyzer.py`: Prompt analyzer (complexity via tokens + perplexity).
 - `pruners/`: 
   - `head_pruner.py`, `ffn_pruner.py`, `layer_skipper.py` (functional masks).
@@ -221,6 +228,7 @@ This section provides a comprehensive, step-by-step explanation of the system's 
   - Functional pruners (hooks for masking).
   - Structural slicers (rebuild layers, GQA-safe head pruning).
   - KV cache pruner (sliding window on past_key_values).
+- **Calibration**: Collect activation-aware importance for heads/FFN using a small prompt set (64 samples, 128 seq len).
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Hardware Monitor**: NVML (if GPU) or torch memory; psutil for CPU/memory/battery.
 
@@ -273,22 +281,23 @@ flowchart TD
     G --> H[Optimize Double DQN]
     H --> I[Target Net Update]
 ```
-Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_layers` with preset intensities. Policy learns to pick actions based on state.
+
+Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_layers` with preset varying intensities. Policy learns to pick actions based on state.
 
 ### 4. Pruning Application
 
 - **Attention Heads**:
-  - Calculate importance: L2 norms of Q/K/V/O projections per head.
-  - Remove lowest-scoring heads (e.g., intensity 0.4 → remove 40% heads).
+  - Importance: Activation stats (if calibrated) or L2 norms of Q/K/V/O projections per head.
+  - Remove lowest-scoring heads (e.g., intensity 0.2 → remove 20% heads).
   - Functional: Mask with hooks; Structural: Rebuild layer without heads (GQA-safe).
 
 - **FFN Neurons**:
-  - Importance: L2 norms of gate/up/down projections per channel.
-  - Remove channels with lowest scores.
+  - Importance: Activation stats (if calibrated) or L2 norms of gate/up/down projections per channel.
+  - Remove channels with lowest scores (mild intensities like 0.1).
   - Functional: Mask channels; Structural: Rebuild Linear layers.
 
 - **Transformer Layers**:
-  - Skip layers from the end (e.g., intensity 0.3 → skip 30% layers).
+  - Skip layers from the end (e.g., intensity 0.06 → skip 6% layers, max 2 of 16).
   - Functional: Hook to bypass layers (cache-safe identity).
 
 - **KV Cache**:
@@ -317,11 +326,12 @@ Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_laye
 - Ensures reversible pruning.
 
 ### 8. Training/Evaluation Loop (Phase 1 - During Training)
+- **Calibration Phase**: Run activation collection on 64 prompts for head/FFN importances.
 - For each prompt in dataset (80% train split):
   - **Step 1**: Compute token length and prompt perplexity (print and save).
   - **Step 2**: Measure baseline metrics (no pruning): inference time, tokens/sec, perplexity (print and save).
   - **Step 3**: Compute complexity score (print and save).
-  - **Step 4**: RL selects action, apply pruning, measure pruned metrics (print and save).
+  - **Step 4**: RL selects action, apply pruning (using calibration if available), measure pruned metrics (print and save).
   - Process prompt → Decide pruning → Apply → Generate → Benchmark → Log metrics.
 - Reward update and policy training on baseline vs pruned difference.
 

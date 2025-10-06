@@ -58,6 +58,10 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 
+# =========================================================================
+# DEVICE MONITORING AND STATE REPRESENTATION
+# =========================================================================
+
 @dataclass
 class DeviceState:
     cpu_utilization: float
@@ -68,6 +72,7 @@ class DeviceState:
     gpu_utilization: float
 
 class EnhancedDeviceMonitor:
+    """Monitors hardware state (CPU, GPU, memory, battery) for RL state features."""
     def __init__(self):
         self.gpu_available = torch.cuda.is_available()
         self.nvml_ok = bool(self.gpu_available and _NVML_AVAILABLE)
@@ -107,11 +112,14 @@ class EnhancedDeviceMonitor:
             gpu_utilization=gpu_util
         )
 # =========================================================================
+# ACTION SPACE DEFINITION (PRUNING ACTIONS)
+# =========================================================================
+
 @dataclass
 class PruningAction:
     level: int; intensity: float; target: str; action_index: int
 class ActionSpace:
-    def __init__(self):
+    """Defines all possible pruning actions: none, KV cache, heads, FFN, layers at various intensities."""
         # Expanded to include intensities 0.1,0.2,0.3,0.4,0.5 for all pruning categories
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
@@ -146,6 +154,7 @@ class ActionSpace:
         return self.actions[index]
 
 class DQN(nn.Module):
+    """Simple Deep Q-Network with two hidden layers for RL policy."""
     def __init__(self, state_dim, action_dim):
         super(DQN, self).__init__()
         self.network = nn.Sequential(
@@ -156,6 +165,10 @@ class DQN(nn.Module):
 
     def forward(self, state):
         return self.network(state)
+
+# =========================================================================
+# REINFORCEMENT LEARNING AGENT (DOUBLE DQN CONTROLLER)
+# =========================================================================
 
 class RLControllerAgent:
     def __init__(self, tokenizer):
@@ -173,8 +186,8 @@ class RLControllerAgent:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=1e-4)
         self.loss_fn = nn.MSELoss()
         
-        # Full exploration by default; decay disabled in train_step
-        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 1.0, 1.0, 0.95
+        # Full exploration by default; slight decay after warm-up for convergence
+        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 0.999, 0.1, 0.95
 
         # Replay buffer and training params
         self.replay_buffer = deque(maxlen=10000)
@@ -282,9 +295,9 @@ class RLControllerAgent:
         self.optimizer.step()
 
         # Epsilon decay and target update
-        # Disabled for full exploration at ε=1.0
-        # if self.epsilon > self.epsilon_min:
-        #     self.epsilon *= self.epsilon_decay
+        # Slight decay after warm-up (100 steps) for exploration-exploitation balance
+        if self.train_steps > 100 and self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
         self.train_steps += 1
         if self.train_steps % self.target_update_interval == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -295,6 +308,7 @@ class RLControllerAgent:
 # ============================================================================
 
 class RealBenchmark:
+    """Benchmarks inference time, token speed, perplexity on baseline vs pruned models."""
     def _calculate_perplexity(self, engine: RealModelEngine, text: str) -> float:
         inputs = engine.tokenizer(text, return_tensors="pt").to(engine.model.device)
         with torch.no_grad():
@@ -581,9 +595,9 @@ def organize_training_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Training reports organized into {train_path}")
 def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
-    """Load a proper prompt dataset to train the RL controller.
-    Supported: 'databricks/databricks-dolly-15k', 'tatsu-lab/alpaca', CSV files with 80/20 split, fallback to WikiText-2.
-    split_type: 'train' or 'test' for CSV split.
+    """Load a proper prompt dataset to train/test the RL controller.
+    Supports: 'databricks/databricks-dolly-15k', 'tatsu-lab/alpaca', CSV files, fallback to WikiText-2.
+    No train/test split; loads and shuffles the full dataset, then takes up to 'samples'.
     Returns a list of prompt strings.
     """
     try:
@@ -603,14 +617,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
             ds = load_dataset('csv', data_files=name)
             prompts = [r['Prompt'] for r in ds['train'] if r['Prompt'] and r['Prompt'].strip()]
             random.shuffle(prompts)
-            # 80/20 split
-            split_idx = int(0.8 * len(prompts))
-            train_prompts = prompts[:split_idx]
-            test_prompts = prompts[split_idx:]
-            if split_type == 'test':
-                return test_prompts[:samples]
-            else:
-                return train_prompts[:samples]
+            return prompts[:samples]
         else:
             ds = load_dataset(name, split=split)
     except Exception as e:
@@ -649,6 +656,10 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     if not prompts:
         prompts = ["Explain quantum computing in simple terms."]
     return prompts[:samples]
+# =========================================================================
+# MAIN TRAINING LOOP AND UTILITIES
+# =========================================================================
+
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
          max_new_tokens: int = 50,
@@ -774,7 +785,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     rl_agent.epsilon = 0.0
     
     if dataset_name and dataset_name.endswith('.csv'):
-        test_prompts = load_training_prompts(dataset_name, split_type='test', samples=num_test_episodes)
+        test_prompts = load_training_prompts(dataset_name, samples=num_test_episodes)
     else:
         test_prompts = [
             "Explain quantum computing in simple terms.",

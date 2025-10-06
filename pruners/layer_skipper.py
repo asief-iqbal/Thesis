@@ -1,4 +1,5 @@
 from typing import List
+from transformers.modeling_outputs import BaseModelOutputWithPast
 
 class LayerSkipper:
     """
@@ -24,8 +25,22 @@ class LayerSkipper:
             layer = layers[idx]
             if idx not in self.original_forwards:
                 self.original_forwards[idx] = layer.forward
-            def identity_forward(x, *args, **kwargs):
-                return x
+            def identity_forward(hidden_states, *args, **kwargs):
+                # Preserve interface expected by HF models
+                use_cache = kwargs.get('use_cache', False)
+                return_dict = kwargs.get('return_dict', True)
+                if return_dict:
+                    return BaseModelOutputWithPast(
+                        last_hidden_state=hidden_states,
+                        past_key_values=None,
+                        hidden_states=None,
+                        attentions=None,
+                    )
+                else:
+                    outputs = (hidden_states,)
+                    if use_cache:
+                        outputs += (None,)
+                    return outputs
             layer.forward = identity_forward
             self.active_layers.add(idx)
 

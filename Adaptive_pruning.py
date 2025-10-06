@@ -75,17 +75,8 @@ class EnhancedDeviceMonitor:
     """Monitors hardware state (CPU, GPU, memory, battery) for RL state features."""
     def __init__(self):
         self.gpu_available = torch.cuda.is_available()
-        self.nvml_ok = bool(self.gpu_available and _NVML_AVAILABLE)
-        if self.nvml_ok:
-            try:
-                self.handle = nvml.nvmlDeviceGetHandleByIndex(0)
-                name = nvml.nvmlDeviceGetName(self.handle).decode("utf-8") if hasattr(nvml, "nvmlDeviceGetName") else "GPU"
-                print(f"[Monitor] GPU detected ({name}); NVML telemetry enabled.")
-            except Exception:
-                self.nvml_ok = False
-                print("[Monitor] GPU detected; NVML unavailable, using torch fallbacks.")
-        else:
-            print(f"[Monitor] GPU {'detected' if self.gpu_available else 'not detected' }.")
+        self.nvml_ok = False  # Disable NVML to avoid interference with CUDA detection
+        print(f"[Monitor] GPU {'detected' if self.gpu_available else 'not detected' }.")
 
     def get_state(self) -> DeviceState:
         cpu_util = psutil.cpu_percent(interval=0.1)
@@ -120,33 +111,22 @@ class PruningAction:
     level: int; intensity: float; target: str; action_index: int
 class ActionSpace:
     """Defines all possible pruning actions: none, KV cache, heads, FFN, layers at various intensities."""
-        # Expanded to include intensities 0.1,0.2,0.3,0.4,0.5 for all pruning categories
+    def __init__(self):
+    # Expanded to include intensities 0.1,0.2,0.3,0.4,0.5 for all pruning categories
+        # Research-aligned action space: no kv_cache; modest head/FFN; shallow layer skip
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            # KV cache (runtime length reduction)
-            PruningAction(level=1, intensity=0.1, target="kv_cache", action_index=1),
-            PruningAction(level=1, intensity=0.2, target="kv_cache", action_index=2),
-            PruningAction(level=1, intensity=0.3, target="kv_cache", action_index=3),
-            PruningAction(level=1, intensity=0.4, target="kv_cache", action_index=4),
-            PruningAction(level=1, intensity=0.5, target="kv_cache", action_index=5),
-            # Attention heads (GQA-safe masking/slicing)
-            PruningAction(level=2, intensity=0.1, target="attention_heads", action_index=6),
-            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=7),
-            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=8),
-            PruningAction(level=2, intensity=0.4, target="attention_heads", action_index=9),
-            PruningAction(level=2, intensity=0.5, target="attention_heads", action_index=10),
-            # FFN channels (use calibration-aware scoring)
-            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=11),
-            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=12),
-            PruningAction(level=2, intensity=0.3, target="ffn_neurons", action_index=13),
-            PruningAction(level=2, intensity=0.4, target="ffn_neurons", action_index=14),
-            PruningAction(level=2, intensity=0.5, target="ffn_neurons", action_index=15),
-            # Transformer layers (skip very few; capped in engine)
-            PruningAction(level=3, intensity=0.1, target="transformer_layers", action_index=16),
-            PruningAction(level=3, intensity=0.2, target="transformer_layers", action_index=17),
-            PruningAction(level=3, intensity=0.3, target="transformer_layers", action_index=18),
-            PruningAction(level=3, intensity=0.4, target="transformer_layers", action_index=19),
-            PruningAction(level=3, intensity=0.5, target="transformer_layers", action_index=20),
+            # Attention heads (structural, GQA-safe): 10–30%
+            PruningAction(level=2, intensity=0.1, target="attention_heads", action_index=1),
+            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=2),
+            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=3),
+            # FFN channels (structural): 10–30%
+            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=4),
+            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=5),
+            PruningAction(level=2, intensity=0.3, target="ffn_neurons", action_index=6),
+            # Transformer layers (functional skip, capped in engine): 10–20%
+            PruningAction(level=3, intensity=0.1, target="transformer_layers", action_index=7),
+            PruningAction(level=3, intensity=0.2, target="transformer_layers", action_index=8),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -316,25 +296,18 @@ class RealBenchmark:
         return torch.exp(outputs.loss).item()
 
     def benchmark_and_get_reward(self, engine: RealModelEngine, prompt: str, validation_text: str, max_new_tokens: int = 50, return_metrics: bool = False):
+        # Use planned token budget for fair throughput comparison
+        planned_tokens = engine.kv_pruner.get_effective_max_length(max_new_tokens)
         start_time = time.time()
-        generated_response = engine.generate_response(prompt, max_length=max_new_tokens)
+        generated_response = engine.generate_response(prompt, max_length=planned_tokens)
         elapsed_s = (time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
-        # Use actual generated token count for tokens/sec
+        # Actual generated tokens may vary; throughput uses planned budget to avoid early-EOS bias
         gen_token_count = len(engine.tokenizer.encode(generated_response))
-        tokens_per_sec = (gen_token_count / elapsed_s) if elapsed_s > 0 else 0.0
-        # Compute perplexity on the generated response (prompt + response) for relevance
-        full_text = prompt + " " + generated_response
-        perplexity = self._calculate_perplexity(engine, full_text)
-        # Reward balances speed and accuracy
-        speed_bonus = tokens_per_sec
-        accuracy_penalty = perplexity / 10.0
-        reward = (0.6 * speed_bonus) - (0.4 * accuracy_penalty)
-        # Note: this prints the absolute reward (training uses relative reward elsewhere)
-        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> Reward: {reward:.3f}")
-        if return_metrics:
-            return reward, { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count }
-        return reward
+        tokens_per_sec = (planned_tokens / elapsed_s) if elapsed_s > 0 else 0.0
+        # Compute PPL on a fixed validation text to decouple from generated content
+        perplexity = self._calculate_perplexity(engine, validation_text)
+        return { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count, 'planned_tokens': planned_tokens }
 
 def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     """Generate comparative scatter plots (baseline vs pruned) and correlation plots."""
@@ -679,7 +652,7 @@ def main(num_episodes: int = 50,
     prompt_pool = prompt_pool[:limit]
     num_episodes = limit
 
-    # Calibrate importance scores for heads/FFN using a small subset
+    # Calibrate importance scores for heads/FFN/layers using a small subset
     try:
         calib_samples = min(64, len(prompt_pool))
         model_engine.calibrate_importances(prompt_pool, max_samples=calib_samples, max_seq_len=128)
@@ -700,7 +673,7 @@ def main(num_episodes: int = 50,
 
         # Ensure clean (no-prune) state and measure baseline metrics
         model_engine.restore_model()
-        _reward_base, base_metrics = benchmark.benchmark_and_get_reward(
+        base_metrics = benchmark.benchmark_and_get_reward(
             model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
         )
         print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
@@ -715,7 +688,7 @@ def main(num_episodes: int = 50,
         state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         model_engine.apply_pruning(pruning_action)
-        _reward_pruned, pruned_metrics = benchmark.benchmark_and_get_reward(
+        pruned_metrics = benchmark.benchmark_and_get_reward(
             model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
@@ -738,6 +711,7 @@ def main(num_episodes: int = 50,
 
         next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
+        print(f"[reward] {relative_reward:.3f}")
         
         # Collect detailed metrics for analysis and plots
         metrics_list.append({
@@ -812,8 +786,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         
         # Apply action and benchmark
         model_engine.apply_pruning(action)
-        reward, metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True)
-        total_reward += reward
+        metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True)
+        total_reward += 0.0  # Placeholder, since reward removed
         total_time += metrics['time_ms']
         total_tok_s += metrics['tok_s']
         total_ppl += metrics['perplexity']
@@ -821,8 +795,6 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         model_engine.restore_model()
     
     n = float(num_test_episodes)
-    avg_reward = total_reward / n
-    print(f"\n[Test] ✓ Testing completed! Average Reward: {avg_reward:.3f}")
     print(f"[Test] Avg Time: {total_time/n:.2f}ms | Avg Tok/s: {total_tok_s/n:.2f} | Avg PPL: {total_ppl/n:.2f}")
     
     # Restore original epsilon

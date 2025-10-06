@@ -43,7 +43,7 @@ class RealModelEngine:
         model_name = "meta-llama/Llama-3.2-1B"
         print(f"[Engine] Loading model: {model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         print(f"[Engine] Llama 3.2 1B model loaded to {self.model.device}.")
@@ -61,12 +61,16 @@ class RealModelEngine:
         # Calibration caches (activation-aware importances)
         self.head_importance = {}   # layer_idx -> tensor[num_heads]
         self.ffn_importance = {}    # layer_idx -> tensor[inter_size]
+        self.layer_importance = []  # per-layer importance (avg |activation| over tokens)
 
     def apply_pruning(self, action) -> None:
         """Apply pruning according to the action. Currently supports head masking scaffold."""
         target = getattr(action, "target", "none")
         intensity = float(getattr(action, "intensity", 0.0) or 0.0)
-        structural = os.getenv("STRUCTURAL_PRUNING", "0") == "1"
+        structural_env = os.getenv("STRUCTURAL_PRUNING", "0") == "1"
+        # Force structural pruning for heads/FFN to realize real throughput gains
+        force_structural = target in ("attention_heads", "ffn_neurons")
+        structural = force_structural or structural_env
 
         if target == "attention_heads" and intensity > 0.0:
             # Determine number of heads per layer (assume homogeneous across layers)
@@ -87,7 +91,7 @@ class RealModelEngine:
             k = max(1, int(round(num_heads * intensity)))
             k = min(k, num_heads)
             if structural:
-                # Magnitude-based per-head importance using q/k/v weights
+                # Magnitude-based per-head importance using q/k/v weights (GQA-safe)
                 per_layer_removed = {}
                 for i, layer in enumerate(layers):
                     attn = getattr(layer, "self_attn", None)
@@ -98,7 +102,10 @@ class RealModelEngine:
                         scores = self.head_importance[i]
                         removed = torch.topk(scores, k, largest=False).indices.tolist()
                     else:
-                        q, kproj, v, o = getattr(attn, 'q_proj', None), getattr(attn, 'k_proj', None), getattr(attn, 'v_proj', None), getattr(attn, 'o_proj', None)
+                        q = getattr(attn, 'q_proj', None)
+                        kproj = getattr(attn, 'k_proj', None)
+                        v = getattr(attn, 'v_proj', None)
+                        o = getattr(attn, 'o_proj', None)
                         if any(m is None for m in [q, kproj, v, o]):
                             continue
                         try:
@@ -108,17 +115,26 @@ class RealModelEngine:
                         with torch.no_grad():
                             def head_scores_linear(m: torch.nn.Linear):
                                 W = m.weight.view(num_heads, head_dim, -1)
-                                return torch.linalg.vector_norm(W, ord=2, dim=(1,2))
+                                return torch.linalg.vector_norm(W, ord=2, dim=(1, 2))
+                            def safe_scores(m: torch.nn.Linear):
+                                try:
+                                    return head_scores_linear(m)
+                                except Exception:
+                                    return None
                             s_q = head_scores_linear(q)
-                            s_k = head_scores_linear(kproj)
-                            s_v = head_scores_linear(v)
-                            scores = s_q + s_k + s_v
+                            s_k = safe_scores(kproj)
+                            s_v = safe_scores(v)
+                            if s_k is not None and s_v is not None and s_k.shape[0] == s_q.shape[0] and s_v.shape[0] == s_q.shape[0]:
+                                scores = s_q + s_k + s_v
+                            else:
+                                # GQA-safe fallback: use Q-only importance
+                                scores = s_q
                             removed = torch.topk(scores, k, largest=False).indices.tolist()
                     per_layer_removed[i] = removed
-                print(f"[Engine] Applying STRUCTURAL head pruning: removing {k}/{num_heads} heads per layer (calib{'+' if per_layer_removed else ''}magnitude-based).")
+                print(f"[Engine] Applying STRUCTURAL head pruning: removing {k}/{num_heads} heads per layer (calib/magnitude-based).")
                 self.structured_head.prune(per_layer_removed)
             else:
-                # Functional masking with calibration-aware or magnitude-based importance per layer
+                # Functional masking with calibration-aware or magnitude-based importance (GQA-safe)
                 per_layer_removed = {}
                 for i, layer in enumerate(layers):
                     attn = getattr(layer, "self_attn", None)
@@ -128,7 +144,10 @@ class RealModelEngine:
                         scores = self.head_importance[i]
                         removed = torch.topk(scores, k, largest=False).indices.tolist()
                     else:
-                        q, kproj, v, o = getattr(attn, 'q_proj', None), getattr(attn, 'k_proj', None), getattr(attn, 'v_proj', None), getattr(attn, 'o_proj', None)
+                        q = getattr(attn, 'q_proj', None)
+                        kproj = getattr(attn, 'k_proj', None)
+                        v = getattr(attn, 'v_proj', None)
+                        o = getattr(attn, 'o_proj', None)
                         if any(m is None for m in [q, kproj, v, o]):
                             continue
                         try:
@@ -138,11 +157,19 @@ class RealModelEngine:
                         with torch.no_grad():
                             def head_scores_linear(m: torch.nn.Linear):
                                 W = m.weight.view(num_heads, head_dim, -1)
-                                return torch.linalg.vector_norm(W, ord=2, dim=(1,2))
+                                return torch.linalg.vector_norm(W, ord=2, dim=(1, 2))
+                            def safe_scores(m: torch.nn.Linear):
+                                try:
+                                    return head_scores_linear(m)
+                                except Exception:
+                                    return None
                             s_q = head_scores_linear(q)
-                            s_k = head_scores_linear(kproj)
-                            s_v = head_scores_linear(v)
-                            scores = s_q + s_k + s_v
+                            s_k = safe_scores(kproj)
+                            s_v = safe_scores(v)
+                            if s_k is not None and s_v is not None and s_k.shape[0] == s_q.shape[0] and s_v.shape[0] == s_q.shape[0]:
+                                scores = s_q + s_k + s_v
+                            else:
+                                scores = s_q
                             removed = torch.topk(scores, k, largest=False).indices.tolist()
                     per_layer_removed[i] = removed
                 print(f"[Engine] Applying head mask (calib-aware): pruning {k}/{num_heads} heads per layer (functional).")
@@ -219,8 +246,20 @@ class RealModelEngine:
             # Cap skipping to at most 12.5% of layers to avoid catastrophic degradation (e.g., <=2 of 16)
             k = min(k, max(1, L // 8))
             k = min(k, L)
-            to_skip = list(range(L - k, L))
-            print(f"[Engine] Skipping {k}/{L} transformer layers (scaffold).")
+            # Select least-important layers from calibrated scores (exclude first/last)
+            allowed = [i for i in range(L) if i not in (0, L-1)]
+            if isinstance(self.layer_importance, list) and len(self.layer_importance) == L and any(isinstance(v, (int, float)) for v in self.layer_importance):
+                scores = sorted([(i, float(self.layer_importance[i])) for i in allowed], key=lambda x: x[1])
+                to_skip = [i for i, _ in scores[:k]] if scores else []
+                if len(to_skip) < k:
+                    # Fallback to trailing layers if insufficient
+                    fallback = [i for i in range(L - k, L) if i in allowed and i not in to_skip]
+                    to_skip = (to_skip + fallback)[:k]
+                print(f"[Engine] Skipping {k}/{L} least-important layers: {to_skip}")
+            else:
+                # Fallback: skip last-k
+                to_skip = [i for i in range(L - k, L) if i in allowed]
+                print(f"[Engine] Skipping {len(to_skip)}/{L} trailing layers (no layer importance available): {to_skip}")
             self.layer_skipper.apply(to_skip)
         elif target == "kv_cache" and intensity > 0.0:
             self.kv_pruner.apply_prune(intensity)
@@ -252,6 +291,9 @@ class RealModelEngine:
         ffn_acc = {}
         hooks = []
         total_tokens = 0
+        # Layer-wise accumulators
+        layer_sums = {}
+        layer_counts = {}
 
         # Infer num_heads and inter_size
         try:
@@ -320,6 +362,28 @@ class RealModelEngine:
                     return pre_hook
                 hooks.append(mlp.down_proj.register_forward_pre_hook(make_ffn_hook(i)))
 
+        # Layer output importance via forward hooks (avg |activation| per token)
+        for i, layer in enumerate(layers):
+            layer_sums[i] = 0.0
+            layer_counts[i] = 0
+            def make_layer_hook(idx):
+                def fwd_hook(module, inputs, output):
+                    try:
+                        hs = output[0] if isinstance(output, (tuple, list)) else output
+                        if hs is None:
+                            return
+                        if hasattr(hs, 'dim') and hs.dim() >= 1:
+                            if hs.dim() == 3:
+                                B, T, _ = hs.shape
+                                layer_counts[idx] += (B * T)
+                            else:
+                                layer_counts[idx] += hs.shape[0] if hs.dim() > 0 else 1
+                            layer_sums[idx] += hs.detach().abs().sum().item()
+                    except Exception:
+                        pass
+                return fwd_hook
+            hooks.append(layer.register_forward_hook(make_layer_hook(i)))
+
         # Run calibration forward passes
         used = 0
         self.model.eval()
@@ -344,12 +408,36 @@ class RealModelEngine:
             self.head_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in head_acc.items()}
         if used > 0 and inter_size is not None:
             self.ffn_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in ffn_acc.items()}
-        print(f"[Calib] Completed on {used} samples. Head importances: {len(self.head_importance)} layers, FFN importances: {len(self.ffn_importance)} layers.")
+        # Layer importance: average abs activation per token per layer
+        if used > 0 and layers:
+            L = len(layers)
+            self.layer_importance = []
+            for i in range(L):
+                s = float(layer_sums.get(i, 0.0))
+                c = float(layer_counts.get(i, 0))
+                self.layer_importance.append(s / max(1.0, c))
+        print(f"[Calib] Completed on {used} samples. Head importances: {len(self.head_importance)} layers, FFN importances: {len(self.ffn_importance)} layers, Layer importances: {len(self.layer_importance)}.")
 
     def generate_response(self, prompt: str, max_length: int = 50) -> str:
         effective_max = self.kv_pruner.get_effective_max_length(max_length)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        outputs = self.model.generate(**inputs, max_new_tokens=effective_max, pad_token_id=self.tokenizer.eos_token_id)
+        # Enforce fixed-length generation for fair throughput/ppl comparisons.
+{{ ... }}
+        try:
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=effective_max,
+                min_new_tokens=effective_max,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+        except TypeError:
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=effective_max,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
         return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
     def save_pretrained(self, out_dir: str) -> None:

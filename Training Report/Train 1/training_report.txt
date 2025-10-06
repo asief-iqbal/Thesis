@@ -1,0 +1,27 @@
+Training Report
+Episodes: 1226
+Overall Avg Time: 1180.00ms
+Overall Avg PPL: 15.49
+
+Averages by Prune Type and Intensity:
+  attention_heads 0.5: Avg Time 1074.90ms, Avg PPL 65.10 (47 samples)
+  ffn_neurons 0.2: Avg Time 1615.13ms, Avg PPL 6.33 (51 samples)
+  kv_cache 0.2: Avg Time 991.53ms, Avg PPL 6.96 (60 samples)
+  transformer_layers 0.3: Avg Time 1136.42ms, Avg PPL 11.77 (67 samples)
+  transformer_layers 0.4: Avg Time 1139.96ms, Avg PPL 12.39 (67 samples)
+  ffn_neurons 0.3: Avg Time 1620.43ms, Avg PPL 6.76 (57 samples)
+  transformer_layers 0.1: Avg Time 1139.12ms, Avg PPL 13.22 (49 samples)
+  attention_heads 0.1: Avg Time 1203.69ms, Avg PPL 6.54 (39 samples)
+  kv_cache 0.3: Avg Time 852.02ms, Avg PPL 9.36 (49 samples)
+  ffn_neurons 0.1: Avg Time 1595.09ms, Avg PPL 6.23 (60 samples)
+  none 0.0: Avg Time 1245.50ms, Avg PPL 5.36 (62 samples)
+  attention_heads 0.2: Avg Time 1192.03ms, Avg PPL 24.89 (54 samples)
+  kv_cache 0.4: Avg Time 735.74ms, Avg PPL 10.42 (61 samples)
+  transformer_layers 0.5: Avg Time 1138.88ms, Avg PPL 12.17 (60 samples)
+  ffn_neurons 0.4: Avg Time 1580.42ms, Avg PPL 6.09 (60 samples)
+  attention_heads 0.3: Avg Time 993.17ms, Avg PPL 45.20 (74 samples)
+  kv_cache 0.5: Avg Time 619.17ms, Avg PPL 13.62 (59 samples)
+  kv_cache 0.1: Avg Time 1117.47ms, Avg PPL 6.30 (67 samples)
+  ffn_neurons 0.5: Avg Time 1598.64ms, Avg PPL 6.73 (62 samples)
+  transformer_layers 0.2: Avg Time 1139.76ms, Avg PPL 13.14 (62 samples)
+  attention_heads 0.4: Avg Time 1099.96ms, Avg PPL 37.97 (59 samples)

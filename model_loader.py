@@ -308,12 +308,13 @@ class RealModelEngine:
                         if not inputs or inputs[0] is None:
                             return inputs
                         x = inputs[0]  # [..., inter_size]
-                        B, T, C = x.shape if x.dim() == 3 else (1, x.shape[0], x.shape[-1])
-                        total_tokens += (B*T)
-                        vals = x.abs().sum(dim=0).sum(dim=0) if x.dim()==3 else x.abs().sum(dim=0)
-                        # if 3D: sum over batch and time to [C]
-                        if x.dim()==3:
-                            vals = x.abs().sum(dim=(0,1))
+                        if x.dim() == 3:
+                            B, T, C = x.shape
+                            total_tokens += (B * T)
+                            vals = x.abs().sum(dim=(0, 1))  # -> [C]
+                        else:
+                            total_tokens += x.shape[0] if x.dim() > 0 else 1
+                            vals = x.abs().sum(dim=0)
                         ffn_acc[idx][:] += vals.to(ffn_acc[idx].device)
                         return inputs
                     return pre_hook

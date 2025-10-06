@@ -316,8 +316,8 @@ class RealBenchmark:
         speed_bonus = tokens_per_sec
         accuracy_penalty = perplexity / 10.0
         reward = (0.6 * speed_bonus) - (0.4 * accuracy_penalty)
-        # Note: this prints absolute reward (training uses relative reward elsewhere)
-        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> AbsReward: {reward:.3f}")
+        # Note: this prints the absolute reward (training uses relative reward elsewhere)
+        print(f"[Benchmark] Time: {inference_time_ms:.2f}ms, GenTokens: {gen_token_count}, Tok/s: {tokens_per_sec:.2f}, PPL: {perplexity:.2f} -> Reward: {reward:.3f}")
         if return_metrics:
             return reward, { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count }
         return reward
@@ -572,13 +572,10 @@ def organize_training_reports(is_report_mode: bool = False):
     if not is_report_mode:
         files_to_move.append('training_metrics.json')
     
-    moved_json = False
     for file in files_to_move:
         if os.path.exists(file):
             shutil.move(file, os.path.join(train_path, file))
             print(f"[Organize] Moved {file} to {train_path}")
-            if file == 'training_metrics.json':
-                moved_json = True
         else:
             print(f"[Organize] Warning: {file} not found, skipping")
     
@@ -666,7 +663,10 @@ def main(num_episodes: int = 50,
     validation_text = "The field of artificial intelligence has seen rapid advancements."
     # Load a proper training prompt pool from the specified dataset
     prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
-    num_episodes = len(prompt_pool)  # Train on every prompt in the pool
+    # Honor CLI episodes: cap to requested number
+    limit = min(num_episodes, len(prompt_pool))
+    prompt_pool = prompt_pool[:limit]
+    num_episodes = limit
 
     # Calibrate importance scores for heads/FFN using a small subset
     try:
@@ -711,7 +711,8 @@ def main(num_episodes: int = 50,
 
         # Compute relative reward: alpha * (pruned_tok_s / base_tok_s) + beta * (base_ppl / pruned_ppl)
         alpha, beta = 0.6, 0.4
-        relative_reward = alpha * (pruned_metrics['tok_s'] / base_metrics['tok_s']) + beta * (base_metrics['perplexity'] / pruned_metrics['perplexity'])
+        eps = 1e-8
+        relative_reward = alpha * (pruned_metrics['tok_s'] / (base_metrics['tok_s'] + eps)) + beta * ((base_metrics['perplexity'] + eps) / (pruned_metrics['perplexity'] + eps))
 
         # Track effective layer-skip intensity (post-cap) for fair analysis
         effective_intensity = pruning_action.intensity

@@ -48,6 +48,20 @@ class NlpPromptAnalyzer:
     def _safe_div(a: float, b: float) -> float:
         return a / b if b else 0.0
 
+    def _safe_word_tokenize(self, text: str) -> List[str]:
+        try:
+            return nltk.word_tokenize(text)
+        except Exception:
+            # Fallback: simple whitespace split
+            return text.split()
+
+    def _safe_pos_tag(self, words: List[str]) -> List[tuple]:
+        try:
+            return nltk.pos_tag(words)
+        except Exception:
+            # Fallback: naive noun tagging
+            return [(w, 'NN') for w in words]
+
     def get_feature_vector(self, prompt_text: str) -> List[float]:
         """
         Return a normalized feature vector capturing prompt complexity signals.
@@ -61,9 +75,9 @@ class NlpPromptAnalyzer:
         - dep_span_norm: max dependency span (token-head distance) / 20
         - complexity_score: weighted sum of key normalized features
         """
-        # Basic tokenization using NLTK
-        words = nltk.word_tokenize(prompt_text)
-        pos_tags = nltk.pos_tag(words) if words else []
+        # Basic tokenization using NLTK with safe fallbacks
+        words = self._safe_word_tokenize(prompt_text)
+        pos_tags = self._safe_pos_tag(words) if words else []
         verb_count = sum(1 for _, tag in pos_tags if tag.startswith('V'))
         interrogative_count = sum(1 for _, tag in pos_tags if tag in ['WDT', 'WP', 'WP$', 'WRB']) + prompt_text.count('?')
 
@@ -115,9 +129,9 @@ class NlpPromptAnalyzer:
 
     def analyze_complexity(self, prompt_text: str) -> PromptComplexityMetrics:
         features = self.get_feature_vector(prompt_text)
-        # Recover raw counts for logging
-        words = nltk.word_tokenize(prompt_text)
-        pos_tags = nltk.pos_tag(words) if words else []
+        # Recover raw counts for logging (safe fallbacks)
+        words = self._safe_word_tokenize(prompt_text)
+        pos_tags = self._safe_pos_tag(words) if words else []
         verb_count = sum(1 for _, tag in pos_tags if tag.startswith('V'))
         interrogative_count = sum(1 for _, tag in pos_tags if tag in ['WDT', 'WP', 'WP$', 'WRB']) + prompt_text.count('?')
         token_count = len(self.tokenizer.encode(prompt_text))

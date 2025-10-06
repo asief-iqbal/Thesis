@@ -45,6 +45,8 @@ The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner
 - **Multi-Level Pruning**: Attention heads (GQA-safe), FFN channels, transformer layers, and sliding-window KV pruning.
 - **Prompt-Centric Complexity**: Uses token length + model perplexity; no external NLP required.
 - **Dataset Flexibility**: Automatic 80/20 splits for custom CSV datasets; standardized evaluation tooling.
+- **Organized Reporting**: Training results automatically organized into numbered folders (Train 1, Train 2, etc.) under "Training Report".
+- **Improved Reward Function**: Correctly rewards speed gains and perplexity reductions.
 
 ## Features
 
@@ -55,10 +57,11 @@ The system is designed for A*-level research, comparing to SparseGPT, LLM-Pruner
   - Structural slicing (rebuilds Linear layers for speedups, GQA-safe head pruning).
   - Runtime KV cache pruning (sliding window on past_key_values).
 - **Benchmarks**: WikiText-2 perplexity, lm-eval-harness tasks, latency/actual tokens/sec metrics.
-- **Modes**: Separate train/test CLI modes with checkpointing.
+- **Modes**: Separate train/test/report CLI modes with checkpointing.
+- **Organized Reports**: Training outputs automatically organized into "Training Report/Train N" folders for each run.
 - **Safety**: Reversible pruning, no permanent model damage.
 - **Local Everything**: All caches, models, datasets stored in project folder.
-- **Detailed Logging & Plots**: Per-episode baseline vs pruned metrics printed and saved; comparative scatter plots (token speed, inference time, perplexity) with trendlines; correlation plot (token length vs prompt PPL).
+- **Detailed Logging & Plots**: Per-episode baseline vs pruned metrics printed and saved; comparative scatter plots (token speed, inference time, perplexity) with trendlines; correlation plot (token length vs prompt PPL); pruning summary with average time and PPL subplots.
 ## Installation
 
 ### 1. Clone Repository
@@ -157,7 +160,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ## Architecture
 
 ### Core Components
-- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 0.6 * (pruned_tok_s / base_tok_s) - 0.4 * (pruned_ppl / base_ppl) (relative to baseline).
+- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 0.6 * (pruned_tok_s / base_tok_s) + 0.4 * (base_ppl / pruned_ppl) (relative to baseline).
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
 - **Calibration System**: Pre-training activation statistics for head/FFN importance.
@@ -203,12 +206,14 @@ RL-driven with prompt-centric complexity; pruning includes activation-aware head
   - `kv_cache_pruner.py` (runtime KV cache size reduction).
 - `.env`: Config (HF token, pruning mode).
 - `checkpoints/`: RL policy files.
+- `Training Report/`: Organized training results in numbered subfolders (Train 1, Train 2, etc.).
 - `training_report.txt`: Post-training report.
 - `training_metrics.json`: Detailed per-episode metrics.
 - `token_speed_compare.png`: Baseline vs pruned token speed plot.
 - `inference_time_compare.png`: Baseline vs pruned inference time plot.
 - `perplexity_compare.png`: Baseline vs pruned perplexity plot.
 - `length_vs_ppl.png`: Token length vs prompt perplexity correlation.
+- `pruning_summary.png`: Average time and PPL per pruning action subplots.
 
 ## Benchmarks
 
@@ -316,7 +321,7 @@ Actions: `none`, `kv_cache`, `attention_heads`, `ffn_neurons`, `transformer_laye
 - **Performance Metrics**:
   - Inference time (ms): Time to generate response.
   - Tokens/sec: generated_tokens / inference_time (uses actual generated length).
-- **Reward (for training)**: alpha * (pruned_tok_s / base_tok_s) - beta * (pruned_ppl / base_ppl), with alpha=0.6, beta=0.4. Balances relative speed gain vs accuracy loss.
+- **Reward (for training)**: alpha * (pruned_tok_s / base_tok_s) + beta * (base_ppl / pruned_ppl), with alpha=0.6, beta=0.4. Balances relative speed gain vs accuracy improvement.
 
 ### 7. Model Restoration
 - Restore all pruners to original state for next prompt.

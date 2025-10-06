@@ -430,25 +430,39 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
         avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
         print(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)")
 
-    # Pruning Summary Bar Chart
+    # Pruning Summary: Two separate plots for Avg Time and Avg PPL
     import numpy as np
     action_labels = [f"{target} {intensity}" for (target, intensity), _ in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
     avg_times = [sum(m['time_ms'] for m in ms) / len(ms) for _, ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
     avg_ppls = [sum(m['ppl'] for m in ms) / len(ms) for _, ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
     x = np.arange(len(action_labels))
-    plt.figure(figsize=(15, 8))
-    bar_width = 0.35
-    plt.bar(x - bar_width/2, avg_times, bar_width, label='Avg Time (ms)', color='skyblue')
-    plt.bar(x + bar_width/2, avg_ppls, bar_width, label='Avg PPL', color='salmon')
-    plt.xlabel('Pruning Action')
-    plt.ylabel('Value')
-    plt.title('Pruning Summary: Average Time and PPL per Action')
-    plt.xticks(x, action_labels, rotation=45, ha='right')
-    plt.legend()
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12))
+    
+    # Plot for Avg Time
+    ax1.bar(x, avg_times, color='skyblue', alpha=0.8, width=0.6)
+    ax1.set_title('Average Inference Time per Pruning Action', fontsize=16, fontweight='bold')
+    ax1.set_xlabel('Pruning Action', fontsize=12)
+    ax1.set_ylabel('Average Time (ms)', fontsize=12)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(action_labels, rotation=45, ha='right', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim(bottom=0)
+    
+    # Plot for Avg PPL
+    ax2.bar(x, avg_ppls, color='salmon', alpha=0.8, width=0.6)
+    ax2.set_title('Average Perplexity per Pruning Action', fontsize=16, fontweight='bold')
+    ax2.set_xlabel('Pruning Action', fontsize=12)
+    ax2.set_ylabel('Average PPL', fontsize=12)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(action_labels, rotation=45, ha='right', fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(bottom=0)
+    
     plt.tight_layout()
-    plt.savefig('pruning_summary.png')
+    plt.savefig('pruning_summary.png', dpi=300, bbox_inches='tight')
     plt.close()
-    print("[Report] Pruning summary bar chart saved to pruning_summary.png")
+    print("[Report] Pruning summary plots saved to pruning_summary.png")
 
 
     episodes = [m['episode'] for m in metrics_list]
@@ -523,6 +537,52 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
             avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
             f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
     print("[Report] Report saved to training_report.txt")
+def organize_training_reports(is_report_mode: bool = False):
+    """Organize training reports into numbered subfolders under 'Training Report'."""
+    import os
+    import shutil
+    import re
+    
+    # Create Training Report folder if not exists
+    report_dir = 'Training Report'
+    if not os.path.exists(report_dir):
+        os.makedirs(report_dir)
+        print(f"[Organize] Created directory: {report_dir}")
+    
+    # Find existing Train folders and determine next number
+    subfolders = [f for f in os.listdir(report_dir) if os.path.isdir(os.path.join(report_dir, f)) and re.match(r'Train \d+', f)]
+    numbers = [int(re.search(r'\d+', f).group()) for f in subfolders if re.search(r'\d+', f)]
+    next_num = max(numbers) + 1 if numbers else 1
+    train_folder = f'Train {next_num}'
+    train_path = os.path.join(report_dir, train_folder)
+    os.makedirs(train_path)
+    print(f"[Organize] Created subfolder: {train_path}")
+    
+    # Files to move
+    files_to_move = [
+        'inference_time_compare.png',
+        'inference_time.png',
+        'length_vs_ppl.png',
+        'perplexity_compare.png',
+        'perplexity.png',
+        'pruning_summary.png',
+        'token_speed_compare.png',
+        'training_report.txt'
+    ]
+    if not is_report_mode:
+        files_to_move.append('training_metrics.json')
+    
+    moved_json = False
+    for file in files_to_move:
+        if os.path.exists(file):
+            shutil.move(file, os.path.join(train_path, file))
+            print(f"[Organize] Moved {file} to {train_path}")
+            if file == 'training_metrics.json':
+                moved_json = True
+        else:
+            print(f"[Organize] Warning: {file} not found, skipping")
+    
+    print(f"[Organize] Training reports organized into {train_path}")
 def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
     """Load a proper prompt dataset to train the RL controller.
     Supported: 'databricks/databricks-dolly-15k', 'tatsu-lab/alpaca', CSV files with 80/20 split, fallback to WikiText-2.
@@ -649,9 +709,9 @@ def main(num_episodes: int = 50,
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
-        # Compute relative reward: alpha * (pruned_tok_s / base_tok_s) - beta * (pruned_ppl / base_ppl)
+        # Compute relative reward: alpha * (pruned_tok_s / base_tok_s) + beta * (base_ppl / pruned_ppl)
         alpha, beta = 0.6, 0.4
-        relative_reward = alpha * (pruned_metrics['tok_s'] / base_metrics['tok_s']) - beta * (pruned_metrics['perplexity'] / base_metrics['perplexity'])
+        relative_reward = alpha * (pruned_metrics['tok_s'] / base_metrics['tok_s']) + beta * (base_metrics['perplexity'] / pruned_metrics['perplexity'])
 
         # Track effective layer-skip intensity (post-cap) for fair analysis
         effective_intensity = pruning_action.intensity
@@ -701,9 +761,8 @@ def main(num_episodes: int = 50,
     with open('training_metrics.json', 'w') as f:
         json.dump(metrics_list, f)
     
-    if checkpoint_path:
-        rl_agent.save(checkpoint_path)
-    return rl_agent
+    # Organize training reports into folders
+    organize_training_reports()
 
 def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, dataset_name: str = None):
     """Test the trained RL agent on new prompts without training."""
@@ -839,6 +898,8 @@ if __name__ == "__main__":
             metrics_list = json.load(f)
         generate_report(metrics_list)
         generate_comparative_plots(metrics_list)
+        # Organize training reports into folders
+        organize_training_reports(is_report_mode=True)
     else:
         engine = RealModelEngine()
         agent = RLControllerAgent(engine.tokenizer)

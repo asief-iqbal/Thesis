@@ -1498,37 +1498,4 @@ Passenger: 'I need to change my flight.' Airline Representative: 'I can assist w
 What are the main functions of the human skeleton?,Knowledge,Biology,No
 Write a short script for a commercial advertising a fictional product.,Creative,Business,No
 Read the attached two descriptions of the same historical event from different perspectives and identify three key differences in their accounts.,Reading,History,Yes
-Write a function in Scala to compute the n-th Fibonacci number.,Programming,Computer Science,No
-What is the Coriolis effect and how does it affect weather patterns?,Knowledge,Geography,No
-Compose a short poem that does not use the letter 'e'.,Creative,Literature,No
-"If it takes 4 hours for 3 printers to print 100 posters, how long would it take for 6 printers to print 100 posters?",Math,Arithmetic,No
-Provide a list of do's and don'ts for a professional job interview.,Instruction,Business,No
-Online Shopper: 'What is your return policy?' Chatbot: 'We accept returns within 30 days of purchase with a valid receipt. Would you like me to read the full details?',Dialogue,Business,No
-What is the process of fossilization?,Knowledge,Geology,No
-"Write a regular expression to validate a standard 10-digit phone number format (e.g., XXX-XXX-XXXX).",Programming,Computer Science,No
-"Write a short, funny story about a misunderstanding caused by a single typo in a text message.",Creative,Daily Life,No
-"Based on the attached nutrition labels for two different cereals, which one is the healthier option? Justify your choice.",Reading,Daily Life,Yes
-What is the purpose of sleep for the human body?,Knowledge,Biology,No
-"You have two ropes that each take exactly one hour to burn from end to end, but they do not burn at a uniform rate. How can you measure exactly 45 minutes?",Commonsense,Daily Life,No
-"Write a critical review of a movie you have recently seen, focusing on its plot, acting, and cinematography.",Creative,Literature,No
-What is the difference between nuclear fission and nuclear fusion?,Knowledge,Physics,No
-"Find the area of a trapezoid with bases of length 10 and 12, and a height of 5.",Math,Geometry,No
-Write a step-by-step guide on how to safely back up your computer's data.,Instruction,Computer Science,No
-Librarian: 'What genre do you enjoy?' Reader: 'I like science fiction.',Dialogue,Literature,Yes
-What are the main branches of the United States government and what are their primary roles?,Knowledge,History,No
-Write a short story set in a world where gravity works differently.,Creative,Physics,No
-Read the attached scientific study and identify its limitations.,Reading,Research Methods,Yes
-Write a function in Haskell that finds the last element of a list.,Programming,Computer Science,No
-Explain the importance of biodiversity in an ecosystem.,Knowledge,Environment,No
-Create a character sketch of a modern-day Sherlock Holmes.,Creative,Literature,No
-"If you are in a race and you overtake the person in second place, what position are you in now?",Commonsense,Daily Life,No
-"Write a brief, persuasive speech arguing for or against a four-day work week.",Instruction,Business,No
-What is the difference between TCP and UDP?,Knowledge,Computer Science,No
-Client: 'My order arrived damaged.' Customer Service: 'I'm very sorry to hear that. Could you please send a photo of the damage so I can arrange for a replacement or a refund?',Dialogue,Business,Yes
-"Write a short, emotional story about saying goodbye.",Creative,Daily Life,No
-Calculate the final price of a $50 item after a 15% discount.,Math,Arithmetic,No
-"Based on the attached map, plan the most efficient walking route to visit three specific landmarks.",Reading,Geography,Yes
-Write a JavaScript program that dynamically creates a table on a webpage based on a given set of data.,Programming,Computer Science,No
-What is the placebo effect?,Knowledge,Research Methods,No
-Write a poem from the perspective of the moon.,Creative,Astronomy,No
-What is the difference between a continent and a country?,Knowledge,Geography,No
+How many people lost their lives in WWII?,Knowledge,History,Yes

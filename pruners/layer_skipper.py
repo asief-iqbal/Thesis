@@ -25,22 +25,25 @@ class LayerSkipper:
             layer = layers[idx]
             if idx not in self.original_forwards:
                 self.original_forwards[idx] = layer.forward
-            def identity_forward(hidden_states, *args, **kwargs):
-                # Preserve interface expected by HF models
-                use_cache = kwargs.get('use_cache', False)
-                return_dict = kwargs.get('return_dict', True)
-                if return_dict:
-                    return BaseModelOutputWithPast(
-                        last_hidden_state=hidden_states,
-                        past_key_values=None,
-                        hidden_states=None,
-                        attentions=None,
-                    )
-                else:
-                    outputs = (hidden_states,)
-                    if use_cache:
-                        outputs += (None,)
-                    return outputs
+            def identity_forward(
+                hidden_states,
+                attention_mask=None,
+                position_ids=None,
+                past_key_value=None,
+                output_attentions=False,
+                use_cache=False,
+                **kwargs,
+            ):
+                """Return HF-compatible outputs for a skipped layer.
+                Mirrors LlamaDecoderLayer return structure depending on flags.
+                """
+                if output_attentions and use_cache:
+                    return hidden_states, None, past_key_value
+                if use_cache:
+                    return hidden_states, past_key_value
+                if output_attentions:
+                    return hidden_states, None
+                return hidden_states
             layer.forward = identity_forward
             self.active_layers.add(idx)
 

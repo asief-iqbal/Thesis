@@ -1,4 +1,5 @@
 import os
+import shutil
 import torch
 import copy
 os.environ['HF_HOME'] = 'd:\\LLM Research\\hf_cache'
@@ -50,15 +51,29 @@ class RealModelEngine:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         print(f"[Engine] Llama 3.2 1B model loaded to {self.model.device}.")
+        # Ensure inference-optimized defaults
+        try:
+            self.model.eval()
+            if hasattr(self.model, 'config'):
+                setattr(self.model.config, 'use_cache', True)
+            if hasattr(self.model, 'generation_config'):
+                setattr(self.model.generation_config, 'use_cache', True)
+        except Exception:
+            pass
 
         # Capabilities
-        self.enable_static_profiles = bool(enable_static_profiles)
+        # Force-disable static profiles to avoid model reloads and torch.compile cache invalidations
+        # regardless of incoming flag.
+        self.enable_static_profiles = False
         self.enable_2to4 = bool(enable_2to4)
         self.enable_compile = bool(enable_compile)
         self.profiles_dir = os.path.join(os.getcwd(), 'profiles')
         self.active_profile_key = None
         if self.enable_static_profiles:
-            os.makedirs(self.profiles_dir, exist_ok=True)
+            print("[Profiles] Static profile caching ENABLED: using prebuilt pruned models for fast inference.")
+            # Only compile the base model when using static profiles; dynamic structural changes during training
+            # can invalidate compiled graphs and cause slowdowns.
+            self.model = self._maybe_compile_model(self.model)
         # KV-cache compression flags (Phase D, scaffold)
         self.enable_kv_compression = bool(enable_kv_compression)
         self.kv_keep_ratio = float(kv_keep_ratio)
@@ -123,7 +138,9 @@ class RealModelEngine:
 
     def _build_profile_model(self, action) -> AutoModelForCausalLM:
         # Fresh model instance to apply structural pruning and persist as a profile
-        new_model = AutoModelForCausalLM.from_pretrained(self.model_name, device_map=self.device_map)
+        # Load on CPU to avoid meta tensors for saving
+        new_model = AutoModelForCausalLM.from_pretrained(self.model_name, device_map=None)
+        new_model = new_model.to('cpu')  # Ensure all tensors are on CPU, no meta
         target = getattr(action, "target", "none")
         intensity = float(getattr(action, "intensity", 0.0) or 0.0)
         if target == 'none' or intensity <= 0.0:
@@ -167,7 +184,12 @@ class RealModelEngine:
             if not layers:
                 return new_model
             inter_size = getattr(layers[0].mlp.down_proj, 'weight', None).shape[1]
-            k = max(1, int(round(inter_size * intensity)))
+            # Compute removal to produce a hardware-friendly new intermediate size
+            multiple = 128
+            target_size = int(round(inter_size * (1.0 - intensity)))
+            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
+            new_inter = min(inter_size - 1, new_inter)
+            k = max(1, inter_size - new_inter)
             per_layer_removed = {}
             for i, _layer in enumerate(layers):
                 if i in self.ffn_importance:
@@ -188,7 +210,8 @@ class RealModelEngine:
 
         # Optional 2:4 packing and compile
         self._try_enable_2to4_on_model(new_model)
-        new_model = self._maybe_compile_model(new_model)
+        # Skip compile for profiles to avoid saving issues
+        # new_model = self._maybe_compile_model(new_model)
 
         # Phase C: lightweight reconstruction via per-layer gain correction using calibration prompts
         try:
@@ -223,16 +246,33 @@ class RealModelEngine:
         if not getattr(self, 'enable_static_profiles', False):
             return
         d = os.path.join(self.profiles_dir, key)
-        if not os.path.exists(d):
+
+        def build_profile():
             print(f"[Profiles] Building profile '{key}'...")
+            if os.path.exists(d):
+                shutil.rmtree(d)
             new_model = self._build_profile_model(action)
             os.makedirs(d, exist_ok=True)
             new_model.save_pretrained(d)
             self.tokenizer.save_pretrained(d)
+
+        required_files = ["pytorch_model.bin", "model.safetensors"]
+        needs_build = False
+        if not os.path.exists(d):
+            needs_build = True
+        else:
+            if not any(os.path.exists(os.path.join(d, fname)) for fname in required_files):
+                needs_build = True
+        if needs_build:
+            build_profile()
         else:
             print(f"[Profiles] Loading cached profile '{key}'...")
+
         loaded = AutoModelForCausalLM.from_pretrained(d, device_map=self.device_map)
         self.model = loaded
+        # Enable accelerations on the loaded profile
+        self._try_enable_2to4_on_model(self.model)
+        self.model = self._maybe_compile_model(self.model)
         self._rebuild_pruners()
         self.active_profile_key = key
 
@@ -257,10 +297,9 @@ class RealModelEngine:
             # Correct GQA logic: Determine how many KV heads (and their corresponding Q head groups) to remove.
             heads_per_group = num_heads // num_kv_heads
             groups_to_remove_count = int(round(intensity * num_kv_heads))
-            
-            if groups_to_remove_count == 0:
-                print(f"[Engine] Intensity {intensity} is too low to prune any head groups. No-op.")
-                return
+            # Ensure at least one KV group is removed when intensity > 0 to realize an effect
+            if groups_to_remove_count <= 0 and intensity > 0.0:
+                groups_to_remove_count = 1
             per_layer_removed_q = {}
             per_layer_removed_kv = {}
             for i, layer in enumerate(layers):
@@ -289,7 +328,12 @@ class RealModelEngine:
                 print("[Engine] No layers found; cannot apply FFN pruning.")
                 return
             inter_size = layers[0].mlp.down_proj.weight.shape[1]
-            k = max(1, int(round(inter_size * intensity)))
+            # Compute removal to produce a hardware-friendly new intermediate size
+            multiple = 128
+            target_size = int(round(inter_size * (1.0 - intensity)))
+            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
+            new_inter = min(inter_size - 1, new_inter)
+            k = max(1, inter_size - new_inter)
             per_layer_removed = {}
             for i, layer in enumerate(layers):
                 if i in self.ffn_importance:
@@ -523,22 +567,42 @@ class RealModelEngine:
 
     def generate_response(self, prompt: str, max_length: int = 50) -> str:
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        input_len = inputs.input_ids.shape[1]
         # Enforce fixed-length generation for fair throughput/ppl comparisons.
         try:
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_length,
-                min_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    min_length=input_len + max_length,
+                    do_sample=False,
+                    use_cache=True,
+                    eos_token_id=None,  # avoid early stop on EOS
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
         except TypeError:
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
+            # Fallback if min_length unsupported: rely on min_new_tokens and disabling EOS
+            try:
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_length,
+                        min_new_tokens=max_length,
+                        do_sample=False,
+                        use_cache=True,
+                        eos_token_id=None,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+            except TypeError:
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_length,
+                        do_sample=False,
+                        use_cache=True,
+                        eos_token_id=None,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
         return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
     def generate_with_inputs(self, inputs, max_length: int = 50):
@@ -546,21 +610,41 @@ class RealModelEngine:
         if self.enable_kv_compression and self.kv_keep_ratio < 0.999 and not self._kv_warned:
             print("[KV] KV-cache compression scaffold enabled (no-op placeholder).")
             self._kv_warned = True
+        input_len = inputs["input_ids"].shape[1] if "input_ids" in inputs else None
         try:
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_length,
-                min_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    min_length=(input_len + max_length) if input_len is not None else None,
+                    do_sample=False,
+                    use_cache=True,
+                    eos_token_id=None,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                )
         except TypeError:
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
+            # Fallbacks for older versions
+            try:
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_length,
+                        min_new_tokens=max_length,
+                        do_sample=False,
+                        use_cache=True,
+                        eos_token_id=None,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+            except TypeError:
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=max_length,
+                        do_sample=False,
+                        use_cache=True,
+                        eos_token_id=None,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
         return outputs
 
     def save_pretrained(self, out_dir: str) -> None:

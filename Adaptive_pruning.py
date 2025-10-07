@@ -112,25 +112,31 @@ class EnhancedDeviceMonitor:
             gpu_memory_free_gb=gpu_mem_free_gb,
             gpu_utilization=gpu_util
         )
-# =========================================================================
 
 @dataclass
 class PruningAction:
-    level: int; intensity: float; target: str; action_index: int
+    level: int
+    intensity: float
+    target: str
+    action_index: int
+
 class ActionSpace:
     """Defines all possible pruning actions: none, KV cache, heads, FFN, layers at various intensities."""
     def __init__(self):
-        # Phase A: remove layer skip; keep only none, attention_heads, ffn_neurons
+        # Include layer skipping alongside heads (layer skipping capped inside engine at <=12.5%)
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            # Attention heads (structural, GQA-safe): 10–30%
-            PruningAction(level=2, intensity=0.1, target="attention_heads", action_index=1),
-            PruningAction(level=2, intensity=0.2, target="attention_heads", action_index=2),
-            PruningAction(level=2, intensity=0.3, target="attention_heads", action_index=3),
-            # FFN channels (structural): 10–30%
-            PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=4),
-            PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=5),
-            PruningAction(level=2, intensity=0.3, target="ffn_neurons", action_index=6),
+            # Attention heads (structural, GQA-safe): 5–15%
+            PruningAction(level=2, intensity=0.05, target="attention_heads", action_index=1),
+            PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=2),
+            PruningAction(level=2, intensity=0.15, target="attention_heads", action_index=3),
+            # FFN channels (structural): 5–15%
+            PruningAction(level=2, intensity=0.05, target="ffn_neurons", action_index=4),
+            PruningAction(level=2, intensity=0.10, target="ffn_neurons", action_index=5),
+            PruningAction(level=2, intensity=0.15, target="ffn_neurons", action_index=6),
+            # Transformer layers (functional skipping): 5–10%
+            PruningAction(level=3, intensity=0.05, target="transformer_layers", action_index=7),
+            PruningAction(level=3, intensity=0.10, target="transformer_layers", action_index=8),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -193,9 +199,26 @@ class RLControllerAgent:
 
     def load(self, path: str):
         ckpt = torch.load(path, map_location='cpu')
-        self.policy_net.load_state_dict(ckpt['policy_state'])
+        # Load policy net with tolerance for action_dim changes (strict=False)
+        try:
+            self.policy_net.load_state_dict(ckpt['policy_state'], strict=False)
+        except Exception:
+            # Partial load: only keys with matching shapes
+            current = self.policy_net.state_dict()
+            for k, v in ckpt['policy_state'].items():
+                if k in current and current[k].shape == v.shape:
+                    current[k] = v
+            self.policy_net.load_state_dict(current, strict=False)
+        # Load target net similarly if present
         if 'target_state' in ckpt:
-            self.target_net.load_state_dict(ckpt['target_state'])
+            try:
+                self.target_net.load_state_dict(ckpt['target_state'], strict=False)
+            except Exception:
+                current_t = self.target_net.state_dict()
+                for k, v in ckpt['target_state'].items():
+                    if k in current_t and current_t[k].shape == v.shape:
+                        current_t[k] = v
+                self.target_net.load_state_dict(current_t, strict=False)
         if 'optimizer_state' in ckpt:
             try:
                 self.optimizer.load_state_dict(ckpt['optimizer_state'])
@@ -254,6 +277,9 @@ class RLControllerAgent:
 
         # Optimize if enough samples
         if len(self.replay_buffer) < self.batch_size:
+            # Epsilon decay even without training to encourage exploration
+            if self.epsilon > self.epsilon_min:
+                self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
             return
 
         batch = random.sample(self.replay_buffer, self.batch_size)
@@ -433,7 +459,7 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
     plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
 
-def generate_report(metrics_list: List[Dict[str, Any]]):
+def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = 'training_report.txt', header: str = 'Training Report'):
     """Generate post-training report with averages by prune type/intensity and plots."""
     if not metrics_list:
         print("[Report] No metrics to report.")
@@ -575,8 +601,8 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
     print("[Report] Perplexity plot saved to perplexity.png")
 
     # Save report to file
-    with open('training_report.txt', 'w') as f:
-        f.write("Training Report\n")
+    with open(report_filename, 'w') as f:
+        f.write(f"{header}\n")
         f.write(f"Episodes: {n}\n")
         f.write(f"Overall Avg Time: {total_time/n:.2f}ms\n")
         f.write(f"Overall Avg PPL: {total_ppl/n:.2f}\n\n")
@@ -585,7 +611,7 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
             avg_time = sum(m['time_ms'] for m in ms) / len(ms)
             avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
             f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
-    print("[Report] Report saved to training_report.txt")
+    print(f"[Report] Report saved to {report_filename}")
 def organize_training_reports(is_report_mode: bool = False):
     """Organize training reports into numbered subfolders under 'Training Report'."""
     import os
@@ -701,7 +727,7 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
          max_new_tokens: int = 50,
-         train_dataset: str = 'Prompt Dataset.csv',
+         train_dataset: str = 'Prompt Dataset Train.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
          split_type: str = 'train',
@@ -772,11 +798,12 @@ def main(num_episodes: int = 50,
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
-        # Reward: direct difference-based scaling per user specification
+        # Reward: balanced speed/quality with stability
         alpha, beta = 0.7, 0.3
+        eps = 1e-8
         relative_reward = (
-            alpha * (pruned_metrics['tok_s'] - base_metrics['tok_s']) / base_metrics['tok_s']
-            - beta * (pruned_metrics['perplexity'] - base_metrics['perplexity']) / base_metrics['perplexity']
+            alpha * (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
+            - beta * (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps)
         )
 
         # Track effective layer-skip intensity (post-cap) for fair analysis
@@ -881,7 +908,7 @@ def organize_test_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Test reports organized into {test_path}")
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -900,23 +927,40 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             "Why is exercise important for health?"
         ]
     
-    total_reward = 0.0
-    total_time = 0.0
-    total_tok_s = 0.0
-    total_ppl = 0.0
-    validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
-    metrics_list = []
+    if force_action:
+        try:
+            target, intensity_str = force_action.split(':')
+            intensity = float(intensity_str)
+            forced_action = type('Action', (), {'target': target, 'intensity': intensity, 'action_index': 0})()  # Dummy action_index
+            print(f"[Test] Forcing action: {target} ({intensity}) for all episodes.")
+        except ValueError:
+            print(f"[Test] Invalid force_action format: {force_action}. Expected 'target:intensity'. Using RL.")
+            forced_action = None
+    else:
+        forced_action = None
     
     for i in range(min(num_test_episodes, len(test_prompts))):
         prompt = test_prompts[i]
         print(f"\n[Test Episode {i+1}/{num_test_episodes}]")
         print(f"[Test] Prompt: '{prompt}'")
         
-        # Get state and action (exploitation only)
-        state = rl_agent._get_state_vector(prompt)
-        action = rl_agent.get_action(prompt)
+        # Calculate prompt perplexity and token length for metrics
+        token_len = len(rl_agent.tokenizer.encode(prompt))
+        prompt_ppl = benchmark._calculate_perplexity(model_engine, prompt)
+        
+        # Baseline: no pruning
+        model_engine.restore_model()
+        base_metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
+        print(f"[Test Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f}")
+        
+        # Pruned: forced or RL-selected action
+        if forced_action:
+            action = forced_action
+        else:
+            state = rl_agent._get_state_vector(prompt)
+            action = rl_agent.get_action(prompt)
         effective_intensity = action.intensity
-        if action.target == transformer_layers:
+        if action.target == 'transformer_layers':
             layers = getattr(model_engine.model.model, 'layers', [])
             L = len(layers)
             if L > 0:
@@ -925,11 +969,20 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
                 k = min(k, L)
                 effective_intensity = k / float(L)
         
-        # Apply action and benchmark
         model_engine.apply_pruning(action)
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
+        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | Time: {metrics['time_ms']:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f}")
+        
+        model_engine.restore_model()
+        
         metrics_list.append({
             'episode': i+1,
+            'token_len': token_len,
+            'prompt_ppl': prompt_ppl,
+            'complexity': 0.0,  # Not calculated for test
+            'baseline_time_ms': base_metrics['time_ms'],
+            'baseline_tok_s': base_metrics['tok_s'],
+            'baseline_ppl': base_metrics['perplexity'],
             'time_ms': metrics['time_ms'],
             'tok_s': metrics['tok_s'],
             'ppl': metrics['perplexity'],
@@ -938,26 +991,14 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'intensity': action.intensity,
             'effective_intensity': effective_intensity
         })
-        total_reward += 0.0  # Placeholder, since reward removed
-        total_time += metrics['time_ms']
-        total_tok_s += metrics['tok_s']
-        total_ppl += metrics['perplexity']
-        
-        model_engine.restore_model()
-    
-    n = float(num_test_episodes)
-    print(f"[Test] Avg Time: {total_time/n:.2f}ms | Avg Tok/s: {total_tok_s/n:.2f} | Avg PPL: {total_ppl/n:.2f}")
     
     # Generate test reports
-    generate_report(metrics_list)
+    generate_report(metrics_list, report_filename='test_report.txt', header='Test Report')
     generate_comparative_plots(metrics_list)
     import json
     with open('test_metrics.json', 'w') as f:
         json.dump(metrics_list, f)
     organize_test_reports()
-    import os
-    if os.path.exists('training_report.txt'):
-        os.rename('training_report.txt', 'test_report.txt')
     
     # Restore original epsilon
     rl_agent.epsilon = original_epsilon
@@ -1029,8 +1070,8 @@ if __name__ == "__main__":
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--max-new-tokens', type=int, default=50)
     parser.add_argument('--wikitext-samples', type=int, default=200)
-    parser.add_argument('--train-dataset', type=str, default='Prompt Dataset.csv')
-    parser.add_argument('--test-dataset', type=str, default='Testing Dataset.csv')
+    parser.add_argument('--train-dataset', type=str, default='Prompt Dataset Train.csv')
+    parser.add_argument('--test-dataset', type=str, default='Prompt Dataset Test.csv')
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
     parser.add_argument('--device', type=str, default='auto', choices=['cpu', 'gpu', 'auto'], help='Device to load model on: cpu, gpu, or auto')
@@ -1039,7 +1080,7 @@ if __name__ == "__main__":
     parser.add_argument('--compile', dest='compile_profiles', action='store_true', help='Compile profiles with torch.compile if available (Phase B)')
     parser.add_argument('--kv-compress', action='store_true', help='Enable KV-cache compression scaffold (Phase D)')
     parser.add_argument('--kv-keep-ratio', type=float, default=1.0, help='KV tokens keep ratio [0,1] (Phase D)')
-    parser.add_argument('--lm-eval', action='store_true', help='Run lm-eval-harness tasks after test')
+    parser.add_argument('--force-action', type=str, default=None, help='Force a specific action for test mode (format: target:intensity, e.g., ffn_neurons:0.2)')
     args = parser.parse_args()
     if args.mode == 'train':
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
@@ -1060,7 +1101,7 @@ if __name__ == "__main__":
         if os.path.exists(args.checkpoint):
             agent.load(args.checkpoint)
         bench = RealBenchmark()
-        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset)
-        run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
-        if args.lm_eval:
+        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action)
+        # run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
+        if hasattr(args, 'lm_eval') and args.lm_eval:
             run_lm_eval_harness(engine, tasks_list=['arc_easy','hellaswag','winogrande','lambada'], batch_size=1)

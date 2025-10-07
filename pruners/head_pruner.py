@@ -44,23 +44,26 @@ class HeadPruner:
             indices = sorted(h for h in heads if 0 <= h < num_heads)
             if not indices:
                 continue
+            # Build a vectorized mask once per layer and apply via broadcast multiply
+            hidden_size = int(num_heads * head_dim)
+            device = attn.o_proj.weight.device
+            dtype = attn.o_proj.weight.dtype
+            mask_vec = torch.ones(hidden_size, device=device, dtype=dtype)
+            for h_idx in indices:
+                start = h_idx * head_dim
+                mask_vec[start:start + head_dim] = 0
 
-            def make_pre_hook(head_indices, head_dim):
+            def make_pre_hook(mask):
                 def pre_hook(module, inputs):
-                    # inputs is a tuple: (x,)
                     if not inputs or inputs[0] is None:
                         return inputs
                     x = inputs[0]
-                    # clone to avoid in-place on shared tensors
-                    x = x.clone()
-                    for h in head_indices:
-                        start = h * head_dim
-                        end = start + head_dim
-                        x[..., start:end] = 0
-                    return (x,)
+                    m = mask.to(device=x.device, dtype=x.dtype)
+                    # x: [..., D], m: [D] will broadcast along batch/seq dims
+                    return (x * m,)
                 return pre_hook
 
-            h = attn.o_proj.register_forward_pre_hook(make_pre_hook(indices, head_dim))
+            h = attn.o_proj.register_forward_pre_hook(make_pre_hook(mask_vec))
             self.hooks.append(h)
         self.active = True
 
@@ -68,7 +71,7 @@ class HeadPruner:
         for h in self.hooks:
             try:
                 h.remove()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[HeadPruner] Exception during restore: {e}")
         self.hooks.clear()
         self.active = False

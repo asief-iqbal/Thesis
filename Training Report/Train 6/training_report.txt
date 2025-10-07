@@ -1,0 +1,10 @@
+Training Report
+Episodes: 5
+Overall Avg Time: 1107.27ms
+Overall Avg PPL: 2394.47
+
+Averages by Prune Type and Intensity:
+  ffn_neurons 0.1: Avg Time 1568.87ms, Avg PPL 23.19 (1 samples)
+  attention_heads 0.3: Avg Time 669.25ms, Avg PPL 813.82 (2 samples)
+  ffn_neurons 0.2: Avg Time 1845.32ms, Avg PPL 29.66 (1 samples)
+  transformer_layers 0.2: Avg Time 783.66ms, Avg PPL 10291.88 (1 samples)

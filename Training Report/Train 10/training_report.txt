@@ -1,0 +1,7 @@
+Training Report
+Episodes: 1
+Overall Avg Time: 1968.76ms
+Overall Avg PPL: 23.26
+
+Averages by Prune Type and Intensity:
+  ffn_neurons 0.1: Avg Time 1968.76ms, Avg PPL 23.26 (1 samples)

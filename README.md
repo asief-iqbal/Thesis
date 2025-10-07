@@ -30,20 +30,10 @@ CASRAP is an RL-driven adaptive LLM pruning system. Components: (1) RL Controlle
 
 This project implements an RL-driven adaptive pruning system for LLMs that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. It bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using a learnable controller (Double DQN), now with advanced GPU acceleration features.
 
-### Recent Improvements
-- **GPU Detection Fix**: Disabled NVML initialization in `EnhancedDeviceMonitor` to prevent interference with `torch.cuda.is_available()`, enabling proper CUDA detection. Installed CUDA-enabled PyTorch (cu121) for GPU acceleration.
-- **Importance-Driven Pruning**: Added calibration for heads, FFN channels, and layers using forward hooks to collect average absolute activations. Pruning now selects least-important units: heads/FFN via structural slicing (real speedups), layers via functional skipping (capped to ≤12.5% depth, excluding first/last).
-- **Structural Pruning Enforcement**: Forced structural pruning for heads (GQA-safe) and FFN channels using `StructuredHeadSlicer` and `StructuredFFNSlicer`, reducing GEMM dimensions for true throughput gains. Falls back to magnitude-based scoring if calibration unavailable.
-- **Action Space Optimization**: Trimmed to research-aligned actions: none, attention_heads (0.1-0.3), ffn_neurons (0.1-0.3). Removed transformer_layers actions to prevent PPL spikes.
-- **Calibration Re-enabled**: Restored importance calibration before training to power importance-guided selections.
-- **Phase A (Static Profiles)**: Prebuild and cache pruned model variants to avoid per-episode surgery, reducing overhead on CPU/GPU.
-- **Phase B (GPU Acceleration)**: Added optional 2:4 semi-structured sparsity packing (cuSPARSELt) and torch.compile for 1.3–2.0× layer speedups on Ampere/Hopper GPUs.
-- **Phase C (Calibration + Reconstruction)**: Lightweight post-prune reconstruction stabilizes perplexity using calibration prompts.
-- **Phase D (KV Compression Scaffold)**: Framework for token selection in long contexts (placeholder for H2O/Keyformer integration).
-- **Benchmarking Upgrade**: Separate encode/gen timing, warmup to avoid overhead, accurate throughput calculation.
-- **Citations**: Based on Michel et al. (2019) for head pruning, Sanh et al. (2020) and Zhang et al. (2023) for FFN pruning, Frantar & Alistarh (2023) and Sun et al. (2023) for structural approaches, NVIDIA cuSPARSELt for 2:4 sparsity, PyTorch AO for compile.
-
-These changes ensure CASRAP prunes least-important components, boosts token speed and reduces inference time drastically while preserving perplexity, aligning with state-of-the-art pruning research and adding production-ready acceleration.
+### Recent Improvements (v2.0 - Reward Simplification & Enhanced Reporting, 2025-10-07)
+- **Simplified Reward Function**: Streamlined to `alpha * (pruned_tok_s - baseline_tok_s) / baseline_tok_s - beta * (pruned_ppl - baseline_ppl) / baseline_ppl` with `alpha=0.7`, `beta=0.3`, eliminating asymmetric penalties and epsilon guards for stable, direct relative scaling. Resolved inference slowdowns caused by prior reward shaping.
+- **Enhanced Reporting**: Added pruning action usage count graph (`pruning_action_usage.png`); split pruning summary into separate graphs for inference time (`inference_time_per_action.png`) and perplexity (`perplexity_per_action.png`) for better readability.
+- **Test Mode Reporting**: Test runs now generate full reports and graphs, organized into 
 
 ## Key Innovations
 
@@ -182,7 +172,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ## Architecture
 
 ### Core Components
-- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: 1.0 * (pruned_tok_s / base_tok_s) - 3.0 * max(0, (ppl_pruned - ppl_base)/ppl_base) (penalizes PPL increases strongly).
+- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: `alpha * (pruned_tok_s - baseline_tok_s) / baseline_tok_s - beta * (pruned_ppl - baseline_ppl) / baseline_ppl` with `alpha=0.7`, `beta=0.3` for direct relative scaling of speed gains vs PPL penalties.
 - **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity). No external NLP.
 - **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
 - **Calibration System**: Pre-training activation statistics for head/FFN importance.
@@ -231,13 +221,16 @@ RL-driven with prompt-centric complexity; pruning includes activation-aware head
 - `.env`: Config (HF token, pruning mode).
 - `checkpoints/`: RL policy files.
 - `Training Report/`: Organized training results in numbered subfolders (Train 1, Train 2, etc.).
+- `Test report/`: Organized test results in numbered subfolders (Test 1, Test 2, etc.).
 - `training_report.txt`: Post-training report.
 - `training_metrics.json`: Detailed per-episode metrics.
 - `token_speed_compare.png`: Baseline vs pruned token speed plot.
 - `inference_time_compare.png`: Baseline vs pruned inference time plot.
 - `perplexity_compare.png`: Baseline vs pruned perplexity plot.
 - `length_vs_ppl.png`: Token length vs prompt perplexity correlation.
-- `pruning_summary.png`: Average time and PPL per pruning action subplots.
+- `pruning_action_usage.png`: Pruning action usage counts.
+- `inference_time_per_action.png`: Average inference time per pruning action.
+- `perplexity_per_action.png`: Average perplexity per pruning action.
 
 ## Benchmarks
 
@@ -345,7 +338,7 @@ Actions: `none`, `attention_heads`, `ffn_neurons` with preset varying intensitie
 - **Performance Metrics**:
   - Inference time (ms): Time to generate response.
   - Tokens/sec: generated_tokens / inference_time (uses actual generated length).
-- **Reward (for training)**: alpha * (pruned_tok_s / base_tok_s) + beta * (base_ppl / pruned_ppl), with alpha=0.6, beta=0.4. Balances relative speed gain vs accuracy improvement.
+- **Reward (for training)**: `alpha * (pruned_tok_s - baseline_tok_s) / baseline_tok_s - beta * (pruned_ppl - baseline_ppl) / baseline_ppl` with `alpha=0.7`, `beta=0.3`. Balances relative speed gains vs PPL penalties.
 
 ### 7. Model Restoration
 - Restore all pruners to original state for next prompt.

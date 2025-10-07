@@ -279,9 +279,9 @@ class RLControllerAgent:
         self.optimizer.step()
 
         # Epsilon decay and target update
-        # Slight decay after warm-up (100 steps) for exploration-exploitation balance
-        if self.train_steps > 100 and self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+        # Decay epsilon immediately toward epsilon_min to encourage learning from the start
+        if self.epsilon > self.epsilon_min:
+            self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
         self.train_steps += 1
         if self.train_steps % self.target_update_interval == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -465,32 +465,53 @@ def generate_report(metrics_list: List[Dict[str, Any]]):
     avg_ppls = [sum(m['ppl'] for m in ms) / len(ms) for _, ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index'])]
     x = np.arange(len(action_labels))
     
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12))
-    
     # Plot for Avg Time
-    ax1.bar(x, avg_times, color='skyblue', alpha=0.8, width=0.6)
-    ax1.set_title('Average Inference Time per Pruning Action', fontsize=16, fontweight='bold')
-    ax1.set_xlabel('Pruning Action', fontsize=12)
-    ax1.set_ylabel('Average Time (ms)', fontsize=12)
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(action_labels, rotation=45, ha='right', fontsize=10)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_ylim(bottom=0)
+    plt.figure(figsize=(16, 8))
+    plt.bar(x, avg_times, color='skyblue', alpha=0.8, width=0.6)
+    plt.title('Average Inference Time per Pruning Action', fontsize=16, fontweight='bold')
+    plt.xlabel('Pruning Action', fontsize=12)
+    plt.ylabel('Average Time (ms)', fontsize=12)
+    plt.xticks(x, action_labels, rotation=45, ha='right', fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.ylim(bottom=0)
+    plt.tight_layout()
+    plt.savefig('inference_time_per_action.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("[Report] Inference time per action plot saved to inference_time_per_action.png")
     
     # Plot for Avg PPL
-    ax2.bar(x, avg_ppls, color='salmon', alpha=0.8, width=0.6)
-    ax2.set_title('Average Perplexity per Pruning Action', fontsize=16, fontweight='bold')
-    ax2.set_xlabel('Pruning Action', fontsize=12)
-    ax2.set_ylabel('Average PPL', fontsize=12)
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(action_labels, rotation=45, ha='right', fontsize=10)
-    ax2.grid(True, alpha=0.3)
-    ax2.set_ylim(bottom=0)
-    
+    plt.figure(figsize=(16, 8))
+    plt.bar(x, avg_ppls, color='salmon', alpha=0.8, width=0.6)
+    plt.title('Average Perplexity per Pruning Action', fontsize=16, fontweight='bold')
+    plt.xlabel('Pruning Action', fontsize=12)
+    plt.ylabel('Average PPL', fontsize=12)
+    plt.xticks(x, action_labels, rotation=45, ha='right', fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.ylim(bottom=0)
     plt.tight_layout()
-    plt.savefig('pruning_summary.png', dpi=300, bbox_inches='tight')
+    plt.savefig('perplexity_per_action.png', dpi=300, bbox_inches='tight')
     plt.close()
-    print("[Report] Pruning summary plots saved to pruning_summary.png")
+    print("[Report] Perplexity per action plot saved to perplexity_per_action.png")
+
+    # Pruning Action Usage Count Plot (New Graph for usage counts)
+    usage_counts = {}
+    for m in metrics_list:
+        key = (m['target'], m['intensity'])
+        usage_counts[key] = usage_counts.get(key, 0) + 1
+    usage_labels = [f"{target} {intensity}" for (target, intensity) in sorted(usage_counts.keys(), key=lambda x: groups[x][0]['action_index'] if x in groups else 0)]
+    usage_values = [usage_counts[(target, intensity)] for (target, intensity) in sorted(usage_counts.keys(), key=lambda x: groups[x][0]['action_index'] if x in groups else 0)]
+    plt.figure(figsize=(16, 8))
+    plt.bar(usage_labels, usage_values, color='lightgreen', alpha=0.8, width=0.6)
+    plt.title('Pruning Action Usage Counts', fontsize=16, fontweight='bold')
+    plt.xlabel('Pruning Action', fontsize=12)
+    plt.ylabel('Usage Count', fontsize=12)
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.ylim(bottom=0)
+    plt.tight_layout()
+    plt.savefig('pruning_action_usage.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("[Report] Pruning action usage plot saved to pruning_action_usage.png")
 
 
     episodes = [m['episode'] for m in metrics_list]
@@ -594,6 +615,9 @@ def organize_training_reports(is_report_mode: bool = False):
         'perplexity_compare.png',
         'perplexity.png',
         'pruning_summary.png',
+        'pruning_action_usage.png',
+        'inference_time_per_action.png',
+        'perplexity_per_action.png',
         'token_speed_compare.png',
         'training_report.txt'
     ]
@@ -681,12 +705,25 @@ def main(num_episodes: int = 50,
          train_split: str = 'train',
          train_samples: int = 5000,
          split_type: str = 'train',
-         device: str = 'auto'):
-    model_engine = RealModelEngine(device=device)
+         device: str = 'auto',
+         static_profiles: bool = False,
+         sparsity_2to4: bool = False,
+         compile_profiles: bool = False,
+         kv_compress: bool = False,
+         kv_keep_ratio: float = 1.0):
+    model_engine = RealModelEngine(
+        device=device,
+        enable_static_profiles=static_profiles,
+        enable_2to4=sparsity_2to4,
+        enable_compile=compile_profiles,
+        enable_kv_compression=kv_compress,
+        kv_keep_ratio=kv_keep_ratio,
+    )
     rl_agent = RLControllerAgent(model_engine.tokenizer)
     benchmark = RealBenchmark()
     
     validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
+    metrics_list = []
     # Load a proper training prompt pool from the specified dataset
     prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
     # Honor CLI episodes: cap to requested number
@@ -735,12 +772,12 @@ def main(num_episodes: int = 50,
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
-        # Reward (Phase A): penalize latency and PPL increases strongly
-        eps = 1e-8
-        t_term = pruned_metrics['tok_s'] / (base_metrics['tok_s'] + eps)
-        q_term = max(0.0, (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps))
-        alpha, beta = 1.0, 3.0
-        relative_reward = alpha * t_term - beta * q_term
+        # Reward: direct difference-based scaling per user specification
+        alpha, beta = 0.7, 0.3
+        relative_reward = (
+            alpha * (pruned_metrics['tok_s'] - base_metrics['tok_s']) / base_metrics['tok_s']
+            - beta * (pruned_metrics['perplexity'] - base_metrics['perplexity']) / base_metrics['perplexity']
+        )
 
         # Track effective layer-skip intensity (post-cap) for fair analysis
         effective_intensity = pruning_action.intensity
@@ -798,6 +835,52 @@ def main(num_episodes: int = 50,
     # Organize training reports into folders
     organize_training_reports()
 
+def organize_test_reports(is_report_mode: bool = False):
+    """Organize test reports into numbered subfolders under 'Test Report'."""
+    import os
+    import shutil
+    import re
+    
+    # Create Test Report folder if not exists
+    report_dir = 'Test Report'
+    if not os.path.exists(report_dir):
+        os.makedirs(report_dir)
+        print(f"[Organize] Created directory: {report_dir}")
+    
+    # Find existing Test folders and determine next number
+    subfolders = [f for f in os.listdir(report_dir) if os.path.isdir(os.path.join(report_dir, f)) and re.match(r'Test \d+', f)]
+    numbers = [int(re.search(r'\d+', f).group()) for f in subfolders if re.search(r'\d+', f)]
+    next_num = max(numbers) + 1 if numbers else 1
+    test_folder = f'Test {next_num}'
+    test_path = os.path.join(report_dir, test_folder)
+    os.makedirs(test_path)
+    print(f"[Organize] Created subfolder: {test_path}")
+    
+    # Files to move
+    files_to_move = [
+        'inference_time_compare.png',
+        'inference_time.png',
+        'length_vs_ppl.png',
+        'perplexity_compare.png',
+        'perplexity.png',
+        'pruning_action_usage.png',
+        'inference_time_per_action.png',
+        'perplexity_per_action.png',
+        'token_speed_compare.png',
+        'test_report.txt'
+    ]
+    if not is_report_mode:
+        files_to_move.append('test_metrics.json')
+    
+    for file in files_to_move:
+        if os.path.exists(file):
+            shutil.move(file, os.path.join(test_path, file))
+            print(f"[Organize] Moved {file} to {test_path}")
+        else:
+            print(f"[Organize] Warning: {file} not found, skipping")
+    
+    print(f"[Organize] Test reports organized into {test_path}")
+
 def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
@@ -822,6 +905,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     total_tok_s = 0.0
     total_ppl = 0.0
     validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
+    metrics_list = []
     
     for i in range(min(num_test_episodes, len(test_prompts))):
         prompt = test_prompts[i]
@@ -831,10 +915,29 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         # Get state and action (exploitation only)
         state = rl_agent._get_state_vector(prompt)
         action = rl_agent.get_action(prompt)
+        effective_intensity = action.intensity
+        if action.target == transformer_layers:
+            layers = getattr(model_engine.model.model, 'layers', [])
+            L = len(layers)
+            if L > 0:
+                k = max(1, int(round(L * action.intensity)))
+                k = min(k, max(1, L // 8))
+                k = min(k, L)
+                effective_intensity = k / float(L)
         
         # Apply action and benchmark
         model_engine.apply_pruning(action)
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
+        metrics_list.append({
+            'episode': i+1,
+            'time_ms': metrics['time_ms'],
+            'tok_s': metrics['tok_s'],
+            'ppl': metrics['perplexity'],
+            'action_index': action.action_index,
+            'target': action.target,
+            'intensity': action.intensity,
+            'effective_intensity': effective_intensity
+        })
         total_reward += 0.0  # Placeholder, since reward removed
         total_time += metrics['time_ms']
         total_tok_s += metrics['tok_s']
@@ -844,6 +947,17 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     
     n = float(num_test_episodes)
     print(f"[Test] Avg Time: {total_time/n:.2f}ms | Avg Tok/s: {total_tok_s/n:.2f} | Avg PPL: {total_ppl/n:.2f}")
+    
+    # Generate test reports
+    generate_report(metrics_list)
+    generate_comparative_plots(metrics_list)
+    import json
+    with open('test_metrics.json', 'w') as f:
+        json.dump(metrics_list, f)
+    organize_test_reports()
+    import os
+    if os.path.exists('training_report.txt'):
+        os.rename('training_report.txt', 'test_report.txt')
     
     # Restore original epsilon
     rl_agent.epsilon = original_epsilon

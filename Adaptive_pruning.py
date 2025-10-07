@@ -75,7 +75,15 @@ class EnhancedDeviceMonitor:
     """Monitors hardware state (CPU, GPU, memory, battery) for RL state features."""
     def __init__(self):
         self.gpu_available = torch.cuda.is_available()
-        self.nvml_ok = False  # Disable NVML to avoid interference with CUDA detection
+        self.nvml_ok = False
+        if self.gpu_available:
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                self.nvml_ok = True
+            except Exception:
+                pass
         print(f"[Monitor] GPU {'detected' if self.gpu_available else 'not detected' }.")
 
     def get_state(self) -> DeviceState:
@@ -89,10 +97,12 @@ class EnhancedDeviceMonitor:
                 gpu_mem_free_gb = mem_info.free / (1024 ** 3)
                 gpu_util = float(util)
             except Exception:
-                gpu_util = random.uniform(10, 80)
+                warnings.warn("[Monitor] NVML failed, setting GPU utilization to 0.0 for reproducible research.")
+                gpu_util = 0.0
                 gpu_mem_free_gb = (torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)) / (1024**3) if self.gpu_available else 0.0
         else:
-            gpu_util = random.uniform(10, 80)
+            warnings.warn("[Monitor] NVML not available, setting GPU utilization to 0.0 for reproducible research.")
+            gpu_util = 0.0
             gpu_mem_free_gb = (torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)) / (1024**3) if self.gpu_available else 0.0
         return DeviceState(
             cpu_utilization=cpu_util,
@@ -103,8 +113,6 @@ class EnhancedDeviceMonitor:
             gpu_utilization=gpu_util
         )
 # =========================================================================
-# ACTION SPACE DEFINITION (PRUNING ACTIONS)
-# =========================================================================
 
 @dataclass
 class PruningAction:
@@ -112,8 +120,7 @@ class PruningAction:
 class ActionSpace:
     """Defines all possible pruning actions: none, KV cache, heads, FFN, layers at various intensities."""
     def __init__(self):
-    # Expanded to include intensities 0.1,0.2,0.3,0.4,0.5 for all pruning categories
-        # Research-aligned action space: no kv_cache; modest head/FFN; shallow layer skip
+        # Phase A: remove layer skip; keep only none, attention_heads, ffn_neurons
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
             # Attention heads (structural, GQA-safe): 10–30%
@@ -124,9 +131,6 @@ class ActionSpace:
             PruningAction(level=2, intensity=0.1, target="ffn_neurons", action_index=4),
             PruningAction(level=2, intensity=0.2, target="ffn_neurons", action_index=5),
             PruningAction(level=2, intensity=0.3, target="ffn_neurons", action_index=6),
-            # Transformer layers (functional skip, capped in engine): 10–20%
-            PruningAction(level=3, intensity=0.1, target="transformer_layers", action_index=7),
-            PruningAction(level=3, intensity=0.2, target="transformer_layers", action_index=8),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -289,24 +293,61 @@ class RLControllerAgent:
 
 class RealBenchmark:
     """Benchmarks inference time, token speed, perplexity on baseline vs pruned models."""
+    def __init__(self):
+        self._warmed = False
+
+    def _warmup_once(self, engine: RealModelEngine):
+        if self._warmed:
+            return
+        try:
+            _ = engine.generate_response("Hello", max_length=4)
+        except Exception:
+            pass
+        self._warmed = True
+    def _calculate_perplexity_on_continuation(self, engine: RealModelEngine, prompt: str, generated_text: str) -> float:
+        """Calculates perplexity on the generated continuation text."""
+        full_text = prompt + generated_text
+        inputs = engine.tokenizer(full_text, return_tensors="pt").to(engine.model.device)
+        prompt_tokens = engine.tokenizer(prompt, return_tensors="pt").input_ids.shape[1]
+
+        # Use -100 as the ignore_index for prompt tokens in the labels.
+        labels = inputs.input_ids.clone()
+        labels[:, :prompt_tokens] = -100
+
+        with torch.no_grad():
+            outputs = engine.model(**inputs, labels=labels)
+
+        # The loss is now correctly calculated only on the generated part.
+        ppl = torch.exp(outputs.loss).item()
+
+        # Handle potential NaN/inf values from empty or problematic generation.
+        if ppl is None or not torch.isfinite(torch.tensor(ppl)):
+            return 50000.0 # Return a high penalty value.
+        return ppl
+
     def _calculate_perplexity(self, engine: RealModelEngine, text: str) -> float:
         inputs = engine.tokenizer(text, return_tensors="pt").to(engine.model.device)
         with torch.no_grad():
             outputs = engine.model(**inputs, labels=inputs["input_ids"])
         return torch.exp(outputs.loss).item()
 
-    def benchmark_and_get_reward(self, engine: RealModelEngine, prompt: str, validation_text: str, max_new_tokens: int = 50, return_metrics: bool = False):
+    def benchmark_and_get_reward(self, engine: RealModelEngine, prompt: str, max_new_tokens: int = 50, return_metrics: bool = False, profile: bool = False):
         # Use planned token budget for fair throughput comparison
-        planned_tokens = engine.kv_pruner.get_effective_max_length(max_new_tokens)
+        planned_tokens = max_new_tokens
         start_time = time.time()
-        generated_response = engine.generate_response(prompt, max_length=planned_tokens)
+        if profile:
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
+                generated_response = engine.generate_response(prompt, max_length=planned_tokens)
+            print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
+        else:
+            generated_response = engine.generate_response(prompt, max_length=planned_tokens)
         elapsed_s = (time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
-        # Actual generated tokens may vary; throughput uses planned budget to avoid early-EOS bias
+        # Actual generated tokens may vary; throughput uses actual for accuracy
         gen_token_count = len(engine.tokenizer.encode(generated_response))
-        tokens_per_sec = (planned_tokens / elapsed_s) if elapsed_s > 0 else 0.0
-        # Compute PPL on a fixed validation text to decouple from generated content
-        perplexity = self._calculate_perplexity(engine, validation_text)
+        tokens_per_sec = (gen_token_count / elapsed_s) if elapsed_s > 0 else 0.0
+        # Compute PPL on the generated continuation, conditioned on the prompt
+        perplexity = self._calculate_perplexity_on_continuation(engine, prompt, generated_response)
         return { 'time_ms': inference_time_ms, 'tok_s': tokens_per_sec, 'perplexity': perplexity, 'gen_tokens': gen_token_count, 'planned_tokens': planned_tokens }
 
 def generate_comparative_plots(metrics: List[Dict[str, Any]]):
@@ -639,12 +680,13 @@ def main(num_episodes: int = 50,
          train_dataset: str = 'Prompt Dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
-         split_type: str = 'train'):
-    model_engine = RealModelEngine()
+         split_type: str = 'train',
+         device: str = 'auto'):
+    model_engine = RealModelEngine(device=device)
     rl_agent = RLControllerAgent(model_engine.tokenizer)
     benchmark = RealBenchmark()
     
-    validation_text = "The field of artificial intelligence has seen rapid advancements."
+    validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
     # Load a proper training prompt pool from the specified dataset
     prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
     # Honor CLI episodes: cap to requested number
@@ -674,7 +716,7 @@ def main(num_episodes: int = 50,
         # Ensure clean (no-prune) state and measure baseline metrics
         model_engine.restore_model()
         base_metrics = benchmark.benchmark_and_get_reward(
-            model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
+            model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
         )
         print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
 
@@ -689,14 +731,16 @@ def main(num_episodes: int = 50,
         pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
         model_engine.apply_pruning(pruning_action)
         pruned_metrics = benchmark.benchmark_and_get_reward(
-            model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True
+            model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
         )
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | Time: {pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
-        # Compute relative reward: alpha * (pruned_tok_s / base_tok_s) + beta * (base_ppl / pruned_ppl)
-        alpha, beta = 0.6, 0.4
+        # Reward (Phase A): penalize latency and PPL increases strongly
         eps = 1e-8
-        relative_reward = alpha * (pruned_metrics['tok_s'] / (base_metrics['tok_s'] + eps)) + beta * ((base_metrics['perplexity'] + eps) / (pruned_metrics['perplexity'] + eps))
+        t_term = pruned_metrics['tok_s'] / (base_metrics['tok_s'] + eps)
+        q_term = max(0.0, (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps))
+        alpha, beta = 1.0, 3.0
+        relative_reward = alpha * t_term - beta * q_term
 
         # Track effective layer-skip intensity (post-cap) for fair analysis
         effective_intensity = pruning_action.intensity
@@ -738,6 +782,10 @@ def main(num_episodes: int = 50,
 
     print("\n[System] ✓ RL training loop completed!")
     
+    # Save the trained RL policy
+    if checkpoint_path:
+        rl_agent.save(checkpoint_path)
+    
     # Generate reports and comparative plots
     generate_report(metrics_list)
     generate_comparative_plots(metrics_list)
@@ -750,7 +798,7 @@ def main(num_episodes: int = 50,
     # Organize training reports into folders
     organize_training_reports()
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, dataset_name: str = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -758,8 +806,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     original_epsilon = rl_agent.epsilon
     rl_agent.epsilon = 0.0
     
-    if dataset_name and dataset_name.endswith('.csv'):
-        test_prompts = load_training_prompts(dataset_name, samples=num_test_episodes)
+    if test_dataset and test_dataset.endswith('.csv'):
+        test_prompts = load_training_prompts(test_dataset, samples=num_test_episodes)
     else:
         test_prompts = [
             "Explain quantum computing in simple terms.",
@@ -773,7 +821,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     total_time = 0.0
     total_tok_s = 0.0
     total_ppl = 0.0
-    validation_text = "The field of artificial intelligence has seen rapid advancements."
+    validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
     
     for i in range(min(num_test_episodes, len(test_prompts))):
         prompt = test_prompts[i]
@@ -786,7 +834,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         
         # Apply action and benchmark
         model_engine.apply_pruning(action)
-        metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, validation_text, max_new_tokens=max_new_tokens, return_metrics=True)
+        metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
         total_reward += 0.0  # Placeholder, since reward removed
         total_time += metrics['time_ms']
         total_tok_s += metrics['tok_s']
@@ -820,7 +868,7 @@ def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int
         elapsed = time.time() - start
         ms = elapsed * 1000
         tok_s = (max_new_tokens / elapsed) if elapsed > 0 else 0.0
-        ppl = benchmark._calculate_perplexity(model_engine, t[:1024])
+        ppl = benchmark._calculate_perplexity_on_continuation(model_engine, prompt, t[512:] if len(t) > 512 else "")
         total_ms += ms
         total_tok_s += tok_s
         total_ppl += ppl
@@ -868,14 +916,22 @@ if __name__ == "__main__":
     parser.add_argument('--max-new-tokens', type=int, default=50)
     parser.add_argument('--wikitext-samples', type=int, default=200)
     parser.add_argument('--train-dataset', type=str, default='Prompt Dataset.csv')
+    parser.add_argument('--test-dataset', type=str, default='Testing Dataset.csv')
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
+    parser.add_argument('--device', type=str, default='auto', choices=['cpu', 'gpu', 'auto'], help='Device to load model on: cpu, gpu, or auto')
+    parser.add_argument('--static-profiles', action='store_true', help='Enable prebuilt static pruning profiles (Phase A)')
+    parser.add_argument('--sparsity-2to4', action='store_true', help='Enable 2:4 semi-structured sparsity packing on supported GPUs (Phase B)')
+    parser.add_argument('--compile', dest='compile_profiles', action='store_true', help='Compile profiles with torch.compile if available (Phase B)')
+    parser.add_argument('--kv-compress', action='store_true', help='Enable KV-cache compression scaffold (Phase D)')
+    parser.add_argument('--kv-keep-ratio', type=float, default=1.0, help='KV tokens keep ratio [0,1] (Phase D)')
     parser.add_argument('--lm-eval', action='store_true', help='Run lm-eval-harness tasks after test')
     args = parser.parse_args()
-
     if args.mode == 'train':
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
-             train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train')
+             train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train', device=args.device,
+             static_profiles=args.static_profiles, sparsity_2to4=args.sparsity_2to4, compile_profiles=args.compile_profiles,
+             kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio)
     elif args.mode == 'report':
         import json
         with open('training_metrics.json', 'r') as f:
@@ -885,12 +941,12 @@ if __name__ == "__main__":
         # Organize training reports into folders
         organize_training_reports(is_report_mode=True)
     else:
-        engine = RealModelEngine()
+        engine = RealModelEngine(device=args.device, enable_static_profiles=args.static_profiles, enable_2to4=args.sparsity_2to4, enable_compile=args.compile_profiles, enable_kv_compression=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio)
         agent = RLControllerAgent(engine.tokenizer)
         if os.path.exists(args.checkpoint):
             agent.load(args.checkpoint)
         bench = RealBenchmark()
-        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens, dataset_name=args.train_dataset)
+        test_agent(engine, agent, bench, num_test_episodes=10, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset)
         run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
         if args.lm_eval:
             run_lm_eval_harness(engine, tasks_list=['arc_easy','hellaswag','winogrande','lambada'], batch_size=1)

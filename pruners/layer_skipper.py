@@ -58,7 +58,7 @@ class LayerSkipper:
         for idx, fwd in self.original_forwards.items():
             try:
                 layers[idx].forward = fwd
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[LayerSkipper] Exception during restore: {e}")
         self.original_forwards.clear()
         self.active_layers.clear()

@@ -52,14 +52,21 @@ class StructuredHeadSlicer:
     def _new_linear(in_features: int, out_features: int, like: nn.Linear) -> nn.Linear:
         return nn.Linear(in_features, out_features, bias=(like.bias is not None), device=like.weight.device, dtype=like.weight.dtype)
 
-    def prune(self, per_layer_removed_heads: Dict[int, List[int]]):
+    def prune(self, per_layer_removed_q: Dict[int, List[int]], per_layer_removed_kv: Dict[int, List[int]] = None):
+        """
+        Remove the specified Qheads and KV heads for each layer's attention by
+        rebuilding q_proj, k_proj, v_proj, and o_proj with reduced shapes.
+        """
+        if per_layer_removed_kv is None:
+            per_layer_removed_kv = per_layer_removed_q  # assume same
         self.restore()
         layers = getattr(self.model.model, "layers", None)
         if layers is None:
             return
         for layer_idx, layer in enumerate(layers):
-            removed = sorted(set(per_layer_removed_heads.get(layer_idx, [])))
-            if not removed:
+            removed_q = sorted(set(per_layer_removed_q.get(layer_idx, [])))
+            removed_kv = sorted(set(per_layer_removed_kv.get(layer_idx, [])))
+            if not removed_q:
                 continue
             attn = getattr(layer, 'self_attn', None)
             if attn is None:
@@ -77,39 +84,43 @@ class StructuredHeadSlicer:
                         head_dim = attn.o_proj.in_features // num_heads
             if num_heads is None or head_dim is None:
                 continue
-            keep = [h for h in range(num_heads) if h not in removed]
-            if len(keep) == num_heads or len(keep) < 1:
+            keep_q = [h for h in range(num_heads) if h not in removed_q]
+            if len(keep_q) == num_heads or len(keep_q) < 1:
                 continue
+
+            # Handle GQA: KV heads may be fewer
+            num_kv_heads = attn.k_proj.weight.shape[0] // head_dim
+            keep_kv = [h for h in range(num_kv_heads) if h not in removed_kv]
+            if len(keep_kv) < 1:
+                keep_kv = [0]  # avoid degenerate
 
             self._ensure_cache(layer_idx, attn)
 
             q, k, v, o = attn.q_proj, attn.k_proj, attn.v_proj, attn.o_proj
-            # Shapes: q/k/v: out_features = num_heads*head_dim, in_features = hidden_size
-            # o: out_features = hidden_size, in_features = num_heads*head_dim
+            # Shapes: q: out_features = num_heads*head_dim, k/v: num_kv_heads*head_dim, o: in_features = num_heads*head_dim
             with torch.no_grad():
                 # Build new q/k/v with reduced out_features
-                new_q = self._new_linear(q.in_features, len(keep)*head_dim, q)
-                new_k = self._new_linear(k.in_features, len(keep)*head_dim, k)
-                new_v = self._new_linear(v.in_features, len(keep)*head_dim, v)
+                new_q = self._new_linear(q.in_features, len(keep_q)*head_dim, q)
+                new_k = self._new_linear(k.in_features, len(keep_kv)*head_dim, k)
+                new_v = self._new_linear(v.in_features, len(keep_kv)*head_dim, v)
                 # Reshape and slice rows by head for q/k/v
-                def slice_qkv(weight: torch.Tensor):
-                    # weight: [out_features, in_features] -> [num_heads, head_dim, in_features]
-                    return weight.view(num_heads, head_dim, -1)[keep, :, :].reshape(len(keep)*head_dim, -1)
-                new_q.weight.copy_(slice_qkv(q.weight))
-                new_k.weight.copy_(slice_qkv(k.weight))
-                new_v.weight.copy_(slice_qkv(v.weight))
+                def slice_qkv(weight: torch.Tensor, num_local: int, keep_local: List[int]):
+                    return weight.view(num_local, head_dim, -1)[keep_local, :, :].reshape(len(keep_local)*head_dim, -1)
+                new_q.weight.copy_(slice_qkv(q.weight, num_heads, keep_q))
+                new_k.weight.copy_(slice_qkv(k.weight, num_kv_heads, keep_kv))
+                new_v.weight.copy_(slice_qkv(v.weight, num_kv_heads, keep_kv))
                 if q.bias is not None:
-                    new_q.bias.copy_(q.bias.view(num_heads, head_dim)[keep, :].reshape(-1))
+                    new_q.bias.copy_(q.bias.view(num_heads, head_dim)[keep_q, :].reshape(-1))
                 if k.bias is not None:
-                    new_k.bias.copy_(k.bias.view(num_heads, head_dim)[keep, :].reshape(-1))
+                    new_k.bias.copy_(k.bias.view(num_kv_heads, head_dim)[keep_kv, :].reshape(-1))
                 if v.bias is not None:
-                    new_v.bias.copy_(v.bias.view(num_heads, head_dim)[keep, :].reshape(-1))
+                    new_v.bias.copy_(v.bias.view(num_kv_heads, head_dim)[keep_kv, :].reshape(-1))
 
                 # Build new o with reduced in_features
-                new_o = self._new_linear(len(keep)*head_dim, o.out_features, o)
+                new_o = self._new_linear(len(keep_q)*head_dim, o.out_features, o)
                 # Slice input columns grouped by head
                 keep_cols = []
-                for h in keep:
+                for h in keep_q:
                     start = h * head_dim
                     keep_cols.extend(list(range(start, start+head_dim)))
                 new_o.weight.copy_(o.weight[:, keep_cols])
@@ -122,5 +133,5 @@ class StructuredHeadSlicer:
             attn.v_proj = new_v
             attn.o_proj = new_o
             if hasattr(attn, 'num_heads'):
-                attn.num_heads = len(keep)
+                attn.num_heads = len(keep_q)
         self.active = True

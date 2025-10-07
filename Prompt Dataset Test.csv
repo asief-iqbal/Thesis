@@ -1,0 +1,300 @@
+"Based on the attached map, plan the most efficient walking route to visit three specific landmarks.",Reading,Geography,Yes
+"Calculate the harmonic mean for speeds 40,60 km/h.",Math,Statistics,No
+Design a visual metaphor for interconnectedness using roots.,Creative,Biology,No
+What drives tectonic plate movement?,Knowledge,Geology,No
+Write a Squeak Smalltalk method for object serialization.,Programming,Computer Science,No
+Read the travel blog and plan a similar itinerary.,Reading,Travel,Yes
+Craft a story of a forgotten constellation's return.,Creative,Astronomy,No
+"Compute the Bellman-Ford distances from source 0 in graph edges [(0,1,4),(1,2,3)].",Math,Algorithms,No
+Guide to fostering innovation in teams.,Instruction,Business,No
+Who was the first to observe cells?,Knowledge,Biology,No
+"Calculate the internal rate of return approximation for cash flows -100,30,40,50.",Math,Finance,No
+Invent a simile for joy using fireworks.,Creative,Psychology,No
+Explain canyon carving by rivers.,Knowledge,Geology,No
+User: Jazz album? AI: Kind of Blue. User: Similar?,Dialogue,Music,Yes
+"Find the mode for multimodal data [1,2,2,3,3,3,4].",Math,Statistics,No
+Compose a sapphic stanza on sisterhood.,Creative,Literature,No
+What is the main threat to polar bears?,Knowledge,Environmental Science,No
+Write a Hy function for data validation.,Programming,Computer Science,No
+Read the manifesto and evaluate its radical ideas.,Reading,Philosophy,Yes
+Design a narrative where dreams fuel machines.,Creative,Literature,No
+"Solve the fractional knapsack for weights [2,3], values [3,4], capacity 5.",Math,Optimization,No
+Outline a succession planning strategy.,Instruction,Business,No
+Who discovered the proton?,Knowledge,Physics,No
+Translate to Italian: 'Gratitude turns what we have into enough.',Instruction,Language,No
+Explain stem cell differentiation.,Knowledge,Biology,No
+User: Knitting pattern? AI: Scarf simple. User: For kids?,Dialogue,Art,Yes
+"Compute the trimmed mean for [1,2,100] trim 20%.",Math,Statistics,No
+Craft a metaphor for hope using dawn.,Creative,Literature,No
+What causes mangrove decline?,Knowledge,Environmental Science,No
+Write a BeanShell script for automation.,Programming,Computer Science,No
+Read the fable collection and select morals for modern life.,Reading,Literature,Yes
+Invent a tall tale about a bottomless well of wishes.,Creative,Literature,No
+"Find the topological sort for DAG 1->2,1->3,2->4.",Math,Algorithms,No
+Provide a template for project retrospectives.,Instruction,Business,No
+Who was the first to use a microscope?,Knowledge,History,No
+"Calculate the weighted average grade 80% exam, 20% homework, scores 90,85.",Math,Statistics,No
+Design an analogy for symbiosis using roommates.,Creative,Biology,No
+Explain fault line earthquakes.,Knowledge,Geology,No
+User: Birdwatching spots? AI: Local wetlands. User: Binoculars rec?,Dialogue,Biology,Yes
+"Determine the outlier using IQR for [10,12,14,15,100].",Math,Statistics,No
+Compose a villanelle on lost opportunities.,Creative,Literature,No
+What is the key to sustainable fishing?,Knowledge,Environmental Science,No
+Write a Groovy closure for collection processing.,Programming,Computer Science,No
+Read the adventure log and plot key events.,Reading,Literature,Yes
+Craft a story where music heals wounds.,Creative,Music,No
+Compute the A* pathfinding heuristic for grid maze.,Math,Algorithms,No
+Outline a feedback loop for product improvement.,Instruction,Business,No
+Who proposed natural selection?,Knowledge,Biology,No
+Translate to Dutch: 'Laughter is the best medicine.',Instruction,Language,No
+Explain gene editing ethics.,Knowledge,Biology,No
+User: Puzzle game? AI: Sudoku. User: App version?,Dialogue,Logic,Yes
+Calculate the variance inflation factor for multicollinearity.,Math,Statistics,No
+Invent a pun for a physics textbook title.,Creative,Physics,No
+What threatens bee populations?,Knowledge,Environmental Science,No
+Write a J script for array operations.,Programming,Computer Science,No
+Read the poem anthology and theme cluster.,Reading,Literature,Yes
+Design a narrative of a shape-shifting cloud.,Creative,Literature,No
+Explain the concept of recursion with an example.,Programming,Computer Science,No
+Guide to effective public speaking.,Instruction,Career,No
+Who was the first to split the atom?,Knowledge,Physics,No
+"Calculate the Sharpe ratio if return 8%, risk-free 2%, SD 15%.",Math,Finance,No
+Craft a simile for curiosity using a cat.,Creative,Psychology,No
+Explain metamorphic rock formation.,Knowledge,Geology,No
+User: Tea blend? AI: Green matcha. User: Caffeine-free?,Dialogue,Culinary Arts,Yes
+Find the bootstrap confidence interval for mean.,Math,Statistics,No
+Compose a haibun on mountain hike.,Creative,Literature,No
+What is the main impact of microplastics?,Knowledge,Environmental Science,No
+Write a Q# quantum circuit for superposition.,Programming,Computer Science,No
+Read the detective dossier and connect clues.,Reading,Literature,Yes
+Invent a fable about a greedy river.,Creative,Geography,No
+Compute the Hungarian algorithm for assignment.,Math,Optimization,No
+Outline a crisis management playbook.,Instruction,Business,No
+Who discovered radio waves?,Knowledge,Physics,No
+Translate to Swedish: 'Balance is the key to harmony.',Instruction,Language,No
+Explain vaccine herd immunity threshold.,Knowledge,Biology,No
+What are the main branches of the United States government and what are their primary roles?,Knowledge,History,No
+Perform principal component analysis on 2D data.,Math,Statistics,No
+"Design a visual oxymoron for ""jumbo shrimp"".",Creative,Language,No
+What causes algal blooms?,Knowledge,Environmental Science,No
+Write a SML module for type-safe lists.,Programming,Computer Science,No
+Read the utopian blueprint and feasibility assess.,Reading,Literature,Yes
+"If a balloon is filled with helium, why does it rise?",Commonsense,Physics,No
+What is the atomic number of oxygen?,Knowledge,Chemistry,No
+"If you squeeze a sponge underwater, what happens when you release it?",Commonsense,Physics,No
+Write a bash script to rename all .txt files in a directory to .bak.,Programming,Computer Science,No
+Read the email thread and draft a concise reply summarizing action items.,Reading,Business,Yes
+Invent a short tale about a clock that runs on forgotten memories.,Creative,Literature,No
+Solve the quadratic equation x^2 - 6x + 8 = 0 using factoring.,Math,Algebra,No
+Who was the first to summit Mount Everest?,Knowledge,History,No
+Explain the role of the pancreas in digestion.,Knowledge,Biology,No
+"Based on the attached map, plan the most efficient walking route to visit three specific landmarks.",Reading,Geography,Yes
+Paraphrase: 'The Industrial Revolution transformed agrarian societies into urban powerhouses.',Instruction,History,No
+What is the square root of 225?,Math,Arithmetic,No
+"If you place ice cream in the sun, what physical change occurs?",Commonsense,Chemistry,No
+Write a Java method to check if a number is prime.,Programming,Computer Science,No
+Read the product review summary and recommend improvements.,Reading,Business,Yes
+Compose a quatrain about the whisper of falling snow.,Creative,Literature,No
+Outline the steps to prepare a basic stir-fry meal.,Instruction,Culinary Arts,No
+What causes the aurora borealis?,Knowledge,Astronomy,No
+Solve for y: y/3 + 2 = 5.,Math,Algebra,No
+Explain the concept of 'inertia' using the example of a passenger in a suddenly stopping bus.,Commonsense ,Physics,No
+What is 64 divided by 8?,Math,Arithmetic,No
+"Write a dialogue where a tenant reports a leaky faucet to their landlord, and they schedule a repair time.",Dialogue,Daily Life,Yes
+Create a fictional diary entry for a scientist who has just discovered a new species of deep-sea fish.,Creative,Biology,No
+What is the difference between a chemical change and a physical change? Provide one example of each.,Knowledge,Chemistry,No
+Write a Python script that takes a URL as input and returns all the hyperlinks found on that webpage.,Programming,Computer Science,No
+"If you pour honey and water into the same glass, which will settle at the bottom? Explain why.",Commonsense,Physics,No
+Calculate the definite integral of f(x) = 2x from x=0 to x=3.,Math,Calculus,No
+Summarize the main argument of the provided academic paper on the causes of the American Civil War.,Reading,History,Yes
+Outline a 5-step process for creating a monthly personal budget.,Instruction,Daily Life,No
+What is the geological process that forms mountains like the Himalayas?,Knowledge,Geology,No
+"Compose a short, melancholic poem about a library after it has closed for the night.",Creative,Literature,No
+"Write a SQL query to join two tables, 'Orders' and 'Customers', on the 'CustomerID' column.",Programming,Computer Science,No
+Tourist: 'What's the weather like today?' Local Guide: 'I can get you the forecast. For which part of the city?',Dialogue,Daily Life,Yes
+Convert 50 miles per hour to kilometers per hour (1 mile = 1.60934 km).,Math,Arithmetic,No
+"Explain the concept of 'opportunity cost' in economics with a simple, everyday example.",Knowledge,Business,No
+Design an experiment to test the hypothesis that plants grow taller when exposed to classical music.,Instruction,Research Methods,No
+Why is the sky blue on a clear day?,Commonsense,Physics,No
+Read the attached business proposal and identify three potential risks.,Reading,Business,Yes
+Write a function in Java that reverses a string without using any built-in reverse methods.,Programming,Computer Science,No
+Imagine a world where humans can photosynthesize. Describe a day in the life of a person in this world.,Creative,Biology,No
+What was the significance of the Rosetta Stone in the field of Egyptology?,Knowledge,History,No
+Subscriber: 'I want to cancel my subscription.' Support Agent: 'I can help with that. Could you please confirm your account email address?',Dialogue,Business,Yes
+Calculate the area of a circle with a diameter of 10 meters.,Math,Geometry,No
+"Provide a step-by-step guide for a beginner to create a simple 'Hello, World!' webpage using HTML.",Instruction,Computer Science,No
+What is the difference between a hypothesis and a theory in a scientific context?,Knowledge,Research Methods,No
+"If a car travels at a constant speed of 60 mph, how long will it take to travel 150 miles?",Math,Arithmetic,No
+Compose a haiku about the sound of a glacier moving.,Creative,Geology,No
+Read the attached poem and explain the central metaphor.,Reading,Literature,Yes
+Write a C# program to read a CSV file and print its contents to the console.,Programming,Computer Science,No
+Why do you see your breath when it's cold outside?,Commonsense,Physics,No
+Explain the function of the ribosomes within a biological cell.,Knowledge,Biology,No
+"Write a short, suspenseful story that ends on a cliffhanger.",Creative,Literature,No
+"Patron: 'Can you recommend a good Italian restaurant nearby?' Concierge: 'Of course. To give you the best options, could you tell me your price range?'",Dialogue,Daily Life,Yes
+What are the three main types of rock? Describe how each is formed.,Knowledge,Geology,No
+Factor the quadratic expression: 2x² + 7x + 3.,Math,Algebra,No
+Outline the key differences between the political systems of ancient Athens and Sparta.,Knowledge,History,No
+Provide instructions on how to perform the Heimlich maneuver on an adult.,Instruction,Daily Life,No
+Write a JavaScript function that fetches data from an API endpoint and logs the JSON response.,Programming,Computer Science,No
+Describe the feeling of 'deja vu' using a creative analogy.,Creative,Daily Life,No
+"Based on the provided company financial statement, is the company's profitability increasing or decreasing? Justify your answer.",Reading,Business,Yes
+"If you mix all the colors of light together, what color do you get? What about all the colors of paint?",Commonsense,Physics,No
+Write a short dialogue where two friends are planning a surprise party for a third friend.,Dialogue,Daily Life,Yes
+What is the purpose of a Punnett square in genetics?,Knowledge,Biology,No
+Find the derivative of f(x) = sin(x²).,Math,Calculus,No
+Create a set of three programming exercises for a beginner learning about 'for' loops.,Instruction,Computer Science,No
+Compose a marketing slogan for a company that sells reusable coffee cups.,Creative,Business,No
+What is plate tectonics and how does it relate to earthquakes?,Knowledge,Geology,No
+Write a Python script to organize files in a directory by their file extension.,Programming,Computer Science,No
+Homeowner: 'My internet is not working.' Tech Support: 'I'm sorry to hear that. Have you tried restarting your router yet?',Dialogue,Daily Life,Yes
+Explain the greenhouse effect and its role in climate change.,Knowledge,Environment,No
+"Write a short, imaginative story about what clouds are made of, from the perspective of a child.",Creative,Literature,No
+"Given the attached abstract of a scientific paper, write a one-sentence summary of its findings.",Reading,Research Methods,Yes
+"If a map has a scale of 1:100,000, what distance in reality does 5 cm on the map represent?",Math,Arithmetic,No
+What is the difference between weather and climate?,Knowledge,Geography,No
+"Design a new, more intuitive icon for a 'save' function, moving away from the floppy disk.",Creative,Computer Science,No
+Provide a list of five tips for effective public speaking.,Instruction,Study Skills,No
+Write a C++ program that uses recursion to calculate the factorial of a number.,Programming,Computer Science,No
+Why does ice float on water?,Commonsense,Chemistry,No
+"Write a short, dramatic monologue from the perspective of a historical figure facing a major decision.",Creative,History,No
+Read the attached terms of service agreement and summarize the clause related to data privacy.,Reading,Daily Life,Yes
+Solve for x: 3(x - 2) = 2(x + 1).,Math,Algebra,No
+What is the role of the mitochondria in a cell?,Knowledge,Biology,No
+Customer: 'I'd like to return an item.' Cashier: 'Certainly. Do you have the order number or the email address used for the purchase?',Dialogue,Business,Yes
+Write a brief history of the development of the internet.,Knowledge,History,No
+"Create a recipe for a fictional, magical potion. List its ingredients and brewing instructions.",Creative,Literature,No
+Write an R script to create a scatter plot from two columns in a data frame.,Programming,Computer Science,No
+Explain how a vaccine works to protect the body from disease.,Knowledge,Biology,No
+Outline a study plan for a student preparing for a final exam in a history course.,Instruction,Study Skills,No
+"If you are facing north and you turn 270 degrees clockwise, which direction are you now facing?",Commonsense,Daily Life,No
+"Write a story that begins with the line: 'The map was a fake, but it led somewhere real.'",Creative,Literature,No
+"Given the attached conflicting eyewitness reports of an event, identify three points of contradiction.",Reading,Research Methods,Yes
+Calculate the hypotenuse of a right-angled triangle with the other two sides being 8 cm and 15 cm.,Math,Geometry,No
+What is the difference between a lunar eclipse and a solar eclipse?,Knowledge,Astronomy,No
+"Write a Python class for a 'Car' object that has attributes for 'make', 'model', and 'year', and a method to display its details.",Programming,Computer Science,No
+Shopper: 'Is this product gluten-free?' Store Employee: 'Let me check that for you. Can you please provide the product's name or barcode number?',Dialogue,Business,Yes
+Describe the rock cycle using an analogy of a person's life journey.,Creative,Geology,No
+What are the primary colors in the additive (light) and subtractive (pigment) color models?,Knowledge,Physics,No
+Provide instructions on how to tie a bowline knot.,Instruction,Daily Life,No
+"Find the next number in the sequence: 1, 1, 2, 3, 5, 8, __.",Math,Arithmetic,No
+"Write a short scene for a play where two characters are having a conversation, but what they're saying is the opposite of what they mean.",Creative,Literature,No
+Write a bash script to count the number of lines in every file within the current directory.,Programming,Computer Science,No
+"Based on the attached product reviews, create a list of the top three pros and cons mentioned by users.",Reading,Business,Yes
+"Explain why Columbus's voyage in 1492 was significant, beyond 'discovering America'.",Knowledge,History,No
+Why is it important to have a diverse portfolio in investing?,Knowledge,Business,No
+Design a travel itinerary for a 3-day trip to Paris for a first-time visitor.,Instruction,Travel,No
+"Write a short, humorous dialogue between a cat and a dog.",Creative,Daily Life,No
+What is the purpose of the 'git clone' command in version control?,Knowledge,Computer Science,No
+"Calculate the mean, median, and mode of the following set of numbers: 2, 5, 8, 2, 5, 9, 5, 10.",Math,Arithmetic,No
+Write a story about a society where people's shadows have lives of their own.,Creative,Literature,No
+Read the attached scientific abstract and rephrase its conclusion for a non-scientific audience.,Reading,Research Methods,Yes
+What is the chemical equation for cellular respiration?,Knowledge,Biology,No
+Write a Go function that takes an array of integers and returns the sum of all even numbers.,Programming,Computer Science,No
+New User: 'I forgot my password.' Automated System: 'No problem. A password reset link has been sent to the email address associated with your account.',Dialogue,Business,Yes
+"Explain the difference between renewable and non-renewable energy sources, giving two examples of each.",Knowledge,Environment,No
+Create a step-by-step guide for a basic magic trick using a deck of cards.,Instruction,Daily Life,No
+"Compose a villain's monologue explaining their motivation, but make it surprisingly relatable.",Creative,Literature,No
+What is the significance of the Magna Carta in the history of law?,Knowledge,History,No
+Write a Python script to convert a directory of JPEG images to PNG format.,Programming,Computer Science,No
+"If you are in a moving car and you toss a ball straight up, where will it land? Explain your answer with respect to inertia.",Commonsense,Physics,No
+Find the roots of the equation x² - 5x + 6 = 0.,Math,Algebra,No
+Write a short dialogue where a travel agent helps a customer plan a vacation on a tight budget.,Dialogue,Travel,Yes
+"Based on the attached historical document, what was the daily life like for a person in that era?",Reading,History,Yes
+What is 'confirmation bias'? Provide a real-world example.,Knowledge,Research Methods,No
+Imagine you are an urban planner. Propose a creative idea to add more green space to a dense city.,Creative,Environment,No
+Write a Java program to implement a stack data structure.,Programming,Computer Science,No
+What is the difference between latitude and longitude?,Knowledge,Geography,No
+Provide a simplified explanation of Einstein's theory of general relativity using an analogy.,Instruction,Physics,No
+"If you have a 3-gallon jug and a 5-gallon jug, how can you measure out exactly 4 gallons of water?",Commonsense,Daily Life,No
+"Write a short, spooky story about a haunted vending machine.",Creative,Literature,No
+What is the role of an operating system in a computer?,Knowledge,Computer Science,No
+Listener: 'Can you tell me about the artist of this song?' Music App Assistant: 'I can try! How do you spell the artist's name?',Dialogue,Daily Life,Yes
+Calculate the surface area of a cube with a side length of 4 inches.,Math,Geometry,No
+"Read the two attached, opposing editorials on a political issue and summarize the main point of each.",Reading,Business,Yes
+Write a Perl script to find all lines in a file that contain the word 'error'.,Programming,Computer Science,No
+Explain the process of natural selection using the example of the peppered moth.,Knowledge,Biology,No
+"Create a fictional creature and describe its habitat, diet, and behavior.",Creative,Biology,No
+What is the purpose of a firewall in network security?,Knowledge,Computer Science,No
+"Write a short dialogue between a person and their reflection in the mirror, which has a different personality.",Creative,Literature,No
+"If you invest $500 at an annual interest rate of 4% compounded annually, how much will you have after 2 years?",Math,Algebra,No
+Outline a plan for a research project to study the effects of social media on teenage self-esteem.,Instruction,Research Methods,No
+Write a Ruby method that takes an array and returns a new array with duplicate elements removed.,Programming,Computer Science,No
+"Based on the attached weather chart, what is the forecast for tomorrow?",Reading,Geography,Yes
+Compose a formal letter of complaint to a company about a faulty product.,Instruction,Business,No
+What is the 'Ring of Fire' and where is it located?,Knowledge,Geology,No
+"Child: 'I'm bored.' Parent: 'I can help with that. Would you like to hear a joke, a fun fact, or a riddle?'",Dialogue,Daily Life,Yes
+Write a short story from the perspective of a single raindrop during a storm.,Creative,Environment,No
+What is the difference between an acid and a base?,Knowledge,Chemistry,No
+Write a Python script using the Pandas library to read a CSV and calculate the average of a specific column.,Programming,Computer Science,No
+"If you are at the equator, are you closer to the center of the Earth than if you are at the North Pole? Why?",Commonsense,Geography,No
+Analyze the use of symbolism in the final scene of the attached short story.,Reading,Literature,Yes
+"Create a new national holiday. What does it celebrate, and what are its traditions?",Creative,History,No
+Solve the system of linear equations: y = 2x + 1 and y = -x + 4.,Math,Algebra,No
+What is the historical origin of the Olympic Games?,Knowledge,History,No
+"Write a TypeScript interface for a 'User' object with properties for id, name, and email.",Programming,Computer Science,No
+Diner: 'Book a table for two at 7 PM.' Restaurant Host: 'Certainly. For what name?',Dialogue,Daily Life,Yes
+Explain the concept of 'half-life' using an analogy that doesn't involve radioactivity.,Instruction,Physics,No
+Write a scene where a character must make a difficult moral choice.,Creative,Literature,No
+What is the function of the ozone layer?,Knowledge,Environment,No
+Write a program in Swift that sorts an array of strings alphabetically.,Programming,Computer Science,No
+"Based on the attached biography, what was the subject's greatest challenge?",Reading,History,Yes
+What are the five stages of grief?,Knowledge,Study Skills,No
+Create a fictional proverb and explain its meaning.,Creative,Literature,No
+"If you have a bag with 5 red balls and 3 blue balls, what is the probability of picking a blue ball at random?",Math,Arithmetic,No
+Write a dialogue between two astronauts witnessing an Earthrise for the first time.,Creative,Astronomy,No
+What is the difference between RAM and ROM in a computer?,Knowledge,Computer Science,No
+Write an Excel formula to calculate the average of cells A1 through A50.,Instruction,Computer Science,No
+Read the attached recipe and scale the ingredients down to serve two people instead of six.,Reading,Culinary Arts,Yes
+Describe a color to someone who has never seen it.,Creative,Daily Life,No
+What is the freezing and boiling point of water in Celsius and Fahrenheit?,Knowledge,Chemistry,No
+Write a Python function that uses a list comprehension to return all the even numbers from a given list.,Programming,Computer Science,No
+Student: 'What's the capital of Australia?' Teacher: 'The capital of Australia is Canberra.',Dialogue,Geography,No
+Why do leaves change color in the fall?,Knowledge,Biology,No
+Write a short piece of flash fiction (under 200 words) based on a historical event.,Creative,History,No
+Solve the inequality: 2x - 5 > 7.,Math,Algebra,No
+Outline a persuasive argument for why schools should teach financial literacy.,Instruction,Business,No
+Write a Kotlin function to find the longest string in an array of strings.,Programming,Computer Science,No
+"Based on the provided chart of a company's stock performance, describe the overall trend for the past year.",Reading,Business,Yes
+"If you are digging a hole, and you separate the dirt into two piles, is the total weight of the two piles of dirt less than, greater than, or equal to the weight of the dirt before you dug the hole?",Commonsense,Physics,No
+"Write a laudatory poem for a common object, like a fork or a key.",Creative,Literature,No
+What is the purpose of an index in a database?,Knowledge,Computer Science,No
+Traveler: 'I'd like to book a flight.' Booking System: 'I can help with that. Where would you like to fly from and to?',Dialogue,Travel,Yes
+What is the difference between a simile and a metaphor?,Knowledge,Literature,No
+"Write a short, engaging story to explain a complex scientific concept (e.g., black holes, DNA) to a child.",Creative,Physics,No
+Provide a list of three effective techniques for memorization.,Instruction,Study Skills,No
+"A farmer has 17 sheep, and all but 9 die. How many are left?",Commonsense,Arithmetic,No
+Write a function in PHP that checks if an email address is valid using a regular expression.,Programming,Computer Science,No
+Read the attached legal disclaimer and explain who is not liable in case of an accident.,Reading,Daily Life,Yes
+"What is the Pythagorean theorem, and what is it used for?",Knowledge,Geometry,No
+"Write a short, optimistic story about the first human colony on Mars.",Creative,Astronomy,No
+What is the difference between qualitative and quantitative data?,Knowledge,Research Methods,No
+Write a short dialogue where a character confesses a long-held secret.,Creative,Literature,No
+Convert the binary number 1011 to its decimal equivalent.,Math,Computer Science,No
+Write a recipe for a simple pasta dish.,Instruction,Culinary Arts,No
+"Caller: 'What are your hours?' IVR System: 'Our business hours are Monday to Friday, 9 AM to 5 PM Eastern Time.'",Dialogue,Business,No
+What is the significance of the Nile River to ancient Egyptian civilization?,Knowledge,History,No
+"Write a Rust program to print the numbers from 1 to 100, but for multiples of three print 'Fizz' and for multiples of five print 'Buzz'.",Programming,Computer Science,No
+"Imagine you are a tour guide for your own hometown. Write a short, welcoming speech for a group of tourists.",Creative,Travel,No
+"Based on the attached consumer report, which of the two products is the better value? Explain your reasoning.",Reading,Business,Yes
+"If you drop a coin and a feather at the same time in a vacuum, which will hit the ground first?",Commonsense,Physics,No
+What is the definition of irony? Provide an example.,Knowledge,Literature,No
+Write a story that is told in reverse chronological order.,Creative,Literature,No
+"Find the slope of the line that passes through the points (2, 3) and (5, 9).",Math,Algebra,No
+Write a brief explanation of how GPS (Global Positioning System) works.,Knowledge,Technology,No
+Provide a set of instructions for a user to clear their web browser's cache.,Instruction,Computer Science,No
+Inquisitive Person: 'Tell me something interesting.' AI Assistant: 'The national animal of Scotland is the unicorn.',Dialogue,Daily Life,No
+What are the main causes of volcanic eruptions?,Knowledge,Geology,No
+Write a Python script that finds and deletes duplicate files in a specified folder.,Programming,Computer Science,No
+"Write a short, comedic scene about two people arguing over the last piece of pizza.",Creative,Daily Life,No
+Read the attached medication label and identify the active ingredient and the recommended dosage for an adult.,Reading,Daily Life,Yes
+What is the purpose of a resume or CV?,Knowledge,Business,No
+"If you are on a boat and you throw a heavy suitcase overboard, will the water level of the lake rise, fall, or stay the same?",Commonsense,Physics,No
+"Write a short story from the perspective of an inanimate object, such as a park bench or a teapot.",Creative,Literature,No
+What is the difference between HTTP and HTTPS?,Knowledge,Computer Science,No
+Calculate 20% of 150.,Math,Arithmetic,No
+"Write a short, heartfelt thank-you note to a teacher who has had a positive impact on you.",Instruction,Daily Life,No
+Passenger: 'I need to change my flight.' Airline Representative: 'I can assist with that. Please provide your booking reference number.',Dialogue,Travel,Yes
+What are the main functions of the human skeleton?,Knowledge,Biology,No
+Write a short script for a commercial advertising a fictional product.,Creative,Business,No
+Read the attached two descriptions of the same historical event from different perspectives and identify three key differences in their accounts.,Reading,History,Yes

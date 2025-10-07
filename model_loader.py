@@ -1,15 +1,14 @@
 import os
 import torch
+import copy
 os.environ['HF_HOME'] = 'd:\\LLM Research\\hf_cache'
-
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 from pruners.head_pruner import HeadPruner
 from pruners.ffn_pruner import FFNPruner
-from pruners.layer_skipper import LayerSkipper
 from pruners.structured_ffn_slicer import StructuredFFNSlicer
 from pruners.structured_head_slicer import StructuredHeadSlicer
-from pruners.kv_cache_pruner import KVCachePruner
+from pruners.layer_skipper import LayerSkipper
 
 
 def _load_hf_token_from_env(env_path: str = ".env") -> str:
@@ -33,239 +32,301 @@ def _load_hf_token_from_env(env_path: str = ".env") -> str:
 
 
 class RealModelEngine:
-    def __init__(self):
+    def __init__(self, device: str = "auto", enable_static_profiles: bool = False, enable_2to4: bool = False, enable_compile: bool = False, enable_kv_compression: bool = False, kv_keep_ratio: float = 1.0):
         token = _load_hf_token_from_env()
         if token:
             login(token=token)
         else:
             print("[Engine] Warning: No HF token found in env/.env. Using cached auth if available.")
 
-        model_name = "meta-llama/Llama-3.2-1B"
-        print(f"[Engine] Loading model: {model_name}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+        self.model_name = "meta-llama/Llama-3.2-1B"
+        print(f"[Engine] Loading model: {self.model_name} on device {device}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        if device == "cpu":
+            self.device_map = None
+        else:
+            self.device_map = "auto"
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, device_map=self.device_map)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         print(f"[Engine] Llama 3.2 1B model loaded to {self.model.device}.")
 
+        # Capabilities
+        self.enable_static_profiles = bool(enable_static_profiles)
+        self.enable_2to4 = bool(enable_2to4)
+        self.enable_compile = bool(enable_compile)
+        self.profiles_dir = os.path.join(os.getcwd(), 'profiles')
+        self.active_profile_key = None
+        if self.enable_static_profiles:
+            os.makedirs(self.profiles_dir, exist_ok=True)
+        # KV-cache compression flags (Phase D, scaffold)
+        self.enable_kv_compression = bool(enable_kv_compression)
+        self.kv_keep_ratio = float(kv_keep_ratio)
+        self._kv_warned = False
+
         # Phase 2 scaffold: reversible head/ffn/layer masking via hooks
         self.head_pruner = HeadPruner(self.model)
         self.ffn_pruner = FFNPruner(self.model)
-        self.layer_skipper = LayerSkipper(self.model)
+        import pruners.layer_skipper
+        self.layer_skipper = pruners.layer_skipper.LayerSkipper(self.model)
         # Phase 3 (structural): FFN & Head slicers that rebuild layers for real speedups
         self.structured_ffn = StructuredFFNSlicer(self.model)
         self.structured_head = StructuredHeadSlicer(self.model)
-        # KV Cache pruner for runtime cache size reduction
-        self.kv_pruner = KVCachePruner(self.model)
 
         # Calibration caches (activation-aware importances)
         self.head_importance = {}   # layer_idx -> tensor[num_heads]
         self.ffn_importance = {}    # layer_idx -> tensor[inter_size]
         self.layer_importance = []  # per-layer importance (avg |activation| over tokens)
 
-    def apply_pruning(self, action) -> None:
-        """Apply pruning according to the action. Currently supports head masking scaffold."""
+    def _rebuild_pruners(self) -> None:
+        # Rebuild pruners for the current self.model (used after switching profiles)
+        self.head_pruner = HeadPruner(self.model)
+        self.ffn_pruner = FFNPruner(self.model)
+        import pruners.layer_skipper
+        self.layer_skipper = pruners.layer_skipper.LayerSkipper(self.model)
+        self.structured_ffn = StructuredFFNSlicer(self.model)
+        self.structured_head = StructuredHeadSlicer(self.model)
+
+    def _profile_key(self, action) -> str:
+        t = getattr(action, 'target', 'none')
+        s = str(float(getattr(action, 'intensity', 0.0) or 0.0))
+        return f"{t}_{s}"
+
+    def _profile_dir(self, key: str) -> str:
+        return os.path.join(self.profiles_dir, key)
+
+    def _try_enable_2to4_on_model(self, model: AutoModelForCausalLM) -> None:
+        if not getattr(self, 'enable_2to4', False):
+            return
+        if not torch.cuda.is_available():
+            print("[Sparsity] 2:4 requested but CUDA not available; skipping.")
+            return
+        try:
+            # Placeholder for semi-structured sparsity packing (requires torchao / PyTorch AO).
+            print("[Sparsity] 2:4 semi-structured packing scaffold only (no-op in this environment).")
+        except Exception as e:
+            print(f"[Sparsity] 2:4 packing failed (skipping): {e}")
+
+    def _maybe_compile_model(self, model: AutoModelForCausalLM) -> AutoModelForCausalLM:
+        if not getattr(self, 'enable_compile', False):
+            return model
+        try:
+            compile = getattr(torch, 'compile', None)
+            if compile is None:
+                print("[Compile] torch.compile not available; skipping.")
+                return model
+            print("[Compile] Compiling model profile (one-time)...")
+            return compile(model)
+        except Exception as e:
+            print(f"[Compile] compile failed (skipping): {e}")
+            return model
+
+    def _build_profile_model(self, action) -> AutoModelForCausalLM:
+        # Fresh model instance to apply structural pruning and persist as a profile
+        new_model = AutoModelForCausalLM.from_pretrained(self.model_name, device_map=self.device_map)
         target = getattr(action, "target", "none")
         intensity = float(getattr(action, "intensity", 0.0) or 0.0)
-        structural_env = os.getenv("STRUCTURAL_PRUNING", "0") == "1"
-        # Force structural pruning for heads/FFN to realize real throughput gains
-        force_structural = target in ("attention_heads", "ffn_neurons")
-        structural = force_structural or structural_env
+        if target == 'none' or intensity <= 0.0:
+            return new_model
 
+        # Local slicers for the fresh model
+        local_head = StructuredHeadSlicer(new_model)
+        local_ffn = StructuredFFNSlicer(new_model)
+
+        layers = getattr(new_model.model, 'layers', [])
+
+        # Phase C: collect baseline layer output sums before pruning (for gain correction)
+        sums_before = None
+        try:
+            prompts = getattr(self, '_calib_prompts_recent', None)
+            if prompts:
+                sums_before = self._collect_layer_output_sums(new_model, prompts, max_samples=min(32, len(prompts)), max_seq_len=128)
+        except Exception:
+            sums_before = None
+        if target == 'attention_heads':
+            cfg = getattr(new_model, "config", None)
+            num_heads = getattr(cfg, "num_attention_heads", 32)
+            num_kv_heads = getattr(cfg, "num_key_value_heads", max(1, num_heads // 4))
+            heads_per_group = max(1, num_heads // num_kv_heads)
+            groups_to_remove_count = int(round(intensity * num_kv_heads))
+            if groups_to_remove_count <= 0:
+                return new_model
+            per_layer_removed_q, per_layer_removed_kv = {}, {}
+            for i, _layer in enumerate(layers):
+                q_head_scores = self.head_importance.get(i, torch.ones(num_heads))
+                group_scores = q_head_scores.view(num_kv_heads, heads_per_group).mean(dim=1)
+                kv_heads_to_remove = torch.topk(group_scores, groups_to_remove_count, largest=False).indices.tolist()
+                q_heads_to_remove = []
+                for kv_idx in kv_heads_to_remove:
+                    start_q_idx = kv_idx * heads_per_group
+                    q_heads_to_remove.extend(range(start_q_idx, start_q_idx + heads_per_group))
+                per_layer_removed_q[i] = sorted(q_heads_to_remove)
+                per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
+            local_head.prune(per_layer_removed_q, per_layer_removed_kv)
+        elif target == 'ffn_neurons':
+            if not layers:
+                return new_model
+            inter_size = getattr(layers[0].mlp.down_proj, 'weight', None).shape[1]
+            k = max(1, int(round(inter_size * intensity)))
+            per_layer_removed = {}
+            for i, _layer in enumerate(layers):
+                if i in self.ffn_importance:
+                    scores = self.ffn_importance[i]
+                    removed = torch.topk(scores, k, largest=False).indices.tolist()
+                else:
+                    mlp = _layer.mlp
+                    with torch.no_grad():
+                        g_scores = torch.linalg.vector_norm(mlp.gate_proj.weight, ord=2, dim=1)
+                        u_scores = torch.linalg.vector_norm(mlp.up_proj.weight, ord=2, dim=1)
+                        d_scores = torch.linalg.vector_norm(mlp.down_proj.weight, ord=2, dim=0)
+                        scores = g_scores + u_scores + d_scores
+                        removed = torch.topk(scores, k, largest=False).indices.tolist()
+                per_layer_removed[i] = removed
+            local_ffn.prune(per_layer_removed)
+        else:
+            return new_model
+
+        # Optional 2:4 packing and compile
+        self._try_enable_2to4_on_model(new_model)
+        new_model = self._maybe_compile_model(new_model)
+
+        # Phase C: lightweight reconstruction via per-layer gain correction using calibration prompts
+        try:
+            if sums_before is not None:
+                prompts = getattr(self, '_calib_prompts_recent', None)
+                sums_after = self._collect_layer_output_sums(new_model, prompts, max_samples=min(32, len(prompts)), max_seq_len=128)
+                eps = 1e-8
+                with torch.no_grad():
+                    for i, layer in enumerate(getattr(new_model.model, 'layers', [])):
+                        sb = float(sums_before.get(i, 1.0))
+                        sa = float(sums_after.get(i, 1.0))
+                        scale = sb / sa if sa > 0 else 1.0
+                        # Bound scale to avoid instability
+                        if scale <= 0 or not torch.isfinite(torch.tensor(scale)):
+                            scale = 1.0
+                        scale = max(0.5, min(2.0, scale))
+                        # Apply to attn.o_proj and mlp.down_proj if present
+                        attn = getattr(layer, 'self_attn', None)
+                        if attn is not None and hasattr(attn, 'o_proj') and hasattr(attn.o_proj, 'weight'):
+                            attn.o_proj.weight.mul_(scale)
+                        mlp = getattr(layer, 'mlp', None)
+                        if mlp is not None and hasattr(mlp, 'down_proj') and hasattr(mlp.down_proj, 'weight'):
+                            mlp.down_proj.weight.mul_(scale)
+        except Exception:
+            pass
+        return new_model
+
+    def activate_profile(self, action) -> None:
+        key = self._profile_key(action)
+        if getattr(self, 'active_profile_key', None) == key:
+            return
+        if not getattr(self, 'enable_static_profiles', False):
+            return
+        d = os.path.join(self.profiles_dir, key)
+        if not os.path.exists(d):
+            print(f"[Profiles] Building profile '{key}'...")
+            new_model = self._build_profile_model(action)
+            os.makedirs(d, exist_ok=True)
+            new_model.save_pretrained(d)
+            self.tokenizer.save_pretrained(d)
+        else:
+            print(f"[Profiles] Loading cached profile '{key}'...")
+        loaded = AutoModelForCausalLM.from_pretrained(d, device_map=self.device_map)
+        self.model = loaded
+        self._rebuild_pruners()
+        self.active_profile_key = key
+
+    def apply_pruning(self, action) -> None:
+        """Apply pruning according to the action, with corrected GQA-aware head pruning."""
+        target = getattr(action, "target", "none")
+        intensity = float(getattr(action, "intensity", 0.0) or 0.0)
+        # Static profile fast-path (Phase A): swap entire model to a prebuilt profile
+        if getattr(self, 'enable_static_profiles', False) and target in ("attention_heads", "ffn_neurons", "none"):
+            self.activate_profile(action)
+            return
+        
         if target == "attention_heads" and intensity > 0.0:
-            # Determine number of heads per layer (assume homogeneous across layers)
             layers = getattr(self.model.model, "layers", [])
             if not layers:
                 print("[Engine] No layers found; cannot apply head pruning.")
                 return
-            # Prefer config if available
             cfg = getattr(self.model, "config", None)
-            num_heads = getattr(cfg, "num_attention_heads", None) if cfg is not None else None
-            if num_heads is None:
-                # fallback to first layer attr
-                attn0 = getattr(layers[0], "self_attn", None)
-                num_heads = getattr(attn0, "num_heads", None)
-            if num_heads is None:
-                print("[Engine] Couldn't determine num_heads; skipping head pruning.")
+            num_heads = getattr(cfg, "num_attention_heads", 32)
+            num_kv_heads = getattr(cfg, "num_key_value_heads", 8)
+            
+            # Correct GQA logic: Determine how many KV heads (and their corresponding Q head groups) to remove.
+            heads_per_group = num_heads // num_kv_heads
+            groups_to_remove_count = int(round(intensity * num_kv_heads))
+            
+            if groups_to_remove_count == 0:
+                print(f"[Engine] Intensity {intensity} is too low to prune any head groups. No-op.")
                 return
-            k = max(1, int(round(num_heads * intensity)))
-            k = min(k, num_heads)
-            if structural:
-                # Magnitude-based per-head importance using q/k/v weights (GQA-safe)
-                per_layer_removed = {}
-                for i, layer in enumerate(layers):
-                    attn = getattr(layer, "self_attn", None)
-                    if attn is None:
-                        continue
-                    # Prefer calibration if available
-                    if i in self.head_importance and len(self.head_importance[i]) == num_heads:
-                        scores = self.head_importance[i]
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    else:
-                        q = getattr(attn, 'q_proj', None)
-                        kproj = getattr(attn, 'k_proj', None)
-                        v = getattr(attn, 'v_proj', None)
-                        o = getattr(attn, 'o_proj', None)
-                        if any(m is None for m in [q, kproj, v, o]):
-                            continue
-                        try:
-                            head_dim = (q.out_features // num_heads)
-                        except Exception:
-                            continue
-                        with torch.no_grad():
-                            def head_scores_linear(m: torch.nn.Linear):
-                                W = m.weight.view(num_heads, head_dim, -1)
-                                return torch.linalg.vector_norm(W, ord=2, dim=(1, 2))
-                            def safe_scores(m: torch.nn.Linear):
-                                try:
-                                    return head_scores_linear(m)
-                                except Exception:
-                                    return None
-                            s_q = head_scores_linear(q)
-                            s_k = safe_scores(kproj)
-                            s_v = safe_scores(v)
-                            if s_k is not None and s_v is not None and s_k.shape[0] == s_q.shape[0] and s_v.shape[0] == s_q.shape[0]:
-                                scores = s_q + s_k + s_v
-                            else:
-                                # GQA-safe fallback: use Q-only importance
-                                scores = s_q
-                            removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    per_layer_removed[i] = removed
-                print(f"[Engine] Applying STRUCTURAL head pruning: removing {k}/{num_heads} heads per layer (calib/magnitude-based).")
-                self.structured_head.prune(per_layer_removed)
-            else:
-                # Functional masking with calibration-aware or magnitude-based importance (GQA-safe)
-                per_layer_removed = {}
-                for i, layer in enumerate(layers):
-                    attn = getattr(layer, "self_attn", None)
-                    if attn is None:
-                        continue
-                    if i in self.head_importance and len(self.head_importance[i]) == num_heads:
-                        scores = self.head_importance[i]
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    else:
-                        q = getattr(attn, 'q_proj', None)
-                        kproj = getattr(attn, 'k_proj', None)
-                        v = getattr(attn, 'v_proj', None)
-                        o = getattr(attn, 'o_proj', None)
-                        if any(m is None for m in [q, kproj, v, o]):
-                            continue
-                        try:
-                            head_dim = (q.out_features // num_heads)
-                        except Exception:
-                            continue
-                        with torch.no_grad():
-                            def head_scores_linear(m: torch.nn.Linear):
-                                W = m.weight.view(num_heads, head_dim, -1)
-                                return torch.linalg.vector_norm(W, ord=2, dim=(1, 2))
-                            def safe_scores(m: torch.nn.Linear):
-                                try:
-                                    return head_scores_linear(m)
-                                except Exception:
-                                    return None
-                            s_q = head_scores_linear(q)
-                            s_k = safe_scores(kproj)
-                            s_v = safe_scores(v)
-                            if s_k is not None and s_v is not None and s_k.shape[0] == s_q.shape[0] and s_v.shape[0] == s_q.shape[0]:
-                                scores = s_q + s_k + s_v
-                            else:
-                                scores = s_q
-                            removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    per_layer_removed[i] = removed
-                print(f"[Engine] Applying head mask (calib-aware): pruning {k}/{num_heads} heads per layer (functional).")
-                self.head_pruner.apply(per_layer_removed)
-        elif target == "none":
-            self.head_pruner.restore()
-            self.ffn_pruner.restore()
-            self.layer_skipper.restore()
+            per_layer_removed_q = {}
+            per_layer_removed_kv = {}
+            for i, layer in enumerate(layers):
+                # Use importance scores to find the least important KV groups to prune.
+                # We will score each group by the average importance of its Q heads.
+                q_head_scores = self.head_importance.get(i, torch.ones(num_heads))
+                
+                # Reshape scores to (num_kv_heads, heads_per_group) and find the mean score for each group.
+                group_scores = q_head_scores.view(num_kv_heads, heads_per_group).mean(dim=1)
+                
+                # Find the indices of the least important KV groups.
+                kv_heads_to_remove = torch.topk(group_scores, groups_to_remove_count, largest=False).indices.tolist()
+                
+                # Determine all corresponding Q heads that belong to the groups being removed.
+                q_heads_to_remove = []
+                for kv_idx in kv_heads_to_remove:
+                    start_q_idx = kv_idx * heads_per_group
+                    q_heads_to_remove.extend(range(start_q_idx, start_q_idx + heads_per_group))
+                per_layer_removed_q[i] = sorted(q_heads_to_remove)
+                per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
+            print(f"[Engine] Applying GQA-CORRECT STRUCTURAL head pruning: removing {groups_to_remove_count}/{num_kv_heads} KV groups per layer.")
+            self.structured_head.prune(per_layer_removed_q, per_layer_removed_kv)
         elif target == "ffn_neurons" and intensity > 0.0:
             layers = getattr(self.model.model, "layers", [])
             if not layers:
                 print("[Engine] No layers found; cannot apply FFN pruning.")
                 return
-            mlp0 = getattr(layers[0], "mlp", None)
-            down_proj0 = getattr(mlp0, "down_proj", None) if mlp0 is not None else None
-            if down_proj0 is None or not hasattr(down_proj0, "weight"):
-                print("[Engine] Couldn't read FFN dims; skipping FFN pruning.")
-                return
-            inter_size = down_proj0.weight.shape[1]
+            inter_size = layers[0].mlp.down_proj.weight.shape[1]
             k = max(1, int(round(inter_size * intensity)))
-            k = min(k, inter_size)
-
-            if structural:
-                # Magnitude-based structured pruning: choose least-important channels per layer
-                per_layer_removed = {}
-                for i, layer in enumerate(layers):
+            per_layer_removed = {}
+            for i, layer in enumerate(layers):
+                if i in self.ffn_importance:
+                    scores = self.ffn_importance[i]
+                    removed = torch.topk(scores, k, largest=False).indices.tolist()
+                else: # Fallback to magnitude
                     mlp = getattr(layer, "mlp", None)
-                    if mlp is None or not hasattr(mlp, "down_proj"):
-                        continue
-                    # Prefer calibration if available
-                    if i in self.ffn_importance:
-                        scores = self.ffn_importance[i]
+                    gate, up, down = mlp.gate_proj, mlp.up_proj, mlp.down_proj
+                    with torch.no_grad():
+                        scores = torch.linalg.vector_norm(gate.weight, ord=2, dim=1) + \
+                                 torch.linalg.vector_norm(up.weight, ord=2, dim=1) + \
+                                 torch.linalg.vector_norm(down.weight, ord=2, dim=0)
                         removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    else:
-                        gate, up, down = mlp.gate_proj, mlp.up_proj, mlp.down_proj
-                        # Compute per-channel importance using L2 norms from gate/up rows and down columns
-                        with torch.no_grad():
-                            g_scores = torch.linalg.vector_norm(gate.weight, ord=2, dim=1)
-                            u_scores = torch.linalg.vector_norm(up.weight, ord=2, dim=1)
-                            d_scores = torch.linalg.vector_norm(down.weight, ord=2, dim=0)
-                            scores = g_scores + u_scores + d_scores
-                            removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    per_layer_removed[i] = removed
-                print(f"[Engine] Applying STRUCTURAL FFN pruning: removing {k}/{inter_size} channels per layer (calib-aware/magnitude-based).")
-                self.structured_ffn.prune(per_layer_removed)
-            else:
-                # Functional masking with calibration-aware or magnitude-based importance
-                per_layer_removed = {}
-                for i, layer in enumerate(layers):
-                    mlp = getattr(layer, "mlp", None)
-                    if mlp is None or not hasattr(mlp, "down_proj"):
-                        continue
-                    if i in self.ffn_importance:
-                        scores = self.ffn_importance[i]
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    else:
-                        gate, up, down = mlp.gate_proj, mlp.up_proj, mlp.down_proj
-                        with torch.no_grad():
-                            g_scores = torch.linalg.vector_norm(gate.weight, ord=2, dim=1)
-                            u_scores = torch.linalg.vector_norm(up.weight, ord=2, dim=1)
-                            d_scores = torch.linalg.vector_norm(down.weight, ord=2, dim=0)
-                            scores = g_scores + u_scores + d_scores
-                            removed = torch.topk(scores, k, largest=False).indices.tolist()
-                    per_layer_removed[i] = removed
-                print(f"[Engine] Applying FFN channel mask (calib-aware): pruning {k}/{inter_size} channels per layer (functional).")
-                self.ffn_pruner.apply(per_layer_removed)
+                per_layer_removed[i] = removed
+                
+            print(f"[Engine] Applying STRUCTURAL FFN pruning: removing {k}/{inter_size} channels per layer.")
+            self.structured_ffn.prune(per_layer_removed)
         elif target == "transformer_layers" and intensity > 0.0:
             layers = getattr(self.model.model, "layers", [])
             L = len(layers)
-            if L == 0:
-                print("[Engine] No layers found; cannot skip layers.")
-                return
+            if L == 0: return
             k = max(1, int(round(L * intensity)))
-            # Cap skipping to at most 12.5% of layers to avoid catastrophic degradation (e.g., <=2 of 16)
-            k = min(k, max(1, L // 8))
-            k = min(k, L)
-            # Select least-important layers from calibrated scores (exclude first/last)
-            allowed = [i for i in range(L) if i not in (0, L-1)]
-            if isinstance(self.layer_importance, list) and len(self.layer_importance) == L and any(isinstance(v, (int, float)) for v in self.layer_importance):
-                scores = sorted([(i, float(self.layer_importance[i])) for i in allowed], key=lambda x: x[1])
-                to_skip = [i for i, _ in scores[:k]] if scores else []
-                if len(to_skip) < k:
-                    # Fallback to trailing layers if insufficient
-                    fallback = [i for i in range(L - k, L) if i in allowed and i not in to_skip]
-                    to_skip = (to_skip + fallback)[:k]
-                print(f"[Engine] Skipping {k}/{L} least-important layers: {to_skip}")
-            else:
-                # Fallback: skip last-k
-                to_skip = [i for i in range(L - k, L) if i in allowed]
-                print(f"[Engine] Skipping {len(to_skip)}/{L} trailing layers (no layer importance available): {to_skip}")
-            self.layer_skipper.apply(to_skip)
-        elif target == "kv_cache" and intensity > 0.0:
-            self.kv_pruner.apply_prune(intensity)
-        else:
-            # Other targets (ffn_neurons, transformer_layers) will be implemented structurally in Phase 2/3
-            print(f"[Engine] Pruning target '{target}' not yet implemented structurally; no-op for now.")
+            k = min(k, max(1, L // 8)) # Cap skipping to 12.5% to preserve quality
+            
+            if self.layer_importance and len(self.layer_importance) == L:
+                scores = torch.tensor(self.layer_importance)
+                to_skip = torch.topk(scores, k, largest=False).indices.tolist()
+            else: # Fallback to skipping trailing layers
+                to_skip = list(range(L - k, L))
+            
+            # Crucially, never skip the first or last layers of the model
+            to_skip_safe = [idx for idx in to_skip if idx != 0 and idx != L-1]
+            print(f"[Engine] Skipping {len(to_skip_safe)}/{L} layers: {to_skip_safe}")
+            self.layer_skipper.apply(to_skip_safe)
+            
+        elif target == "none":
+            self.restore_model()
 
     def restore_model(self) -> None:
         # Restore functional masks
@@ -275,8 +336,6 @@ class RealModelEngine:
         # Restore structural slicing (if any)
         self.structured_ffn.restore()
         self.structured_head.restore()
-        # Restore KV cache pruning
-        self.kv_pruner.restore()
 
     def calibrate_importances(self, prompts, max_samples: int = 64, max_seq_len: int = 128) -> None:
         """Collect activation-aware importance for heads and FFN channels using a small calibration set.
@@ -416,29 +475,93 @@ class RealModelEngine:
                 s = float(layer_sums.get(i, 0.0))
                 c = float(layer_counts.get(i, 0))
                 self.layer_importance.append(s / max(1.0, c))
+        # Retain a copy of prompts for later reconstruction passes (Phase C)
+        try:
+            self._calib_prompts_recent = list(prompts[:max_samples]) if prompts else []
+        except Exception:
+            self._calib_prompts_recent = []
         print(f"[Calib] Completed on {used} samples. Head importances: {len(self.head_importance)} layers, FFN importances: {len(self.ffn_importance)} layers, Layer importances: {len(self.layer_importance)}.")
 
+    def _collect_layer_output_sums(self, model: AutoModelForCausalLM, prompts, max_samples: int = 32, max_seq_len: int = 128) -> dict:
+        """Collect per-layer output |activation| sums over a small prompt set for gain estimation."""
+        layers = getattr(model.model, 'layers', [])
+        if not layers:
+            return {}
+        sums = {i: 0.0 for i in range(len(layers))}
+        hooks = []
+        try:
+            def make_layer_hook(idx):
+                def fwd_hook(module, inputs, output):
+                    try:
+                        hs = output[0] if isinstance(output, (tuple, list)) else output
+                        if hs is None:
+                            return
+                        if hasattr(hs, 'abs'):
+                            sums[idx] += float(hs.detach().abs().sum().item())
+                    except Exception:
+                        pass
+                return fwd_hook
+            for i, layer in enumerate(layers):
+                hooks.append(layer.register_forward_hook(make_layer_hook(i)))
+            model.eval()
+            used = 0
+            with torch.no_grad():
+                for p in prompts[:max_samples]:
+                    tok = self.tokenizer(p, return_tensors='pt', truncation=True, max_length=max_seq_len).to(model.device)
+                    try:
+                        _ = model(**tok)
+                        used += 1
+                    except Exception:
+                        continue
+        finally:
+            for h in hooks:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+        return sums
+
     def generate_response(self, prompt: str, max_length: int = 50) -> str:
-        effective_max = self.kv_pruner.get_effective_max_length(max_length)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         # Enforce fixed-length generation for fair throughput/ppl comparisons.
-{{ ... }}
         try:
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=effective_max,
-                min_new_tokens=effective_max,
+                max_new_tokens=max_length,
+                min_new_tokens=max_length,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
         except TypeError:
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=effective_max,
+                max_new_tokens=max_length,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
         return self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+
+    def generate_with_inputs(self, inputs, max_length: int = 50):
+        """Generate using precomputed tokenized inputs to avoid re-tokenization in benchmarks."""
+        if self.enable_kv_compression and self.kv_keep_ratio < 0.999 and not self._kv_warned:
+            print("[KV] KV-cache compression scaffold enabled (no-op placeholder).")
+            self._kv_warned = True
+        try:
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=max_length,
+                min_new_tokens=max_length,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+        except TypeError:
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=max_length,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+        return outputs
 
     def save_pretrained(self, out_dir: str) -> None:
         """Persist current model/tokenizer (including structural pruning) for external eval (e.g., lm-eval-harness)."""

@@ -220,7 +220,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ```mermaid
 flowchart TD
     A[Load Model & Components] --> B[Model Validation & Safety Checks]
-    B --> C[Calibration: Activation Stats for Heads/FFN]
+    B --> C[Calibration: Activation Stats for Heads]
     C --> D[User Prompt]
     D --> E[Compute Complexity: Tokens + PPL]
     E --> F[Collect Hardware State: CPU/GPU/Memory]
@@ -228,34 +228,24 @@ flowchart TD
     G --> H{Action Type?}
     H -->|Heads| I[GQA-Aware Head Pruning<br/>5-15% intensities]
     H -->|Layers| J[Functional Layer Skipping<br/>5-10% intensities]
-    H -->|FFN| K[Functional FFN Masking<br/>Disabled for stability]
-    H -->|None| L[No Pruning]
-    I --> M[Generate Response<br/>torch.no_grad + use_cache]
-    J --> M
-    K --> M
-    L --> M
-    M --> N[Benchmark: Tok/s, PPL]
-    N --> O{Performance Check}
-    O -->|>10% Slowdown| P[Early Termination<br/>-20.0 penalty]
-    O -->|Normal| Q[Compute Reward Function<br/>α=0.7 speed, β=0.3 quality]
-    P --> R[Model Restoration<br/>with Validation]
-    Q --> R
-    R --> S{FFN Dimensions OK?}
-    S -->|No| T[Emergency Model Reload]
-    S -->|Yes| U[Continue Training]
-    T --> U
-    U --> D
-
-    V[Dataset] --> W[Batch Evaluation]
-    W --> X[Generate Comparative Plots<br/>Speed, PPL, Action Usage]
-    X --> Y[Organized Reports<br/>Train N folders]
+    H -->|None| K[No Pruning]
+    I --> L[Generate Response<br/>torch.no_grad + use_cache]
+    J --> L
+    K --> L
+    L --> M[Benchmark: Tok/s, PPL]
+    M --> N{Performance Check}
+    N -->|>10% Slowdown| O[Early Termination<br/>-20.0 penalty]
+    N -->|Normal| P[Compute Reward Function<br/>α=0.7 speed, β=0.3 quality]
+    O --> Q[Model Restoration<br/>with Validation]
+    P --> Q
+    Q --> R[Continue Training]
+    R --> D
 ```
 
 **Enhanced Architecture Features:**
 
 - **Safety-First Design**: Model validation, emergency reload, early termination
 - **Ultra-Conservative Actions**: Only proven pruning methods (heads 5-15%, layers 5-10%)
-- **Stable FFN Handling**: Functional masking instead of structural changes
 - **Performance Monitoring**: Real-time slowdown detection with heavy penalties
 - **Robust Restoration**: Automatic model recovery from corruption
 

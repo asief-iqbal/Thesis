@@ -390,32 +390,44 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[State: Hardware + Complexity] --> B[Q-Network]
-    B --> C[epsilon-greedy Action Selection]
-    C --> D{Action Type?}
-    D -->|Heads 5-15%| E[GQA-Aware Head Pruning]
-    D -->|Layers 5-10%| F[Functional Layer Skipping]
-    D -->|FFN| G[Functional FFN Masking<br/>Currently Disabled]
-    D -->|None| H[No Pruning]
-    E --> I[Generate Response]
-    F --> I
-    G --> I
-    H --> I
-    I --> J[Benchmark: tok/s, PPL]
-    J --> K{Performance Check}
-    K -->|>10% Slowdown| L[Early Termination<br/>-20.0 penalty]
-    K -->|Normal Performance| M[Compute Enhanced Reward]
-    L --> N[Skip to Next Episode]
-    M --> O[Speedup Ratio Calculation]
-    O --> P{Quality vs Speed}
-    P -->|Speedup| Q[α=0.7*speedup - β=0.3*degradation<br/>+ Bonus for 15%+ speedup]
-    P -->|Slowdown| R[Heavy Penalty<br/>-10.0 - 20.0*slowdown]
-    Q --> S[Replay Buffer]
-    R --> S
-    S --> T[Optimize Double DQN]
-    T --> U[Target Net Update]
-    U --> V[Model Restoration + Validation]
-    V --> W[Continue Training]
+    %% Foundational Setup
+    A[Dataset Curation & Complexity Scoring] --> B[Base Model: Llama‑3.2‑1B Setup]
+    B --> C{Methodology}
+
+    %% Static Baseline
+    C -->|Static Baseline| D[Measure Unpruned Performance]
+
+    %% Dynamic Framework
+    C -->|Dynamic Framework| E[Initialize DDQN Agent]
+    E --> F[State Vector: Hardware + Complexity]
+    F --> G[Training Loop]
+
+    %% Core RL Loop
+    G --> H[Action Selection (epsilon‑greedy)]
+    H --> I[Apply Pruning: Heads 5–15% / Layers 5–10%]
+    I --> J[Measure Performance: Speed & PPL]
+    J --> K[Reward: alpha*speed − beta*PPL]
+    K --> L[Experience Replay Training]
+    L --> M[Model Restoration]
+    M -->|Continue Training| G
+    M -->|Training Complete| N[Test Evaluation: 300 Episodes]
+
+    %% Final Analysis
+    D --> O[Baseline vs Pruned Comparison]
+    N --> O
+    O --> P[Results Analysis & Reporting]
+
+    %% Styling
+    classDef setup fill:#87CEEB,stroke:#333,stroke-width:2px
+    classDef baseline fill:#DDA0DD,stroke:#333,stroke-width:2px
+    classDef rl fill:#98FB98,stroke:#333,stroke-width:2px
+    classDef analysis fill:#FFB6C1,stroke:#333,stroke-width:2px
+
+    class A,B setup
+    class D baseline
+    class E,F,G,H,I,J,K,L,M,N rl
+    class O,P analysis
+
 ```
 
 **Enhanced RL Features:**

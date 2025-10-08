@@ -213,7 +213,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 - 4: `transformer_layers` (0.05) - Skip 5% of layers (max 1 of 16) via functional skipping.
 - 5: `transformer_layers` (0.10) - Skip 10% of layers (max 1 of 16) via functional skipping.
 
-**Note**: FFN pruning temporarily disabled due to restoration stability issues. System focuses on proven head pruning and layer skipping methods for guaranteed speedups.
+**Note**: FFN pruning is temporarily disabled due to restoration stability issues. System focuses on proven head pruning and layer skipping methods for guaranteed speedups.
 
 ### System Architecture Overview
 
@@ -221,7 +221,7 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 graph TB
     subgraph "RL Controller"
         A[Hardware Monitor<br/>CPU/GPU/Memory/Battery] --> B[State Vector<br/>7 features]
-        C[Prompt Analyzer<br/>Tokens + PPL] --> B
+        C[Prompt Analyzer<br/> Prompt Complexity Measurement from Dataset] --> B
         B --> D[Double DQN<br/>Policy Network]
         D --> E[Action Selection<br/>epsilon-greedy]
     end

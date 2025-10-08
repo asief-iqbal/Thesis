@@ -235,6 +235,8 @@ graph TB
     subgraph "Pruning Methods"
         H --> K[Structured Head Slicer<br/>Remove Q/K/V/O projections]
         I --> L[Layer Bypass Hooks<br/>Skip transformer layers]
+        H --> X[Remove least-important heads via GQA-aware structural slicing]
+        L --> Y[Skip layers (max 1 of 16) via functional skipping.]
     end
 
     subgraph "Evaluation"
@@ -243,8 +245,8 @@ graph TB
     end
 
     E --> G
-    K --> N
-    L --> N
+    X --> N
+    Y --> N
     P --> D
 
     style A fill:#e1f5fe

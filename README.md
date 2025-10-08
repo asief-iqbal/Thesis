@@ -230,13 +230,11 @@ graph TB
         F[LLaMA-3.2-1B<br/>Base Model] --> G[Pruning Layer]
         G --> H[Head Pruner<br/>GQA-aware]
         G --> I[Layer Skipper<br/>Functional]
-        G --> J[FFN Pruner<br/>Functional Masking]
     end
 
     subgraph "Pruning Methods"
         H --> K[Structured Head Slicer<br/>Remove Q/K/V/O projections]
         I --> L[Layer Bypass Hooks<br/>Skip transformer layers]
-        J --> M[Channel Masking<br/>Zero FFN channels]
     end
 
     subgraph "Evaluation"

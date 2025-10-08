@@ -267,19 +267,19 @@ graph TB
 
 ```mermaid
 flowchart TD
-    A[Load Model & Components] --> C[Model Validation & Safety Checks]
+    A[Load Model & Components] --> B[Model Validation & Safety Checks]
+    B --> C[Calibration: Activation Stats for Heads]
     C --> D[User Prompt]
-    D --> E[Retrieve Prompt Complexity from Dataset]
+    D --> E[Compute Complexity: Tokens + PPL]
     E --> F[Collect Hardware State: CPU/GPU/Memory]
     F --> G[RL Controller: Ultra-Conservative Action Selection]
     G --> H{Action Type?}
     H -->|Heads| I[GQA-Aware Head Pruning<br/>5-15% intensities]
     H -->|Layers| J[Functional Layer Skipping<br/>5-10% intensities]
     H -->|None| K[No Pruning]
-    I --> L[Generate Response<br/>torch.no_grad + use_cache]
-    J --> L
-    K --> L
-    L --> M[Benchmark: Tok/s, PPL]
+    I --> M[Benchmark: Tok/s, PPL]
+    J --> M
+    K --> M
     M --> N{Performance Check}
     N -->|>10% Slowdown| O[Early Termination<br/>-20.0 penalty]
     N -->|Normal| P[Compute Reward Function<br/>α=0.7 speed, β=0.3 quality]

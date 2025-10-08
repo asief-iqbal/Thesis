@@ -115,7 +115,7 @@ The pruning system implements several optimization strategies to ensure efficien
 
 ## 4.2.3 Result Analysis
 
-### 4.2.3.1 Training Performance Analysis (Train 41)
+### 4.2.3.1 Training Performance Analysis 
 
 The training results from 1,199 episodes demonstrate the effectiveness of our adaptive pruning approach. The system achieved significant performance improvements across different pruning strategies:
 
@@ -144,7 +144,7 @@ The training results from 1,199 episodes demonstrate the effectiveness of our ad
 
 3. **Conservative Action Space Success**: The 5% transformer layer pruning showed minimal performance impact (-0.3% speedup, identical PPL), validating our conservative action space design.
 
-### 4.2.3.2 Test Performance Analysis (Test 3)
+### 4.2.3.2 Test Performance Analysis 
 
 The test results from 300 episodes provide validation of the trained RL agent's performance:
 

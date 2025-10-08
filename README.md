@@ -215,7 +215,55 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 
 **Note**: FFN pruning temporarily disabled due to restoration stability issues. System focuses on proven head pruning and layer skipping methods for guaranteed speedups.
 
-### System Architecture Diagram (v2.2 - Enhanced with Critical Fixes)
+### System Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "RL Controller"
+        A[Hardware Monitor<br/>CPU/GPU/Memory/Battery] --> B[State Vector<br/>7 features]
+        C[Prompt Analyzer<br/>Tokens + PPL] --> B
+        B --> D[Double DQN<br/>Policy Network]
+        D --> E[Action Selection<br/>epsilon-greedy]
+    end
+
+    subgraph "Model Engine"
+        F[LLaMA-3.2-1B<br/>Base Model] --> G[Pruning Layer]
+        G --> H[Head Pruner<br/>GQA-aware]
+        G --> I[Layer Skipper<br/>Functional]
+        G --> J[FFN Pruner<br/>Functional Masking]
+    end
+
+    subgraph "Pruning Methods"
+        H --> K[Structured Head Slicer<br/>Remove Q/K/V/O projections]
+        I --> L[Layer Bypass Hooks<br/>Skip transformer layers]
+        J --> M[Channel Masking<br/>Zero FFN channels]
+    end
+
+    subgraph "Evaluation"
+        N[Benchmark System<br/>Time/PPL/Tokens] --> O[Reward Function<br/>α=0.7 speed, β=0.3 quality]
+        O --> P[Training Update<br/>Double DQN]
+    end
+
+    E --> G
+    K --> N
+    L --> N
+    M --> N
+    P --> D
+
+    style A fill:#e1f5fe
+    style F fill:#f3e5f5
+    style N fill:#e8f5e8
+    style D fill:#fff3e0
+```
+
+**System Components:**
+
+- **RL Controller**: Hardware-aware policy that selects pruning actions
+- **Model Engine**: Manages LLaMA-3.2-1B and applies reversible pruning
+- **Pruning Methods**: Three types of structural and functional pruning
+- **Evaluation**: Measures performance and updates the RL policy
+
+### Training Workflow Diagram (v2.2 - Enhanced with Critical Fixes)
 
 ```mermaid
 flowchart TD

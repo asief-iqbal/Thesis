@@ -270,9 +270,9 @@ flowchart TD
     A[Load Model & Components] --> B[Model Validation & Safety Checks]
     B --> C[Calibration: Activation Stats for Heads]
     C --> D[User Prompt]
-    D --> E[Compute Complexity: Tokens + PPL]
+    D --> E[Retrieve Prompt Complexity from Dataset]
     E --> F[Collect Hardware State: CPU/GPU/Memory]
-    F --> G[RL Controller: Ultra-Conservative Action Selection]
+    F --> G[RL Controller: Action Selection(epsilon-greedy exploration)]
     G --> H{Action Type?}
     H -->|Heads| I[GQA-Aware Head Pruning<br/>5-15% intensities]
     H -->|Layers| J[Functional Layer Skipping<br/>5-10% intensities]

@@ -268,8 +268,7 @@ graph TB
 ```mermaid
 flowchart TD
     A["Load Model & Components"] --> B["Model Validation & Safety Checks"]
-    B --> C["Calibration: Activation Stats for Heads"]
-    C --> D["User Prompt"]
+    B --> D["User Prompt"]
     D --> E["Retrieve Prompt Complexity from Dataset"]
     E --> F["Collect Hardware State: CPU/GPU/Memory"]
     F --> G["RL Controller: Action Selection (epsilon-greedy exploration)"]

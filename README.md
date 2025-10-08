@@ -267,26 +267,27 @@ graph TB
 
 ```mermaid
 flowchart TD
-    A[Load Model & Components] --> B[Model Validation & Safety Checks]
-    B --> C[Calibration: Activation Stats for Heads]
-    C --> D[User Prompt]
-    D --> E[Retrieve Prompt Complexity from Dataset]
-    E --> F[Collect Hardware State: CPU/GPU/Memory]
-    F --> G[RL Controller: Action Selection(epsilon-greedy exploration)]
+    A["Load Model & Components"] --> B["Model Validation & Safety Checks"]
+    B --> C["Calibration: Activation Stats for Heads"]
+    C --> D["User Prompt"]
+    D --> E["Retrieve Prompt Complexity from Dataset"]
+    E --> F["Collect Hardware State: CPU/GPU/Memory"]
+    F --> G["RL Controller: Action Selection (epsilon-greedy exploration)"]
     G --> H{Action Type?}
-    H -->|Heads| I[GQA-Aware Head Pruning<br/>5-15% intensities]
-    H -->|Layers| J[Functional Layer Skipping<br/>5-10% intensities]
-    H -->|None| K[No Pruning]
-    I --> M[Benchmark: Tok/s, PPL]
+    H -->|"Heads"| I["GQA-Aware Head Pruning<br/>5-15% intensities"]
+    H -->|"Layers"| J["Functional Layer Skipping<br/>5-10% intensities"]
+    H -->|"None"| K["No Pruning"]
+    I --> M["Benchmark: Tok/s, PPL"]
     J --> M
     K --> M
     M --> N{Performance Check}
-    N -->|>10% Slowdown| O[Early Termination<br/>-20.0 penalty]
-    N -->|Normal| P[Compute Reward Function<br/>α=0.7 speed, β=0.3 quality]
-    O --> Q[Model Restoration<br/>with Validation]
+    N -->|">10% Slowdown"| O["Early Termination<br/>-20.0 penalty"]
+    N -->|"Normal"| P["Compute Reward Function<br/>alpha=0.7 speed, beta=0.3 quality"]
+    O --> Q["Model Restoration<br/>with Validation"]
     P --> Q
-    Q --> R[Continue Training]
+    Q --> R["Continue Training"]
     R --> D
+
 ```
 
 **Enhanced Architecture Features:**

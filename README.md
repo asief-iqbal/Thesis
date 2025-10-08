@@ -267,10 +267,9 @@ graph TB
 
 ```mermaid
 flowchart TD
-    A[Load Model & Components] --> B[Model Validation & Safety Checks]
-    B --> C[Calibration: Activation Stats for Heads]
+    A[Load Model & Components] --> C[Model Validation & Safety Checks]
     C --> D[User Prompt]
-    D --> E[Compute Complexity: Tokens + PPL]
+    D --> E[Retrieve Prompt Complexity from Dataset]
     E --> F[Collect Hardware State: CPU/GPU/Memory]
     F --> G[RL Controller: Ultra-Conservative Action Selection]
     G --> H{Action Type?}

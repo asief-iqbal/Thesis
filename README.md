@@ -220,8 +220,8 @@ python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --m
 ```mermaid
 graph TB
     subgraph "RL Controller"
-        A[Hardware Monitor<br/>CPU/GPU/Memory/Battery] --> B[State Vector<br/>7 features]
-        C[Prompt Analyzer<br/> Prompt Complexity Measurement from Dataset] --> B
+        A[Hardware Monitor:<br/>CPU/GPU/Memory/Battery] --> B[State Vector<br/>7 features]
+        C[Prompt Analyzer:<br/> Prompt Complexity Measurement from Dataset] --> B
         B --> D[Double DQN<br/>Policy Network]
         D --> E[Action Selection<br/>epsilon-greedy]
     end

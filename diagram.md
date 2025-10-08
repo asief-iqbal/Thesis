@@ -1,73 +1,40 @@
-flowchart TD
-    %% Styling
-    classDef foundational fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
-    classDef baseline fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
-    classDef dynamic fill:#98FB98,stroke:#333,stroke-width:2px,color:#000
-    classDef decision fill:#FFE4B5,stroke:#333,stroke-width:3px,color:#000
-    classDef process fill:#F0E68C,stroke:#333,stroke-width:2px,color:#000
-    
+graph TD
     %% Foundational Setup
-    A[Custom Prompt Dataset<br/>Curation] --> B[Prompt Complexity<br/>Scoring from Dataset]
-    B --> C[Hardware State<br/>Monitoring Setup]
-    C --> D[Base Model Selection<br/>Llama-3.2-1B]
-    D --> E[Initial Model<br/>Warmup & Validation]
+    A[Dataset Curation<br/>& Complexity Scoring] --> B[Base Model<br/>Llama-3.2-1B Setup]
     
-    %% Decision Point
-    E --> F{Evaluation Path}
+    %% Dual Path
+    B --> C{Methodology}
     
-    %% Path A: Static Baseline
-    F -->|Path A: Static Baseline| G[Load Unpruned<br/>Base Model]
-    G --> H[Measure Baseline Metrics<br/>Time, PPL, Token Speed]
-    H --> I[Store Baseline<br/>Performance Data]
+    %% Static Baseline
+    C -->|Static Baseline| D[Measure Unpruned<br/>Performance]
     
-    %% Path B: Dynamic Framework Setup
-    F -->|Path B: Dynamic Framework| J[Initialize DDQN Agent<br/>Policy + Target Networks]
-    J --> K[State Vector Construction<br/>7D: Hardware + Complexity]
-    K --> L[Experience Replay<br/>Buffer Setup]
+    %% Dynamic Framework
+    C -->|Dynamic Framework| E[Initialize DDQN<br/>Agent]
+    E --> F[State Vector:<br/>Hardware + Complexity]
+    F --> G[Training Loop]
     
-    %% Training Loop
-    L --> M[RL Training Loop]
-    M --> N[Hardware State<br/>Monitoring]
-    N --> O[Action Selection<br/>ε-greedy Strategy]
-    O --> P{Pruning Action}
+    %% Core RL Loop
+    G --> H[Action Selection<br/>ε-greedy]
+    H --> I[Apply Pruning<br/>Heads/Layers 5-15%]
+    I --> J[Measure Performance<br/>Speed vs Quality]
+    J --> K[Reward Calculation<br/>α×Speed - β×PPL]
+    K --> L[Experience Replay<br/>DDQN Training]
+    L --> M[Model Restoration]
+    M -->|Continue Training| G
+    M -->|Training Complete| N[Test Evaluation<br/>300 Episodes]
     
-    %% Action Types
-    P -->|5-15%| Q[Attention Head<br/>Structured Pruning]
-    P -->|5-10%| R[Transformer Layer<br/>Skipping]
-    P -->|Baseline| S[No Pruning<br/>Full Model]
+    %% Final Analysis
+    D --> O[Performance<br/>Comparison]
+    N --> O
+    O --> P[Results Analysis<br/>& Publication]
     
-    %% Performance Measurement
-    Q --> T[Apply Dynamic Pruning<br/>& GPU Synchronization]
-    R --> T
-    S --> T
-    T --> U[Measure Pruned<br/>Performance]
-    U --> V[Calculate Reward Function<br/>α×Speed - β×Quality]
+    %% Styling
+    classDef setup fill:#87CEEB,stroke:#333,stroke-width:2px
+    classDef baseline fill:#DDA0DD,stroke:#333,stroke-width:2px
+    classDef rl fill:#98FB98,stroke:#333,stroke-width:2px
+    classDef analysis fill:#FFB6C1,stroke:#333,stroke-width:2px
     
-    %% Penalty Logic
-    V --> W{Performance Check}
-    W -->|>10% Slowdown| X[Apply -20 Penalty<br/>Early Termination]
-    W -->|Acceptable| Y[Store Experience<br/>in Replay Buffer]
-    
-    %% Model Management
-    X --> Z[Model Restoration<br/>& Memory Cleanup]
-    Y --> AA[DDQN Training<br/>Experience Replay]
-    AA --> BB[Target Network<br/>Update Every 200 Steps]
-    BB --> Z
-    
-    %% Loop Control
-    Z --> CC{Training Complete?}
-    CC -->|No| M
-    CC -->|Yes| DD[Final Model<br/>Evaluation]
-    
-    %% Final Evaluation
-    I --> EE[Performance Comparison<br/>Analysis]
-    DD --> EE
-    EE --> FF[Test Set Evaluation<br/>300 Episodes]
-    FF --> GG[Results Analysis<br/>& Convergence Study]
-    
-    %% Apply Styles
-    class A,B,C,D,E foundational
-    class G,H,I baseline
-    class J,K,L,M,N,O,Q,R,S,T,U,V,Y,AA,BB,DD,FF,GG dynamic
-    class F,P,W,CC decision
-    class X,Z process
+    class A,B setup
+    class D baseline
+    class E,F,G,H,I,J,K,L,M,N rl
+    class O,P analysis

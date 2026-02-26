@@ -21,6 +21,8 @@ from collections import deque
 import matplotlib.pyplot as plt
 import argparse
 import os
+import re
+import itertools
 import warnings
 try:
     import pynvml as nvml
@@ -246,11 +248,23 @@ class RLControllerAgent:
     def _get_state_vector(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None) -> torch.Tensor:
         device_state = self.device_monitor.get_state()
         
-        # Simple prompt complexity: token length normalized + prompt perplexity if provided
+        # Enhanced prompt complexity: token length, perplexity, math density, code density
         tokens = token_len if token_len is not None else len(self.tokenizer.encode(prompt))
+        
+        # Analyze content for structural complexity (math/code)
+        math_ops, code_syms = self._analyze_prompt_content(prompt)
+        text_len = max(1, len(prompt))
+        math_density = math_ops / text_len
+        code_density = code_syms / text_len
+        
+        # Normalization
         llm_norm = min(1.0, tokens / 200.0)
         ppl_norm = min(1.0, prompt_ppl / 50.0) if prompt_ppl is not None else 0.5
-        complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
+        math_norm = min(1.0, math_density / 0.05)  # 5% math symbols is very high
+        code_norm = min(1.0, code_density / 0.05)  # 5% code symbols is very high
+        
+        # Weighted complexity score
+        complexity_score = (0.4 * llm_norm) + (0.3 * ppl_norm) + (0.15 * math_norm) + (0.15 * code_norm)
         
         state = [
             device_state.cpu_utilization / 100.0,
@@ -262,6 +276,18 @@ class RLControllerAgent:
             complexity_score
         ]
         return torch.FloatTensor(state).unsqueeze(0)
+
+    def _analyze_prompt_content(self, prompt: str):
+        """Analyze prompt for math and code indicators using regex."""
+        # Math patterns: arithmetic, latex, numbers
+        math_pattern = r'[\+\-\*\/=\^\\]|\b(sin|cos|tan|log|sqrt|pi|sum|int)\b|\d+\.?\d*'
+        # Code patterns: brackets, keywords, common operators
+        code_pattern = r'[\{\}\[\]<>;]|\b(def|class|return|if|else|for|while|import|print|lambda)\b|==|!=|>=|<='
+        
+        math_matches = len(re.findall(math_pattern, prompt))
+        code_matches = len(re.findall(code_pattern, prompt))
+        
+        return math_matches, code_matches
 
     def get_action(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None, state_tensor: Optional[torch.Tensor] = None) -> PruningAction:
         # RL-driven action selection: epsilon-greedy
@@ -960,6 +986,16 @@ def organize_test_reports(is_report_mode: bool = False):
         'length_vs_ppl.png',
         'perplexity_compare.png',
         'perplexity.png',
+        'wikitext2_inference_time_compare.png',
+        'wikitext2_perplexity_compare.png',
+        'wikitext2_token_speed_compare.png',
+        'wikitext2_metrics.json',
+        'boolq_zeroshoot_accuracy.png',
+        'hellaswag_zeroshoot_accuracy.png',
+        'mmlu_zeroshoot_accuracy.png',
+        'boolq_zeroshoot_metrics.json',
+        'hellaswag_zeroshoot_metrics.json',
+        'mmlu_zeroshoot_metrics.json',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -1120,6 +1156,446 @@ def run_wikitext_eval(model_engine, benchmark, split: str = 'test', samples: int
         total_ppl += ppl
     n = float(len(texts)) if texts else 1.0
     print(f"[WikiText-2] Avg PPL: {total_ppl/n:.2f} | Avg Tok/s: {total_tok_s/n:.2f} | Avg Time: {total_ms/n:.2f}ms")
+
+def _load_streaming_samples(dataset_name: str, dataset_config: Optional[str], split: str, samples: int, seed: int = 42, buffer_size: int = 10000) -> List[dict]:
+    try:
+        from datasets import load_dataset
+    except Exception:
+        print("[Eval] Please install 'datasets' to run eval: pip install datasets")
+        return []
+    try:
+        ds = load_dataset(dataset_name, dataset_config, split=split, streaming=True)
+    except Exception:
+        ds = None
+    if ds is None:
+        # Fallback: try to load only a slice of the split so we don't download the entire dataset.
+        # This is still not guaranteed to be minimal for every dataset, but it's much safer than full split download.
+        try:
+            slice_n = max(int(samples), int(min(buffer_size, samples * 5)))
+            ds = load_dataset(dataset_name, dataset_config, split=f"{split}[:{slice_n}]")
+        except Exception:
+            try:
+                ds = load_dataset(dataset_name, dataset_config, split=split)
+                print(f"[Eval] Warning: streaming and split slicing failed for {dataset_name}; this may download the full dataset.")
+            except Exception:
+                return []
+    try:
+        if getattr(ds, 'shuffle', None) is not None:
+            try:
+                ds = ds.shuffle(seed=seed, buffer_size=buffer_size)
+            except TypeError:
+                ds = ds.shuffle(seed=seed)
+    except Exception:
+        pass
+    out = []
+    try:
+        it = iter(ds)
+        while len(out) < samples:
+            out.append(next(it))
+    except StopIteration:
+        pass
+    except Exception:
+        try:
+            for ex in itertools.islice(ds, samples):
+                out.append(ex)
+        except Exception:
+            pass
+    return out
+
+def _parse_force_action(force_action_str: Optional[str]):
+    if not force_action_str:
+        return None
+    try:
+        t, i = force_action_str.split(':')
+        return PruningAction(3, float(i), t, 0)
+    except Exception:
+        return None
+
+def _tokenize_ids(tokenizer, text: str) -> List[int]:
+    try:
+        return tokenizer(text, add_special_tokens=False).get('input_ids', [])
+    except Exception:
+        try:
+            return tokenizer.encode(text)
+        except Exception:
+            return []
+
+def _compute_ppl_on_ids(engine: RealModelEngine, prompt_ids: List[int], cont_ids: List[int]) -> float:
+    if not cont_ids:
+        return 50000.0
+    ids = (prompt_ids or []) + (cont_ids or [])
+    if not ids:
+        return 50000.0
+    input_ids = torch.tensor([ids], dtype=torch.long, device=engine.model.device)
+    labels = input_ids.clone()
+    pl = len(prompt_ids or [])
+    if pl > 0:
+        labels[:, :pl] = -100
+    with torch.no_grad():
+        out = engine.model(input_ids=input_ids, labels=labels)
+    ppl = torch.exp(out.loss).item()
+    if ppl is None or not torch.isfinite(torch.tensor(ppl)):
+        return 50000.0
+    return float(ppl)
+
+def _score_options_mean_logprob(engine: RealModelEngine, prompt: str, options: List[str], max_seq_len: int = 512) -> List[float]:
+    tok = engine.tokenizer
+    base_prompt_ids = _tokenize_ids(tok, prompt)
+    scores = []
+    if not options:
+        return scores
+    option_ids_list = []
+    prompt_ids_list = []
+    for opt in options:
+        opt_ids = _tokenize_ids(tok, opt)
+        if not opt_ids:
+            option_ids_list.append([])
+            prompt_ids_list.append(base_prompt_ids)
+            continue
+        keep_prompt = base_prompt_ids
+        max_prompt_len = max(1, max_seq_len - len(opt_ids))
+        if len(keep_prompt) > max_prompt_len:
+            keep_prompt = keep_prompt[-max_prompt_len:]
+        option_ids_list.append(opt_ids)
+        prompt_ids_list.append(keep_prompt)
+    batch_ids = []
+    for p_ids, o_ids in zip(prompt_ids_list, option_ids_list):
+        batch_ids.append((p_ids or []) + (o_ids or []))
+    max_len = max(len(x) for x in batch_ids) if batch_ids else 0
+    if max_len <= 1:
+        return [float('-inf') for _ in options]
+    pad_id = tok.pad_token_id
+    if pad_id is None:
+        pad_id = tok.eos_token_id if tok.eos_token_id is not None else 0
+    input_ids = torch.full((len(batch_ids), max_len), pad_id, dtype=torch.long, device=engine.model.device)
+    attn = torch.zeros((len(batch_ids), max_len), dtype=torch.long, device=engine.model.device)
+    for i, ids in enumerate(batch_ids):
+        if not ids:
+            continue
+        input_ids[i, :len(ids)] = torch.tensor(ids, dtype=torch.long, device=engine.model.device)
+        attn[i, :len(ids)] = 1
+    with torch.no_grad():
+        logits = engine.model(input_ids=input_ids, attention_mask=attn).logits
+        logp = torch.log_softmax(logits, dim=-1)
+    for i, (p_ids, o_ids) in enumerate(zip(prompt_ids_list, option_ids_list)):
+        if not o_ids:
+            scores.append(float('-inf'))
+            continue
+        pl = len(p_ids)
+        ol = len(o_ids)
+        start = max(0, pl - 1)
+        end = start + ol
+        if end > (max_len - 1):
+            scores.append(float('-inf'))
+            continue
+        target = input_ids[i, pl:pl + ol]
+        pred_lp = logp[i, start:end, :].gather(1, target.unsqueeze(1)).squeeze(1)
+        denom = float(max(1, ol))
+        scores.append(float(pred_lp.sum().item() / denom))
+    return scores
+
+def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBenchmark, samples: int = 1000, split: str = 'test', seed: int = 42, max_new_tokens: int = 50, max_seq_len: int = 512, force_action_str: Optional[str] = None):
+    print(f"\n[Eval] Running WikiText-2 comparative eval on {samples} samples...")
+    rows = _load_streaming_samples('wikitext', 'wikitext-2-raw-v1', split=split, samples=samples, seed=seed)
+    texts = []
+    for r in rows:
+        t = r.get('text') if isinstance(r, dict) else None
+        if t and str(t).strip():
+            texts.append(str(t))
+    if not texts:
+        print("[Eval] WikiText-2: no usable samples")
+        return
+    engine.model.eval()
+    metrics = []
+
+    def make_prompt_cont(text: str):
+        ids = _tokenize_ids(engine.tokenizer, text)
+        if len(ids) < 8:
+            return None, None
+        cut = min(len(ids) - 1, max(8, max_seq_len // 2))
+        prompt_ids = ids[:cut]
+        cont_ids = ids[cut:min(len(ids), cut + max(1, max_seq_len - cut))]
+        if not cont_ids:
+            return None, None
+        return prompt_ids, cont_ids
+
+    print("[Eval] Baseline pass...")
+    try:
+        engine.restore_model()
+    except Exception:
+        pass
+    base_times = []
+    base_ppls = []
+    base_tok_s = []
+    for i, t in enumerate(texts, start=1):
+        pc = make_prompt_cont(t)
+        if not pc or pc[0] is None:
+            continue
+        prompt_ids, cont_ids = pc
+        prompt_text = engine.tokenizer.decode(prompt_ids, skip_special_tokens=True)
+        start = time.time()
+        gen = engine.generate_response(prompt_text, max_length=max_new_tokens)
+        elapsed = max(1e-12, time.time() - start)
+        tok_count = len(engine.tokenizer.encode(gen))
+        base_times.append(elapsed * 1000.0)
+        base_tok_s.append((tok_count / elapsed) if elapsed > 0 else 0.0)
+        base_ppls.append(_compute_ppl_on_ids(engine, prompt_ids, cont_ids))
+        if i % 50 == 0:
+            print(f"[Eval] Baseline {i}/{len(texts)}")
+
+    target_action = _parse_force_action(force_action_str)
+    if not target_action:
+        try:
+            target_action = PruningAction(3, 0.25, 'transformer_layers', 0)
+        except Exception:
+            target_action = None
+    if target_action:
+        print(f"[Eval] Applying pruning action: {target_action}")
+        try:
+            engine.restore_model()
+        except Exception:
+            pass
+        engine.apply_pruning(target_action)
+    else:
+        print("[Eval] No pruning action available; skipping pruned pass")
+        return
+
+    print("[Eval] Pruned pass...")
+    pr_times = []
+    pr_ppls = []
+    pr_tok_s = []
+    for i, t in enumerate(texts, start=1):
+        pc = make_prompt_cont(t)
+        if not pc or pc[0] is None:
+            continue
+        prompt_ids, cont_ids = pc
+        prompt_text = engine.tokenizer.decode(prompt_ids, skip_special_tokens=True)
+        start = time.time()
+        gen = engine.generate_response(prompt_text, max_length=max_new_tokens)
+        elapsed = max(1e-12, time.time() - start)
+        tok_count = len(engine.tokenizer.encode(gen))
+        pr_times.append(elapsed * 1000.0)
+        pr_tok_s.append((tok_count / elapsed) if elapsed > 0 else 0.0)
+        pr_ppls.append(_compute_ppl_on_ids(engine, prompt_ids, cont_ids))
+        if i % 50 == 0:
+            print(f"[Eval] Pruned {i}/{len(texts)}")
+
+    n = min(len(base_times), len(pr_times), len(base_ppls), len(pr_ppls))
+    if n <= 0:
+        print("[Eval] WikiText-2: no aligned samples")
+        return
+    for i in range(n):
+        metrics.append({
+            'sample': i + 1,
+            'baseline_time_ms': float(base_times[i]),
+            'baseline_tok_s': float(base_tok_s[i]),
+            'baseline_ppl': float(base_ppls[i]),
+            'time_ms': float(pr_times[i]),
+            'tok_s': float(pr_tok_s[i]),
+            'ppl': float(pr_ppls[i]),
+        })
+
+    import json
+    with open('wikitext2_metrics.json', 'w') as f:
+        json.dump({
+            'samples_used': n,
+            'baseline': {
+                'avg_time_ms': float(sum(base_times[:n]) / n),
+                'avg_tok_s': float(sum(base_tok_s[:n]) / n),
+                'avg_ppl': float(sum(base_ppls[:n]) / n),
+            },
+            'pruned': {
+                'avg_time_ms': float(sum(pr_times[:n]) / n),
+                'avg_tok_s': float(sum(pr_tok_s[:n]) / n),
+                'avg_ppl': float(sum(pr_ppls[:n]) / n),
+            },
+            'per_sample': metrics,
+        }, f)
+    print("[Report] Saved wikitext2_metrics.json")
+
+    xs = [m['sample'] for m in metrics]
+    plt.figure(figsize=(10, 6))
+    plt.plot(xs, [m['baseline_time_ms'] for m in metrics], color='red', linewidth=1.2, alpha=0.85, label='Baseline Time (ms)')
+    plt.plot(xs, [m['time_ms'] for m in metrics], color='blue', linewidth=1.2, alpha=0.85, label='Pruned Time (ms)')
+    plt.title('WikiText-2 Inference Time (Baseline vs Pruned)')
+    plt.xlabel('Sample'); plt.ylabel('Time (ms)'); plt.grid(True, alpha=0.3); plt.legend(); plt.tight_layout()
+    plt.savefig('wikitext2_inference_time_compare.png', dpi=300)
+    plt.close()
+    print('[Report] Saved wikitext2_inference_time_compare.png')
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(xs, [m['baseline_ppl'] for m in metrics], color='red', linewidth=1.2, alpha=0.85, label='Baseline PPL')
+    plt.plot(xs, [m['ppl'] for m in metrics], color='blue', linewidth=1.2, alpha=0.85, label='Pruned PPL')
+    plt.title('WikiText-2 Perplexity (Baseline vs Pruned)')
+    plt.xlabel('Sample'); plt.ylabel('Perplexity'); plt.grid(True, alpha=0.3); plt.legend(); plt.tight_layout()
+    plt.savefig('wikitext2_perplexity_compare.png', dpi=300)
+    plt.close()
+    print('[Report] Saved wikitext2_perplexity_compare.png')
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(xs, [m['baseline_tok_s'] for m in metrics], color='red', linewidth=1.2, alpha=0.85, label='Baseline Tok/s')
+    plt.plot(xs, [m['tok_s'] for m in metrics], color='blue', linewidth=1.2, alpha=0.85, label='Pruned Tok/s')
+    plt.title('WikiText-2 Token Speed (Baseline vs Pruned)')
+    plt.xlabel('Sample'); plt.ylabel('Tokens/sec'); plt.grid(True, alpha=0.3); plt.legend(); plt.tight_layout()
+    plt.savefig('wikitext2_token_speed_compare.png', dpi=300)
+    plt.close()
+    print('[Report] Saved wikitext2_token_speed_compare.png')
+
+def _plot_two_bar(out_file: str, title: str, base_val: float, pruned_val: float, ylabel: str):
+    plt.figure(figsize=(6.5, 5.5))
+    labels = ['Baseline', 'Pruned']
+    vals = [base_val, pruned_val]
+    colors = ['#1f77b4', '#ff7f0e']
+    bars = plt.bar(labels, vals, color=colors, alpha=0.85)
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.ylim(0, 100)
+    plt.grid(axis='y', linestyle='--', alpha=0.35)
+    for b in bars:
+        h = float(b.get_height())
+        plt.text(b.get_x() + b.get_width() / 2.0, min(99.0, h + 1.0), f"{h:.2f}%", ha='center', va='bottom', fontsize=10)
+    plt.tight_layout()
+    plt.savefig(out_file, dpi=300)
+    plt.close()
+    print(f"[Report] Saved {out_file}")
+
+def run_zeroshoot_accuracy(engine: RealModelEngine, task: str, samples: int = 1000, seed: int = 42, max_seq_len: int = 512, force_action_str: Optional[str] = None):
+    task_l = str(task).lower().strip()
+    if task_l == 'boolq':
+        split = 'validation'
+        rows = _load_streaming_samples('boolq', None, split=split, samples=samples, seed=seed)
+    elif task_l == 'hellaswag':
+        split = 'validation'
+        rows = _load_streaming_samples('hellaswag', None, split=split, samples=samples, seed=seed)
+    elif task_l == 'mmlu':
+        split = 'test'
+        rows = []
+        for cfg in ['all', None]:
+            try:
+                rows = _load_streaming_samples('cais/mmlu', cfg, split=split, samples=samples, seed=seed)
+                if rows:
+                    break
+            except Exception:
+                pass
+        if not rows:
+            rows = _load_streaming_samples('mmlu', None, split=split, samples=samples, seed=seed)
+    else:
+        print(f"[Eval] Unknown task: {task}")
+        return
+    if not rows:
+        print(f"[Eval] {task}: no samples")
+        return
+    engine.model.eval()
+
+    def eval_on_rows():
+        correct = 0
+        total = 0
+        for ex in rows:
+            if not isinstance(ex, dict):
+                continue
+            if task_l == 'boolq':
+                passage = str(ex.get('passage', '')).strip()
+                question = str(ex.get('question', '')).strip()
+                ans = ex.get('answer', None)
+                if passage == '' or question == '' or ans is None:
+                    continue
+                prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+                options = [' yes', ' no']
+                scores = _score_options_mean_logprob(engine, prompt, options, max_seq_len=max_seq_len)
+                pred = int(np.argmax(scores)) if scores else 0
+                gold = 0 if bool(ans) else 1
+                correct += 1 if pred == gold else 0
+                total += 1
+            elif task_l == 'hellaswag':
+                ctx_a = str(ex.get('ctx_a', '')).strip()
+                ctx_b = str(ex.get('ctx_b', '')).strip()
+                endings = ex.get('endings', None)
+                label = ex.get('label', None)
+                if not endings or label is None:
+                    continue
+                try:
+                    gold = int(label)
+                except Exception:
+                    continue
+                prompt = (ctx_a + ' ' + ctx_b).strip()
+                options = []
+                for e in endings:
+                    et = str(e)
+                    if not et.startswith(' '):
+                        et = ' ' + et
+                    options.append(et)
+                scores = _score_options_mean_logprob(engine, prompt, options, max_seq_len=max_seq_len)
+                pred = int(np.argmax(scores)) if scores else 0
+                correct += 1 if pred == gold else 0
+                total += 1
+            else:
+                question = str(ex.get('question', '')).strip()
+                choices = ex.get('choices', None)
+                ans = ex.get('answer', None)
+                if question == '' or not choices or ans is None:
+                    continue
+                gold = None
+                # Support multiple common MMLU answer formats: int index (0-3) or letter (A-D).
+                try:
+                    gold = int(ans)
+                except Exception:
+                    try:
+                        a = str(ans).strip().upper()
+                        if a in ['A', 'B', 'C', 'D']:
+                            gold = ['A', 'B', 'C', 'D'].index(a)
+                        elif a in ['0', '1', '2', '3']:
+                            gold = int(a)
+                    except Exception:
+                        gold = None
+                if gold is None:
+                    continue
+                if len(choices) < 4:
+                    continue
+                prompt = f"Question: {question}\nA. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:"
+                options = [' A', ' B', ' C', ' D']
+                scores = _score_options_mean_logprob(engine, prompt, options, max_seq_len=max_seq_len)
+                pred = int(np.argmax(scores)) if scores else 0
+                correct += 1 if pred == gold else 0
+                total += 1
+        acc = (float(correct) / float(total)) if total > 0 else 0.0
+        return acc, total
+
+    print(f"\n[Eval] Zero-shot {task} baseline...")
+    try:
+        engine.restore_model()
+    except Exception:
+        pass
+    base_acc, base_n = eval_on_rows()
+
+    target_action = _parse_force_action(force_action_str)
+    if not target_action:
+        try:
+            target_action = PruningAction(3, 0.25, 'transformer_layers', 0)
+        except Exception:
+            target_action = None
+    if not target_action:
+        print("[Eval] No pruning action available")
+        return
+    print(f"[Eval] Zero-shot {task} pruned...")
+    try:
+        engine.restore_model()
+    except Exception:
+        pass
+    engine.apply_pruning(target_action)
+    pr_acc, pr_n = eval_on_rows()
+
+    import json
+    out_json = f"{task_l}_zeroshoot_metrics.json"
+    with open(out_json, 'w') as f:
+        json.dump({
+            'task': task_l,
+            'samples_requested': int(samples),
+            'baseline': {'accuracy': float(base_acc), 'n': int(base_n)},
+            'pruned': {'accuracy': float(pr_acc), 'n': int(pr_n)},
+        }, f)
+    print(f"[Report] Saved {out_json}")
+    out_png = f"{task_l}_zeroshoot_accuracy.png"
+    _plot_two_bar(out_png, f"{task_l.upper()} Zero-shot Accuracy", base_acc * 100.0, pr_acc * 100.0, 'Accuracy (%)')
 
 def run_lm_eval_harness(model_engine, tasks_list: List[str], batch_size: int = 1, export_dir: str = 'export/pruned_model', limit: int = None):
     """Run lm-eval-harness tasks and generate accuracy plot."""
@@ -1526,6 +2002,13 @@ if __name__ == "__main__":
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--max-new-tokens', type=int, default=50)
     parser.add_argument('--wikitext-samples', type=int, default=200)
+    parser.add_argument('--wikitext2', action='store_true', help='Run WikiText-2 subset (PPL + inference) evaluation only')
+    parser.add_argument('--boolq', action='store_true', help='Run BoolQ zero-shot accuracy evaluation only')
+    parser.add_argument('--hellaswag', action='store_true', help='Run HellaSwag zero-shot accuracy evaluation only')
+    parser.add_argument('--mmlu', action='store_true', help='Run MMLU zero-shot accuracy evaluation only')
+    parser.add_argument('--eval-samples', type=int, default=1000)
+    parser.add_argument('--eval-seed', type=int, default=42)
+    parser.add_argument('--eval-max-seq-len', type=int, default=512)
     parser.add_argument('--train-dataset', type=str, default='Prompt Dataset Train.csv')
     parser.add_argument('--test-dataset', type=str, default='Prompt Dataset Test.csv')
     parser.add_argument('--train-split', type=str, default='train')
@@ -1561,13 +2044,25 @@ if __name__ == "__main__":
         if os.path.exists(args.checkpoint):
             agent.load(args.checkpoint)
         bench = RealBenchmark()
-        test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action)
-        if getattr(args, 'wikitext_samples', 0):
-            try:
-                engine.restore_model()
-            except Exception:
-                pass
-            run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
-        if hasattr(args, 'lm_eval') and args.lm_eval:
-            tasks = [t.strip() for t in args.eval_tasks.split(',')]
-            run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
+        specific_eval = bool(getattr(args, 'wikitext2', False) or getattr(args, 'boolq', False) or getattr(args, 'hellaswag', False) or getattr(args, 'mmlu', False))
+        if not specific_eval:
+            test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action)
+            if getattr(args, 'wikitext_samples', 0):
+                try:
+                    engine.restore_model()
+                except Exception:
+                    pass
+                run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
+            if hasattr(args, 'lm_eval') and args.lm_eval:
+                tasks = [t.strip() for t in args.eval_tasks.split(',')]
+                run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
+        else:
+            if getattr(args, 'wikitext2', False):
+                run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+            if getattr(args, 'boolq', False):
+                run_zeroshoot_accuracy(engine, 'boolq', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+            if getattr(args, 'hellaswag', False):
+                run_zeroshoot_accuracy(engine, 'hellaswag', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+            if getattr(args, 'mmlu', False):
+                run_zeroshoot_accuracy(engine, 'mmlu', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+            organize_test_reports()

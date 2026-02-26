@@ -23,7 +23,7 @@ coverage.xml
 .mypy_cache/
 .pytest_cache/
 .hypothesis/
-
+export/
 # Project specific
 checkpoints/
 hf_cache/
@@ -32,3 +32,8 @@ spacy_data/
 .env
 *.pt
 *.png
+Training Report/
+Test Report/
+*.safetensors
+*.bin
+*.msgpack

@@ -22,6 +22,34 @@ For clarity, the complete implemented pipeline is summarized in Table 4.2.1.
 | Runtime pruning | Apply and restore structured pruning | GQA-safe head pruning, reversible layer skipping, calibrated importance ranking |
 | Evaluation | Compare dense versus pruned inference | Latency, throughput, continuation perplexity, plots, and run reports |
 
+Figure 4.2.1 summarizes the implemented end-to-end architecture from dataset preparation to runtime control.
+
+```mermaid
+flowchart LR
+	A[Benchmark mixture<br/>GSM8K MBPP WikiText-2 MMLU BoolQ] --> B[Audit and cleaning<br/>JSON audit reports]
+	B --> C[Oracle labeling<br/>dense vs sparse loss gap]
+	C --> D[LCR training<br/>BERT-mini router]
+	D --> E[Runtime controller]
+
+	subgraph Runtime [Runtime adaptive pruning loop]
+		F[Prompt] --> G[Dense Llama-3.2-1B baseline]
+		F --> H[LCR scorer<br/>BERT-mini + auxiliary + attention stats]
+		G --> I[Early-Llama signals]
+		J[Hardware telemetry] --> K[10D DDQN state]
+		H --> K
+		I --> K
+		K --> L[DDQN action selection<br/>15 actions]
+		L --> M[Pruning engine]
+		M --> N[GQA-safe head pruning<br/>or reversible layer skipping]
+		N --> O[Pruned inference]
+		G --> P[Reward computation<br/>throughput and continuation PPL]
+		O --> P
+		P --> Q[Replay update + model restoration]
+	end
+
+	E --> Runtime
+```
+
 ## 4.2.1 Current System Architecture
 
 ### 4.2.1.1 Overall Framework
@@ -162,6 +190,29 @@ The action space contains 15 discrete actions:
 - seven transformer-layer skipping intensities: 5%, 10%, 15%, 20%, 25%, 30%, and 50%.
 
 Training uses a replay buffer of 10,000 transitions, batch size 32, AdamW optimization, discount factor $\gamma = 0.95$, and target-network synchronization every 200 update steps. Exploration is epsilon-greedy; epsilon decays during training toward 0.1 and is set to 0 during testing for pure exploitation.
+
+Figure 4.2.2 highlights how the runtime controller constructs the DDQN state and closes the action-reward loop.
+
+```mermaid
+flowchart TD
+	A[State inputs] --> B[Hardware telemetry<br/>CPU RAM battery GPU VRAM util]
+	A --> C[LCR score]
+	A --> D[Early-Llama features<br/>hidden norm entropy concentration]
+	B --> E[10-dimensional state vector]
+	C --> E
+	D --> E
+	E --> F[Policy network<br/>10 -> 128 -> 128 -> 15]
+	F --> G{epsilon-greedy}
+	G -->|explore| H[Random action]
+	G -->|exploit| I[argmax Q action]
+	H --> J[Apply pruning action]
+	I --> J
+	J --> K[Benchmark pruned run]
+	K --> L[Compute reward]
+	L --> M[Store transition]
+	M --> N[Replay training]
+	N --> O[Target sync every 200 steps]
+```
 
 ### 4.2.1.6 Dynamic Pruning Engine
 

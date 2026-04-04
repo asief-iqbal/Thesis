@@ -1,656 +1,505 @@
-# CASRAP: Context Aware Structured Runtime Adaptive Pruning
+# CASRAP: Context-Aware Structured Runtime Adaptive Pruning
 
-A reinforcement learning (RL)-driven system for adaptive LLM pruning that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. Bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using an interpretable yet learnable controller. Includes detailed per-episode logging (baseline vs pruned metrics) and comparative plots showing pruning effectiveness.
+CASRAP is a local inference research framework for adaptive structural pruning of Llama-3.2-1B. The current repository no longer reflects an early heuristic prototype. It now contains a benchmark-based data pipeline, oracle sensitivity labeling, a trained BERT-mini Learned Complexity Router (LCR), a Double Deep Q-Network (DDQN) pruning controller, and a reversible runtime pruning engine with grouped-query-attention-safe head pruning and transformer-layer skipping.
+
+The project is organized around a single research question: can pruning be selected at inference time, per prompt, using both prompt sensitivity and hardware state rather than a fixed offline compression profile? The present answer is partially yes. The routing and pruning infrastructure are implemented end to end, the learned LCR is strong and reusable, and the RL controller is functional but still unstable on the latest stored runs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Table of Contents
 
-- [Description](#description)
-- [Recent Improvements](#recent-improvements)
-- [Key Innovations](#key-innovations)
-- [Features](#features)
-- [Requirements](#requirements)
+- [Project Status](#project-status)
+- [What Changed](#what-changed)
+- [Current Architecture](#current-architecture)
+- [Repository Workflow](#repository-workflow)
+- [Datasets and Labeling](#datasets-and-labeling)
+- [Runtime Components](#runtime-components)
+- [Diagrams](#diagrams)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
-- [Architecture](#architecture)
-- [Modules](#modules)
 - [CLI Arguments](#cli-arguments)
-- [Benchmarks](#benchmarks)
-- [Workflow](#workflow)
-- [Roadmap](#roadmap)
+- [Repository Layout](#repository-layout)
+- [Reports and Outputs](#reports-and-outputs)
+- [Current Findings](#current-findings)
+- [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [Citations](#citations)
-- [Acknowledgments](#acknowledgments)
+- [Citation](#citation)
+- [License](#license)
 
-## Description
+## Project Status
 
-CASRAP is an RL-driven adaptive LLM pruning system. Components: (1) RL Controller (Double DQN agent) selects pruning actions based on state (hardware telemetry + prompt complexity). State features: CPU/GPU utilization, memory/battery, token length, perplexity. Actions: prune attention heads, transformer layers at intensities 0.05-0.50, or none. (2) RealModelEngine loads LLaMA-3.2-1B from Hugging Face (cached locally), applies hardware-aligned in-memory structural slicing for pruning without model reloading. (3) Benchmarking evaluates speed (tokens/sec) vs accuracy (PPL) relative to baseline. (4) Training loop on CSV prompts, calibrates layer/head importances, trains DQN, generates reports/plots. (5) Pruners: StructuredHeadSlicer (importance-guided head pruning). Supports importance-aware structural pruning with optimized generation (torch.no_grad, use_cache=True) for 15-30% speedups.
+This repository now reflects the implemented architecture described in the thesis methodology, not the earlier proposal-stage design.
 
-This project implements an RL-driven adaptive pruning system for LLMs that balances inference speed, accuracy, and resource usage based on real-time hardware state and prompt complexity. It bridges static pruning (e.g., LLM-Pruner, SparseGPT) with dynamic runtime decisions using a learnable controller (Double DQN), now with advanced GPU acceleration features.
+- Backbone model: `meta-llama/Llama-3.2-1B`
+- Router: fine-tuned `prajjwal1/bert-mini` LCR with auxiliary text features and internal attention statistics
+- Controller: DDQN with a 10-dimensional state vector and 15 discrete actions
+- Runtime pruning: GQA-safe structural attention-head pruning and reversible transformer-layer skipping
+- Additional engine support: structural FFN slicing, static-profile scaffolding, 2:4 sparsity scaffold, KV-cache compression scaffold
+- Data pipeline: benchmark mixture from GSM8K, MBPP, WikiText-2, MMLU, and BoolQ
+- Reporting: numbered training and test run folders with metrics, plots, and summaries
 
-### Recent Improvements (v2.4 - Simplified Action Space)
+## What Changed
 
-- **Simplified Action Space**: Streamlined pruning intensities for attention heads and transformer layers to 10-50% in 10% increments for focused optimization.
-- **Enhanced RL Training**: Action space now includes 11 distinct pruning actions (1 none, 5 head intensities, 5 layer intensities).
-- **Maintained Stability**: FFN pruning remains disabled for stability; system focuses on proven head pruning and layer skipping methods.
-- **Performance Gains**: System can achieve higher speedups with focused actions while maintaining safety checks and early termination for slowdowns.
+Earlier project versions described a heuristic prompt-complexity system and a smaller RL state. The current repository has moved beyond that design.
 
-## Key Innovations
+| Earlier state | Current implemented state |
+| --- | --- |
+| heuristic prompt-complexity score | trained BERT-mini LCR used at runtime |
+| ad hoc prompt pool | audited five-source benchmark mixture |
+| single sparse comparison | dense-vs-sparse oracle labeling with multi-method support |
+| 7-feature controller state | 10-feature state including LCR and early-Llama signals |
+| conceptual head pruning | grouped-query-attention-safe structural head pruning |
+| conceptual layer pruning | reversible layer skipping with restoration |
+| limited logging | per-episode metrics, plots, JSON artifacts, organized run folders |
 
-- **RL Controller**: Learnable policy maps hardware + prompt complexity to pruning actions.
-- **Importance-Aware Pruning**: Calibrates least-important heads/layers via activation hooks; structural slicing for real speedups.
-- **Multi-Level Pruning**: Attention heads (GQA-safe), transformer layers at intensities (0.05-0.50) for guaranteed speedups.
-- **Prompt-Centric Complexity**: Uses token length + model perplexity; no external NLP required.
-- **Dataset Flexibility**: Automatic 80/20 splits for custom CSV datasets; standardized evaluation tooling.
-- **Organized Reporting**: Training results automatically organized into numbered folders (Train 1, Train 2, etc.) under "Training Report".
-- **Improved Reward Function**: Correctly rewards speed gains and perplexity reductions.
+The strongest mature contribution is the learned prompt-sensitivity pipeline. The pruning engine is implemented and reversible. The RL controller is complete enough for experimentation, but the latest saved evaluation indicates policy collapse under some conditions, so the controller should be described as implemented but not fully optimized.
 
-## Features
+## Current Architecture
 
-- **Pruning Methods**:
-  - Importance-aware structural slicing (rebuilds Linear layers for speedups, GQA-safe head pruning).
-  - Activation calibration for heads using forward hooks.
-  - Static profiles: Prebuilt pruned model variants cached to avoid per-episode overhead.
-- **GPU Acceleration (Phase B)**: Optional 2:4 semi-structured sparsity (cuSPARSELt) and torch.compile for 1.3–2.0× speedups on Ampere/Hopper.
-- **Calibration + Reconstruction (Phase C)**: Post-prune reconstruction stabilizes perplexity.
-- **KV Compression Scaffold (Phase D)**: Placeholder for long-context token selection.
-- **Benchmarks**: WikiText-2 perplexity, dataset-specific zero-shot accuracy (BoolQ/HellaSwag/MMLU), lm-eval-harness (optional), latency/actual tokens/sec metrics.
-- **Modes**: Separate train/test/report CLI modes with checkpointing.
-- **Organized Reports**: Training outputs automatically organized into "Training Report/Train N" folders for each run.
-- **Safety**: Reversible pruning, no permanent model damage.
-- **Local Everything**: All caches, models, datasets stored in project folder.
-- **Detailed Logging & Plots**: Per-episode baseline vs pruned metrics printed and saved; comparative scatter plots (token speed, inference time, perplexity) with trendlines; correlation plot (token length vs prompt PPL); time breakdown plot including RL agent inference time; pruning summary with average time and PPL subplots.
+CASRAP is a closed-loop runtime controller. Each episode evaluates a prompt with the dense model, estimates prompt sensitivity with the LCR, extracts cheap early-Llama signals, combines them with hardware telemetry, selects a pruning action using DDQN, benchmarks the pruned run, computes reward, updates the agent, and restores the dense model.
+
+### Core pipeline
+
+1. Build and audit a heterogeneous benchmark prompt mixture.
+2. Generate oracle sensitivity labels from dense-vs-sparse teacher-forcing loss.
+3. Train and export the BERT-mini LCR checkpoint.
+4. Load Llama-3.2-1B and calibrate pruning importance scores.
+5. For each prompt, compute dense baseline metrics.
+6. Compute the LCR score and early-layer backbone features.
+7. Build the DDQN state vector and choose a pruning action.
+8. Apply pruning, benchmark the pruned run, compute reward, and restore the model.
+
+### DDQN state vector
+
+The live controller uses a 10-dimensional state vector:
+
+1. CPU utilization
+2. Available system memory
+3. Battery percentage
+4. GPU availability
+5. Free GPU memory
+6. GPU utilization
+7. LCR sensitivity score
+8. Layer-0 hidden-state norm
+9. Layer-0 attention-entropy proxy
+10. Layer-0 attention-concentration proxy
+
+### Action space
+
+The RL action space contains 15 discrete actions:
+
+- `none`
+- `attention_heads` at 5%, 10%, 15%, 20%, 25%, 30%, 50%
+- `transformer_layers` at 5%, 10%, 15%, 20%, 25%, 30%, 50%
+
+Structural FFN slicing exists in the engine but is intentionally not exposed in the current RL action space because it introduced additional instability during this stage of experimentation.
+
+### Reward function
+
+The current reward uses relative throughput gain and relative continuation-perplexity penalty:
+
+$$
+R = \alpha \cdot \frac{tok/s_{pruned} - tok/s_{base}}{tok/s_{base} + \varepsilon}
+- \beta \cdot \frac{PPL_{pruned} - PPL_{base}}{PPL_{base} + \varepsilon}
+$$
+
+with $\alpha = 0.7$, $\beta = 0.3$, and $\varepsilon = 10^{-8}$.
+
+## Repository Workflow
+
+The repository is now best understood as four linked stages.
+
+### 1. Dataset construction and audit
+
+- `build_lcr_mixture_dataset.py` creates the mixed benchmark prompt set.
+- `audit_lcr_mixture_dataset.py` filters malformed or low-value rows and writes audit reports.
+
+### 2. Oracle sensitivity labeling
+
+- `oracle_labeler.py` runs dense and sparse teacher-forcing passes on Llama-3.2-1B.
+- Labels are based on the non-negative loss gap $\Delta \ell = \max(0, \ell_S - \ell_D)$.
+- Metadata files record normalization bounds, sparse settings, sequence length, and runtime.
+
+### 3. LCR preprocessing and training
+
+- `prepare_dual_labels.py` prepares per-method labels and auxiliary columns.
+- `train_tinybert_lcr.py` trains the router.
+- `lcr_tinybert.py` loads the exported backbone and head for runtime scoring.
+
+### 4. RL training and evaluation
+
+- `Adaptive_pruning.py` runs training, testing, reporting, and benchmark-specific evaluation.
+- `model_loader.py` loads the backbone, applies pruning, restores the model, and calibrates pruning importance.
+
+## Datasets and Labeling
+
+### Benchmark mixture
+
+The current project uses a five-source benchmark mixture:
+
+| Source | Why it is included |
+| --- | --- |
+| GSM8K | arithmetic and multi-step reasoning sensitivity |
+| MBPP | code-generation prompts with syntax sensitivity |
+| WikiText-2 | redundancy-rich narrative language modeling |
+| MMLU | mixed-domain reasoning and multiple choice |
+| BoolQ | passage-grounded binary QA |
+
+Two main scales were used during development:
+
+- pilot 5k target: 4,374 usable rows after cleaning
+- larger 10k target: 8,974 usable rows after cleaning
+
+The final larger mixture contains 2,000 prompts each from GSM8K, WikiText-2, MMLU, and BoolQ, plus 974 prompts from MBPP.
+
+### Canonical dataset file
+
+If you want the single cleaned mixture file with optional evaluation fields, use:
+
+- `lcr_mixture.final.csv`
+
+It includes prompt metadata and optional benchmark-specific answer columns where available.
+
+### Oracle labels
+
+The current oracle pipeline compares dense inference against sparse configurations for:
+
+- attention-head pruning at 30%
+- transformer-layer skipping at 25%
+
+The repository can produce multi-method labels, but the selected runtime checkpoint is still the strongest single-output router. Cross-method sensitivity correlation is weak, which is why the project moved away from treating prompt difficulty as a single heuristic concept.
+
+## Runtime Components
+
+### Learned Complexity Router
+
+The current router is a fine-tuned BERT-mini model that combines pooled backbone representations with explicit auxiliary features and attention-derived statistics.
+
+- backbone: `prajjwal1/bert-mini`
+- input truncation: 128 tokens
+- auxiliary prompt features: 9
+- attention-statistics features: 48
+- fused representation: 304 dimensions
+- exported runtime checkpoint: `checkpoints/tinybert_lcr_backbone` + `checkpoints/tinybert_lcr_head.pt`
+
+The currently selected checkpoint corresponds to `Training Report/TinyBERT Train 20`, which achieved:
+
+- MSE: 0.03997
+- $R^2$: 0.4950
+- Spearman: 0.7009
+- 3-bin accuracy: 65.13%
+
+### DDQN controller
+
+The controller uses:
+
+- policy and target MLPs: $10 \rightarrow 128 \rightarrow 128 \rightarrow 15$
+- replay buffer size: 10,000
+- batch size: 32
+- optimizer: AdamW
+- learning rate: $1 \times 10^{-4}$
+- discount factor: 0.95
+- target update interval: 200 steps
+
+### Pruning engine
+
+The runtime engine supports:
+
+- GQA-safe structural attention-head pruning
+- reversible transformer-layer skipping
+- structural FFN slicing
+- activation-based importance calibration for heads, FFN channels, and layers
+- full model restoration between episodes
+
+The current RL loop exposes only head pruning and layer skipping. That separation matters: the engine is broader than the current action space.
+
+## Diagrams
+
+### End-to-end system diagram
+
+```mermaid
+flowchart LR
+    A[Benchmark mixture<br/>GSM8K MBPP WikiText-2 MMLU BoolQ] --> B[Audit and cleaning<br/>JSON audit reports]
+    B --> C[Oracle labeling<br/>dense vs sparse loss gap]
+    C --> D[LCR training<br/>BERT-mini router]
+    D --> E[Runtime controller]
+
+    subgraph Runtime [Runtime adaptive pruning loop]
+        F[Prompt] --> G[Dense Llama-3.2-1B baseline]
+        F --> H[LCR scorer<br/>BERT-mini + aux + attention stats]
+        G --> I[Early-Llama signals]
+        J[Hardware telemetry] --> K[10D DDQN state]
+        H --> K
+        I --> K
+        K --> L[DDQN action selection<br/>15 actions]
+        L --> M[Pruning engine]
+        M --> N[GQA-safe head pruning<br/>or reversible layer skipping]
+        N --> O[Pruned inference]
+        G --> P[Reward computation<br/>throughput and continuation PPL]
+        O --> P
+        P --> Q[Replay update + model restoration]
+    end
+
+    E --> Runtime
+```
+
+### Runtime controller diagram
+
+```mermaid
+flowchart TD
+    A[State inputs] --> B[Hardware telemetry<br/>CPU RAM battery GPU VRAM util]
+    A --> C[LCR score]
+    A --> D[Early-Llama features<br/>hidden norm entropy concentration]
+    B --> E[10-dimensional state vector]
+    C --> E
+    D --> E
+    E --> F[Policy network<br/>10 -> 128 -> 128 -> 15]
+    F --> G{epsilon-greedy}
+    G -->|explore| H[Random action]
+    G -->|exploit| I[argmax Q action]
+    H --> J[Apply pruning action]
+    I --> J
+    J --> K[Benchmark pruned run]
+    K --> L[Compute reward]
+    L --> M[Store transition]
+    M --> N[Replay training]
+    N --> O[Target sync every 200 steps]
+```
+
+### LCR architecture diagram
+
+```mermaid
+flowchart TD
+    A[Input prompt] --> B[BERT-mini encoder<br/>4 layers 256 hidden]
+    B --> C[ScalarMix over embedding and hidden states]
+    C --> D[Mean pooling<br/>256-d representation]
+
+    A --> E[Auxiliary text features<br/>9 prompt statistics]
+    B --> F[Attention statistics<br/>48 features]
+    E --> G[Concatenate aux + attention stats<br/>57-d vector]
+    F --> G
+    G --> H[AuxProjector<br/>57 -> 48]
+    D --> I[Fusion<br/>256 + 48 = 304]
+    H --> I
+    I --> J[Regressor head<br/>304 -> 202 -> 101 -> 1]
+    J --> K[Sigmoid sensitivity score<br/>0 to 1]
+```
+
+The same synchronized diagrams are also stored in `diagram.md`.
 
 ## Installation
 
-### 1. Clone Repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/asief-iqbal/Thesis.git
 cd Thesis
 ```
 
-### 2. Create Virtual Environment
+### 2. Create and activate a virtual environment
 
 ```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
+python -m venv .venv
+.venv\Scripts\activate
 ```
 
-### 3. Install Dependencies
+### 3. Install dependencies
 
 ```bash
 pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
-pip install transformers psutil numpy accelerate datasets lm-eval matplotlib
+pip install transformers accelerate datasets psutil numpy matplotlib huggingface_hub lm-eval
 ```
 
-### 4. Additional Downloads
+### 4. Configure environment variables
 
-No additional downloads required.
+Create `.env` with a Hugging Face token for Llama access:
 
-### 5. Setup Environment
-
-Create `.env` file:
-
-```
+```env
 HUGGINGFACE_HUB_TOKEN=your_hf_token_here
-STRUCTURAL_PRUNING=0  # 1 for structural pruning
 ```
 
-**Note**: All caches (HF models/datasets) stored locally in project folder.
+The repository automatically uses a project-local `HF_HOME` cache when none is set.
 
 ## Quick Start
 
-### CPU Training (Optimized for Speed)
+### Train the RL controller
 
 ```bash
-python Adaptive_pruning.py --mode train --episodes 50 --train-samples 5000 --train-dataset "Prompt Dataset Train.csv" --device cpu
+python Adaptive_pruning.py --mode train --episodes 50 --checkpoint checkpoints/rl_policy.pt --train-dataset "lcr_mixture.final.csv" --train-samples 500 --max-new-tokens 20 --device gpu
 ```
 
-### GPU Training with All Features
+### Test the saved controller
 
 ```bash
-python Adaptive_pruning.py --mode train --episodes 200 --train-samples 1200 --train-dataset "Prompt Dataset Train.csv" --device gpu --sparsity-2to4 --compile --kv-compress --kv-keep-ratio 0.5
+python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --test-dataset "lcr_mixture.final.csv" --episodes 100 --max-new-tokens 50 --device gpu
 ```
 
-### Testing Trained Agent
+### Run benchmark-specific evaluation
 
 ```bash
-python Adaptive_pruning.py --mode test --checkpoint "checkpoints/rl_policy.pt" --device gpu --max-new-tokens 50
-```
-
-## Dataset Files (Use Just One)
-
-If you only want a single clean mixture dataset (GSM8K + MBPP + WikiText-2 + MMLU + BoolQ) with answers/options/tests where available, use:
-
-- `lcr_mixture.final.csv` (canonical; audited clean)
-
-It contains a unified schema with optional evaluation columns:
-
-- **Always present**: `Prompt, Category, Subject, Context Dependency, SourceDataset, SourceSplit, SourceId`
-- **MMLU + BoolQ**: `Choices, AnswerIndex, AnswerLetter, AnswerText`
-- **GSM8K only**: `Gsm8kAnswer`
-- **MBPP only**: `MbppTests` (JSON list of `assert ...` tests)
-- **WikiText-2**: no ground-truth answer (evaluation columns are empty)
-
-Other dataset-related files are intermediate artifacts (kept for reproducibility / thesis appendices):
-
-- `lcr_mixture.raw.csv`: initial build output (may contain noisy WikiText rows)
-- `lcr_mixture.csv`: cleaned prompt-only mixture (no answers/options)
-- `lcr_mixture_with_eval_fields.csv`: same content as `lcr_mixture.final.csv` (older name)
-- `*_audit.json`: audit reports for the corresponding CSV
-
-## Usage
-
-### Training
-
-Train the RL agent on a prompt dataset:
-
-> ```bash
-> python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset Train.csv" --train-samples 5000 --max-new-tokens 50
-> ```
-
-````
-Uses 80% of the dataset for training.
-
-**Training Outputs**:
-- **Per-Episode Logs**: Terminal prints token length, prompt PPL, complexity score, baseline metrics (no-prune), pruned metrics (with RL action).
-- **Saved Files**:
-  - `training_metrics.json`: Detailed metrics for all episodes.
-  - `token_speed_compare.png`: Baseline vs pruned token speed scatter + trendlines.
-  - `inference_time_compare.png`: Baseline vs pruned inference time scatter + trendlines.
-  - `perplexity_compare.png`: Baseline vs pruned perplexity scatter + trendlines.
-  - `length_vs_ppl.png`: Correlation between token length and prompt perplexity.
-- **Reports**: `training_report.txt` with averages by prune type.
-
-**Faster Training Options** (for testing/debugging):
-- `--episodes 50` (half episodes).
-- `--train-samples 1000` (fewer prompts).
-- `--max-new-tokens 20` (shorter generations).
-
-Example fast run:
-```bash
-python Adaptive_pruning.py --mode train --episodes 10 --checkpoint checkpoints/rl_policy.pt --train-dataset "Prompt Dataset Train.csv" --train-samples 500 --max-new-tokens 20
-````
-
-### Testing
-
-Evaluate the trained agent:
-
-```bash
-python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt --max-new-tokens 50 --wikitext-samples 200 --lm-eval
-```
-
-Dataset-specific evaluation (recommended for thesis testing; uses random subset sampling to avoid downloading full datasets):
-
-**WikiText-2 (Perplexity + Inference graphs; baseline vs pruned)**
-
-```bash
-python Adaptive_pruning.py --mode test --wikitext2 --eval-samples 1000 --max-new-tokens 50 --device gpu
-```
-
-**BoolQ (Zero-shot accuracy; baseline vs pruned)**
-
-```bash
+python Adaptive_pruning.py --mode test --wikitext2 --eval-samples 1000 --device gpu
 python Adaptive_pruning.py --mode test --boolq --eval-samples 1000 --device gpu
-```
-
-**HellaSwag (Zero-shot accuracy; baseline vs pruned)**
-
-```bash
-python Adaptive_pruning.py --mode test --hellaswag --eval-samples 1000 --device gpu
-```
-
-**MMLU (Zero-shot accuracy; baseline vs pruned)**
-
-```bash
 python Adaptive_pruning.py --mode test --mmlu --eval-samples 1000 --device gpu
 ```
 
-**Notes**:
+### Train the LCR
 
-- All the above dataset-specific runs try to load datasets via Hugging Face `datasets` using streaming first, and fall back to split slicing (e.g., `validation[:5000]`) to reduce memory/disk usage.
-- Outputs are automatically organized under `Test Report/Test N/` after each run.
-- You can control the pruning action used for the "after pruning" run via `--force-action target:intensity`.
-
-### CLI Arguments
-
-| Argument             | Default                  | Description                                                             |
-| -------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| `--mode`             | -                        | `train`, `test`, or `report`                                            |
-| `--episodes`         | 50                       | Number of training episodes                                             |
-| `--checkpoint`       | -                        | Path to save/load RL policy                                             |
-| `--train-dataset`    | Prompt Dataset Train.csv | Dataset for training. Defaults to RedPajama sample if CSV not found.    |
-| `--test-dataset`     | Prompt Dataset Test.csv  | Dataset for testing/evaluation.                                         |
-| `--train-split`      | train                    | Dataset split to use for training.                                      |
-| `--train-samples`    | 5000                     | Number of training prompts                                              |
-| `--max-new-tokens`   | 50                       | Generation length                                                       |
-| `--device`           | auto                     | cpu/gpu/auto                                                            |
-| `--static-profiles`  | False                    | Enable prebuilt static pruning profiles (Phase A)                       |
-| `--sparsity-2to4`    | False                    | Enable 2:4 semi-structured sparsity packing on supported GPUs (Phase B) |
-| `--compile`          | False                    | Compile profiles with torch.compile if available (Phase B)              |
-| `--kv-compress`      | False                    | Enable KV-cache compression scaffold (Phase D)                          |
-| `--kv-keep-ratio`    | 1.0                      | KV tokens keep ratio [0,1] (Phase D)                                    |
-| `--wikitext-samples` | 200                      | WikiText-2 eval samples                                                 |
-| `--wikitext2`        | False                    | Run WikiText-2 subset eval (baseline vs pruned PPL + inference plots)   |
-| `--boolq`            | False                    | Run BoolQ zero-shot accuracy (baseline vs pruned)                       |
-| `--hellaswag`        | False                    | Run HellaSwag zero-shot accuracy (baseline vs pruned)                   |
-| `--mmlu`             | False                    | Run MMLU zero-shot accuracy (baseline vs pruned)                        |
-| `--eval-samples`     | 1000                     | Number of random samples used for dataset-specific evals                |
-| `--eval-seed`        | 42                       | RNG seed for dataset-specific eval sampling                             |
-| `--eval-max-seq-len` | 512                      | Max sequence length used during dataset-specific eval scoring           |
-| `--lm-eval`          | False                    | Run lm-eval-harness                                                     |
-| `--eval-limit`       | None                     | Limit number of samples per lm-eval task                                |
-| `--eval-batch-size`  | 1                        | Batch size for lm-eval evaluation                                       |
-| `--eval-tasks`       | boolq,hellaswag,mmlu     | Comma-separated list of lm-eval tasks                                   |
-| `--force-action`     | None                     | Force a specific action for test mode (format: target:intensity)        |
-
-## Architecture
-
-### Core Components
-
-- **RL Controller (DQN)**: State includes hardware (CPU/GPU, memory, battery) + prompt-centric complexity. Actions: pruning targets with varying intensities. Reward: `alpha * (pruned_tok_s - baseline_tok_s) / baseline_tok_s - beta * (pruned_ppl - baseline_ppl) / baseline_ppl` with `alpha=0.7`, `beta=0.3` for direct relative scaling of speed gains vs PPL penalties.
-- **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity using regex for analysis).
-- **Model Engine**: Loads LLaMA-3.2-1B from HF, applies reversible pruning, generates responses, computes PPL.
-- **Calibration System**: Pre-training activation statistics for head importance.
-- **Benchmark System**: Measures latency (ms), tokens/sec (actual generated tokens), PPL. Logs baseline vs pruned per-episode.
-- **Plot Generator**: Post-training comparative scatter plots with trendlines and outlier removal.
-
-### Pruning Actions (v2.4 - Simplified Action Space)
-
-- 0: `none` (0.0) - No pruning.
-- 1: `attention_heads` (0.10) - Remove 10% least-important heads via GQA-aware structural slicing.
-- 2: `attention_heads` (0.20) - Remove 20% least-important heads via GQA-aware structural slicing.
-- 3: `attention_heads` (0.30) - Remove 30% least-important heads via GQA-aware structural slicing.
-- 4: `attention_heads` (0.40) - Remove 40% least-important heads via GQA-aware structural slicing.
-- 5: `attention_heads` (0.50) - Remove 50% least-important heads via GQA-aware structural slicing.
-- 6: `transformer_layers` (0.10) - Skip 10% of layers via functional skipping.
-- 7: `transformer_layers` (0.20) - Skip 20% of layers via functional skipping.
-- 8: `transformer_layers` (0.30) - Skip 30% of layers via functional skipping.
-- 9: `transformer_layers` (0.40) - Skip 40% of layers via functional skipping.
-- 10: `transformer_layers` (0.50) - Skip 50% of layers via functional skipping.
-
-**Note**: FFN pruning is disabled; system focuses on head pruning and layer skipping.
-
-### System Architecture Overview
-
-```mermaid
-graph TB
-    subgraph "RL Controller"
-        A[Hardware Monitor:<br/>CPU/GPU/Memory/Battery] --> B[State Vector<br/>7 features]
-        C[Prompt Analyzer:<br/> Prompt Complexity Measurement from Dataset] --> B
-        B --> D[Double DQN<br/>Policy Network]
-        D --> E[Action Selection<br/>epsilon-greedy]
-    end
-
-    subgraph "Model Engine"
-        F[LLaMA-3.2-1B<br/>Base Model] --> G[Pruning Layer]
-        G --> H[Head Pruner<br/>GQA-aware]
-        G --> I[Layer Skipper<br/>Functional]
-    end
-
-    subgraph "Pruning Methods"
-        H --> K[Structured Head Slicer<br/>Remove Q/K/V/O projections]
-        I --> L[Layer Bypass Hooks<br/>Skip transformer layers]
-        K --> X[Remove least-important heads via GQA-aware structural slicing]
-        L --> Y[Skip layers via functional skipping <br/> max 1 of 16 Layers]
-    end
-
-    subgraph "Evaluation"
-        N[Benchmark System<br/>Time/PPL/Tokens] --> O[Reward Function<br/>α=0.7 speed, β=0.3 quality]
-        O --> P[Training Update<br/>Double DQN]
-    end
-
-    E --> G
-    X --> N
-    Y --> N
-    P --> D
-
-    style A fill:#e1f5fe
-    style F fill:#f3e5f5
-    style N fill:#e8f5e8
-    style D fill:#fff3e0
+```bash
+python train_tinybert_lcr.py --train-file oracle_lcr_10k_dual.csv --output-dir checkpoints
 ```
 
-**System Components:**
+## Usage
 
-- **RL Controller**: Hardware-aware policy that selects pruning actions
-- **Model Engine**: Manages LLaMA-3.2-1B and applies reversible pruning
-- **Pruning Methods**: Three types of structural and functional pruning
-- **Evaluation**: Measures performance and updates the RL policy
+### Recommended workflow
 
-### Training Workflow Diagram (v2.3 - Expanded Action Space)
+1. Build or reuse the cleaned benchmark mixture.
+2. Generate oracle labels from dense and sparse teacher-forcing loss.
+3. Train the LCR and export checkpoints.
+4. Train or evaluate the RL controller.
+5. Inspect numbered folders under `Training Report` and `Test Report`.
 
-```mermaid
-flowchart TD
-    A["Load Model & Components"] --> B["Model Validation & Safety Checks"]
-    B --> D["User Prompt"]
-    D --> E["Retrieve Prompt Complexity from Dataset"]
-    E --> F["Collect Hardware State: CPU/GPU/Memory"]
-    F --> G["RL Controller: Action Selection (epsilon-greedy exploration)"]
-    G --> H{Action Type?}
-    H -->|"Heads"| I["GQA-Aware Head Pruning<br/>10-50% intensities"]
-    H -->|"Layers"| J["Functional Layer Skipping<br/>10-50% intensities"]
-    H -->|"None"| K["No Pruning"]
-    I --> M["Benchmark: Tok/s, PPL"]
-    J --> M
-    K --> M
-    M --> N{Performance Check}
-    N -->|">10% Slowdown"| O["Early Termination<br/>-20.0 penalty"]
-    N -->|"Normal"| P["Compute Reward Function<br/>alpha=0.7 speed, beta=0.3 quality"]
-    O --> Q["Model Restoration<br/>with Validation"]
-    P --> Q
-    Q --> R["Continue Training"]
-    R --> D
+### Forcing a specific pruning action during evaluation
 
+You can bypass the learned policy during test-time comparison:
+
+```bash
+python Adaptive_pruning.py --mode test --wikitext2 --force-action attention_heads:0.15 --eval-samples 500 --device gpu
+python Adaptive_pruning.py --mode test --boolq --force-action transformer_layers:0.10 --eval-samples 500 --device gpu
 ```
 
-**Enhanced Architecture Features:**
+This is useful for ablations and per-method comparisons.
 
-- **Safety-First Design**: Model validation, emergency reload, early termination
-- **Expanded Actions**: Proven pruning methods (heads 10-50%, layers 10-50%)
-- **Performance Monitoring**: Real-time slowdown detection with heavy penalties
-- **Robust Restoration**: Automatic model recovery from corruption
+## CLI Arguments
 
-## Modules
+The main entrypoint is `Adaptive_pruning.py`.
 
-- `model_loader.py`: HF loading, token auth, pruning apply/restore, save_pretrained, activation calibration.
-- `dashboard_gen.py`: Generates comprehensive 3-panel dashboard (Accuracy, PPL, Latency) for comparative analysis.
-- `pruners/`:
-  - `head_pruner.py`, `ffn_pruner.py`, `layer_skipper.py` (functional masks).
-  - `structured_ffn_slicer.py`, `structured_head_slicer.py` (structural slicing).
-- `.env`: Config (HF token, pruning mode).
-- `checkpoints/`: RL policy files.
-- `Training Report/`: Organized training results in numbered subfolders (Train 1, Train 2, etc.).
-- `Test report/`: Organized test results in numbered subfolders (Test 1, Test 2, etc.).
-- `training_report.txt`: Post-training report.
-- `training_metrics.json`: Detailed per-episode metrics.
-- `token_speed_compare.png`: Baseline vs pruned token speed plot.
-- `inference_time_compare.png`: Baseline vs pruned inference time plot.
-- `perplexity_compare.png`: Baseline vs pruned perplexity plot.
-- `length_vs_ppl.png`: Token length vs prompt perplexity correlation.
-- `pruning_action_usage.png`: Pruning action usage counts.
-- `inference_time_per_action.png`: Average inference time per pruning action.
-- `perplexity_per_action.png`: Average perplexity per pruning action.
+| Argument | Default | Description |
+| --- | --- | --- |
+| `--mode` | `test` | `train`, `test`, or `report` |
+| `--checkpoint` | `checkpoints/rl_policy.pt` | Save/load path for the RL policy |
+| `--episodes` | `50` | Number of train or test episodes |
+| `--max-new-tokens` | `50` | Maximum generated continuation length |
+| `--train-dataset` | `Prompt Dataset Train.csv` | Training CSV path |
+| `--test-dataset` | `Prompt Dataset Test.csv` | Test CSV path |
+| `--train-samples` | `5000` | Number of training prompts |
+| `--test-samples` | `100` | Number of test prompts in auto-test flows |
+| `--device` | `auto` | `cpu`, `gpu`, or `auto` |
+| `--wikitext2` | `False` | Run WikiText-2 comparative evaluation |
+| `--boolq` | `False` | Run BoolQ zero-shot evaluation |
+| `--hellaswag` | `False` | Run HellaSwag zero-shot evaluation |
+| `--mmlu` | `False` | Run MMLU zero-shot evaluation |
+| `--eval-samples` | `1000` | Number of samples for benchmark-specific evaluation |
+| `--eval-seed` | `42` | Random seed for evaluation sampling |
+| `--eval-max-seq-len` | `512` | Sequence length cap during eval |
+| `--wikitext-min-cont-tokens` | `32` | Minimum continuation tokens for WikiText-2 PPL |
+| `--force-action` | `None` | Force `target:intensity` instead of RL selection |
+| `--lm-eval` | `False` | Run lm-eval-harness tasks |
+| `--eval-tasks` | `boolq,hellaswag,mmlu` | lm-eval task list |
+| `--static-profiles` | `False` | Static profile scaffold flag |
+| `--sparsity-2to4` | `False` | 2:4 sparsity scaffold flag |
+| `--compile` | `False` | Compile-profile scaffold flag |
+| `--kv-compress` | `False` | KV compression scaffold flag |
+| `--kv-keep-ratio` | `1.0` | Fraction of KV tokens retained |
 
-## Benchmarks
+## Repository Layout
 
-- **WikiText-2**: Perplexity and inference speed (baseline vs pruned), evaluated on a random subset via `--wikitext2`.
-- **BoolQ / HellaSwag / MMLU**: Zero-shot accuracy (baseline vs pruned), evaluated on random subsets via `--boolq`, `--hellaswag`, `--mmlu`.
-- **lm-eval-harness**: Optional standardized accuracy benchmark (configurable via `--lm-eval`).
-- **Custom Metrics**: Latency (ms), tokens/sec, perplexity in train/test.
+| Path | Role |
+| --- | --- |
+| `Adaptive_pruning.py` | RL training, testing, reporting, benchmark evaluation |
+| `model_loader.py` | Llama loading, pruning, restoration, importance calibration |
+| `lcr_tinybert.py` | Runtime LCR scorer |
+| `build_lcr_mixture_dataset.py` | Benchmark mixture builder |
+| `audit_lcr_mixture_dataset.py` | Dataset audit and cleaning |
+| `oracle_labeler.py` | Dense-vs-sparse oracle labeling |
+| `prepare_dual_labels.py` | Label and feature preparation |
+| `train_tinybert_lcr.py` | LCR training script |
+| `smoke_test_lcr.py` | End-to-end LCR validation |
+| `check_tinybert_install.py` | TinyBERT environment check |
+| `pruners/` | Head, FFN, and layer pruning implementations |
+| `Training Report/` | Saved RL and LCR training outputs |
+| `Test Report/` | Saved evaluation outputs |
+| `Methodology.md` | Thesis/journal methodology chapter |
+| `diagram.md` | Synchronized Mermaid diagrams for the current architecture |
 
-## Detailed Methodology: How the RL-Driven Pruning Architecture Works
+## Reports and Outputs
 
-This section provides a comprehensive, step-by-step explanation of the system's workflow, calculations, and decision-making processes.
+The project generates numbered run folders and artifacts for both training and evaluation.
 
-### 1. Initialization Phase
+Typical outputs include:
 
-- **Model Loading**: Load LLaMA-3.2-1B from Hugging Face using `transformers`. Requires HF token for access.
-- **Pruner Setup**: Initialize all pruners:
-  - Functional pruners (hooks for masking).
-  - Structural slicers (rebuild layers, GQA-safe head pruning).
-  - KV cache pruner (sliding window on past_key_values).
-- **Calibration**: Collect activation-aware importance for heads using a small prompt set (64 samples, 128 seq len).
-- **Prompt Analyzer**: Prompt-centric complexity (token length + model perplexity using regex for analysis).
-- **Hardware Monitor**: NVML (if GPU) or torch memory; psutil for CPU/memory/battery.
+- `training_metrics.json`
+- `training_report.txt`
+- `token_speed_compare.png`
+- `inference_time_compare.png`
+- `perplexity_compare.png`
+- `length_vs_ppl.png`
+- `pruning_action_usage.png`
+- benchmark-specific evaluation summaries under `Test Report/Test N`
 
-### 2. Prompt Processing (Enhanced Workflow)
+The saved reports are part of the thesis evidence trail. They are not just debugging artifacts.
 
-```mermaid
-flowchart TD
-    A[Input Prompt] --> B[Model Validation Check]
-    B --> C{Model State OK?}
-    C -->|Corrupted| D[Emergency Model Reload]
-    C -->|Clean| E[Tokenizer]
-    D --> E
-    E --> F[LLM Tokens]
-    A --> G[Model Perplexity Calculation]
-    F --> H[llm_norm = min(1.0, tokens/200)]
-    G --> I[ppl_norm = min(1.0, ppl/50)]
-    H --> J[Complexity = 0.6*llm_norm + 0.4*ppl_norm]
-    I --> J
-    J --> K[Hardware State Collection]
-    K --> L[CPU/GPU/Memory/Battery]
-    L --> M[Combined State Vector]
-    M --> N[Output: Complexity + Hardware State]
-```
+## Current Findings
 
-**Step-by-step breakdown**:
+### LCR results
 
-1. **Tokenization**:
-   - Use model tokenizer to count LLM tokens.
+The LCR is the strongest current contribution in the repository.
 
-2. **Metrics**:
-   - LLM tokens: Total tokens from model's tokenizer.
-   - Prompt perplexity: PPL measured on the prompt by the current model.
+- best selected runtime checkpoint: `Training Report/TinyBERT Train 20`
+- held-out Spearman: 0.7009
+- held-out $R^2$: 0.4950
+- strongest held-out sources: WikiText-2, BoolQ, MMLU
+- hardest source: GSM8K
 
-3. **Normalization**:
-   - llm_norm = min(1.0, llm_tokens / 200.0)
-   - ppl_norm = min(1.0, ppl / 50.0)
+### RL results
 
-4. **Complexity Score Calculation**:
-   - Complexity Score = 0.6 _ llm_norm + 0.4 _ ppl_norm
-   - Range: 0.0 (simple prompts) to 1.0 (complex prompts).
+The RL controller is implemented and measurable, but not yet stable enough to claim strong generalization.
 
-5. **Hardware State Collection**:
-   - CPU utilization (%).
-   - Memory available (GB).
-   - GPU utilization (%) and free VRAM (GB).
-   - Battery (%) if applicable.
+- latest stored training run: latency improved on average, but with quality degradation and negative average reward
+- latest stored test run: near-collapse to one layer-skipping action with catastrophic perplexity spikes
 
-### 3. Pruning Decision-Making (Enhanced RL Policy)
+That is the correct scientific framing for the current repository state: the adaptive pruning system is real, the LCR works well, and the RL controller still requires reward-shaping and policy-stabilization work.
 
-```mermaid
-flowchart TD
-    %% Foundational Setup
-    A["Dataset Curation and Complexity Scoring"] --> B["Base Model: Llama-3.2-1B Setup"]
-    B --> C{"Methodology"}
+## Limitations
 
-    %% Static Baseline
-    C -->|"Static baseline"| D["Measure Unpruned Performance"]
-
-    %% Dynamic Framework
-    C -->|"Dynamic framework"| E["Initialize DDQN Agent"]
-    E --> F["State Vector: Hardware and Complexity"]
-    F --> G["Training Loop"]
-
-    %% Core RL Loop
-    G --> H["Action Selection (epsilon-greedy)"]
-    H --> I["Apply Pruning: Heads 5-50&#37; / Layers 5-50&#37;"]
-    I --> J["Measure Performance: Speed and PPL"]
-    J --> K["Reward: alpha*speed - beta*PPL"]
-    K --> L["Experience Replay Training"]
-    L --> M["Model Restoration"]
-    M -->|"Continue training"| G
-    M -->|"Training complete"| N["Test Evaluation: 300 Episodes"]
-
-    %% Final Analysis
-    D --> O["Baseline vs Pruned Comparison"]
-    N --> O
-    O --> P["Results Analysis and Reporting"]
-
-    %% Styling
-    classDef setup fill:#87CEEB,stroke:#333,stroke-width:2px
-    classDef baseline fill:#DDA0DD,stroke:#333,stroke-width:2px
-    classDef rl fill:#98FB98,stroke:#333,stroke-width:2px
-    classDef analysis fill:#FFB6C1,stroke:#333,stroke-width:2px
-
-    class A,B setup
-    class D baseline
-    class E,F,G,H,I,J,K,L,M,N rl
-    class O,P analysis
-
-
-```
-
-**Enhanced RL Features:**
-
-- **Expanded Actions**: Proven methods (heads 10-50%, layers 10-50%)
-- **Early Termination**: Immediate detection and penalty for slow actions
-- **Enhanced Reward Function**: Balanced speed/quality with bonus system
-- **Safety Validation**: Model state checks before and after pruning
-
-### 4. Pruning Application
-
-- **Attention Heads**:
-  - Importance: Activation stats (if calibrated) or L2 norms of Q/K/V/O projections per head.
-  - Remove lowest-scoring heads (e.g., intensity 0.2 → remove 20% heads).
-  - Functional: Mask with hooks; Structural: Rebuild layer without heads (GQA-safe).
-
-- **FFN Neurons**:
-  - Importance: Activation stats (if calibrated) or L2 norms of gate/up/down projections per channel.
-  - Remove channels with lowest scores (mild intensities like 0.1).
-  - Functional: Mask channels; Structural: Rebuild Linear layers.
-
-- **Transformer Layers**:
-  - Skip layers from the end (e.g., intensity 0.06 → skip 6% layers, max 2 of 16).
-  - Functional: Hook to bypass layers (cache-safe identity).
-
-- **KV Cache**:
-  - Sliding-window pruning of past_key_values to keep only the most recent context (window size scales with intensity).
-  - Reduces KV cache footprint during generation without forcing shorter outputs.
-
-- **None**: No changes to model.
-
-### 5. Response Generation
-
-- Apply pruning to model.
-- Generate response: `model.generate(prompt, max_new_tokens=effective_max)`.
-- For KV pruning, past_key_values are trimmed during forward passes.
-
-### 6. Benchmarking and Evaluation
-
-- **Perplexity Calculation**:
-  - Full text = prompt + generated response.
-  - PPL = exp(cross-entropy loss) on full text.
-- **Performance Metrics**:
-  - Inference time (ms): Time to generate response.
-  - Tokens/sec: generated_tokens / inference_time (uses actual generated length).
-- **Reward Function**:
-  - **Speedup Calculation**: `speedup_ratio = (baseline_time - pruned_time) / baseline_time`
-  - **Quality Degradation**: `ppl_degradation = (pruned_ppl - baseline_ppl) / baseline_ppl`
-  - **Heavy Penalty for Slowdowns**: If `speedup_ratio ≤ 0`: `penalty = -10.0 - abs(speedup_ratio) * 20.0`
-  - **Balanced Reward for Speedups**: `alpha * speedup_ratio - beta * max(0, ppl_degradation)` with `alpha=0.7`, `beta=0.3`
-  - **Bonus System**: +2.0 for 20%+ speedup, +1.0 for 15%+ speedup
-  - **Early Termination**: -20.0 penalty for actions causing >10% slowdown
-
-### 7. Model Restoration
-
-- Restore all pruners to original state for next prompt.
-- Ensures reversible pruning.
-
-### 8. Training/Evaluation Loop (Phase 1 - During Training)
-
-- **Calibration Phase**: Run activation collection on 64 prompts for head importances.
-- For each prompt in dataset (80% train split):
-  - **Step 1**: Compute token length and prompt perplexity (print and save).
-  - **Step 2**: Measure baseline metrics (no pruning): inference time, tokens/sec, perplexity (print and save).
-  - **Step 3**: Compute complexity score (print and save).
-  - **Step 4**: RL selects action, apply pruning (using calibration if available), measure pruned metrics (print and save).
-  - Process prompt → Decide pruning → Apply → Generate → Benchmark → Log metrics.
-- Reward update and policy training on baseline vs pruned difference.
-
-### 9. Post-Training Analysis (Phase 2 - After Training)
-
-- Generate reports: Overall stats, per-prune-type averages.
-- Produce comparative scatter plots (baseline red vs pruned blue, with trendlines, outliers removed):
-  - Token speed per episode.
-  - Inference time per episode.
-  - Perplexity per episode.
-- Produce correlation plot: Token length vs prompt perplexity.
-- All plots saved as PNGs.
-
-This methodology ensures learnable, hardware-aware pruning without randomness, adapting to prompt complexity for optimal speed-accuracy trade-offs.
-
-## Roadmap
-
-- **Phase 4**: Power/energy logging, baselines (SparseGPT, LLM-Pruner, quantization), Pareto plots.
-- **Phase 5**: Expand RL state to more features, gradient-based saliency for pruning, ablations.
+- The controller currently uses a single LCR score in the state, even though the repository supports richer multi-method label preparation.
+- Structural FFN slicing is implemented but not yet integrated into the RL action space.
+- Additional acceleration scaffolds, such as 2:4 sparsity and KV compression, are present but not central to the reported thesis results.
+- The CLI still defaults to legacy CSV filenames, so you should explicitly pass the intended dataset path for reproducible runs.
 
 ## Troubleshooting
 
-### Common Issues
+### Hugging Face token issues
 
-1. **ModuleNotFoundError**: Activate venv and install deps.
+If Llama-3.2-1B fails to load, confirm that `.env` contains a valid `HUGGINGFACE_HUB_TOKEN`.
 
-   ```bash
-   venv\Scripts\activate
-   pip install torch transformers psutil numpy accelerate pynvml datasets lm-eval matplotlib
-   ```
+### Missing GPU telemetry
 
-2. **FFN Restoration Issues**: If you see "FFN not fully restored" errors:
-   - The system will automatically reload the base model
-   - This is normal behavior after FFN pruning
-   - Training will continue with the next episode
+If NVML is unavailable, GPU utilization falls back to `0.0`. The project still runs, but telemetry is less informative.
 
-3. **Very Slow Inference (>5 seconds)**:
-   - Indicates model corruption from failed restoration
-   - System will detect and automatically fix this
-   - Check console for "WARNING: Very slow inference" messages
+### Slow or unstable training
 
-4. **CUDA OOM**: Enable structural pruning or use smaller model.
+- Reduce `--episodes`
+- Reduce `--train-samples`
+- Reduce `--max-new-tokens`
+- Use explicit dataset paths instead of relying on defaults
 
-   ```bash
-   STRUCTURAL_PRUNING=1
-   ```
+### LCR checkpoint fallback
 
-5. **HF Token**: Ensure `.env` has valid token.
+If the exported BERT-mini checkpoints are missing, the system falls back to a heuristic proxy. That keeps the pipeline operational, but it is not the main reported model.
 
-6. **NVML Unavailable**: GPU memory metrics fall back to torch; GPU util set to 0.0.
-
-7. **Slow Training**: Use fast options or GPU.
-
-8. **Action Space Issues**: If you see "Action caused X% slowdown":
-   - This is the early termination system working
-   - The RL agent will learn to avoid these actions
-   - Normal part of the learning process
-
-### Logs
-
-Check console for errors. Training auto-saves checkpoints/reports.
-
-## Contributing
-
-- Fork repo.
-- Create feature branch.
-- Submit PR with description.
-- Report bugs with logs.
-
-## License
-
-MIT License. See LICENSE file for details.
-
-## Citations
-
-If you use this work in your research, please cite:
+## Citation
 
 ```bibtex
-@misc{rl_adaptive_pruning_llm,
-  title={RL-Driven Adaptive Pruning for Large Language Models},
+@misc{iqbal2026casrap,
+  title={CASRAP: Context-Aware Structured Runtime Adaptive Pruning for Local LLM Inference},
   author={Asief Iqbal},
-  year={2025},
+  year={2026},
   howpublished={\url{https://github.com/asief-iqbal/Thesis}},
-  note={An RL-driven system for adaptive LLM pruning balancing inference speed, accuracy, and resource usage with prompt-centric complexity and importance-guided structural pruning.}
+  note={Repository containing the benchmark mixture pipeline, oracle sensitivity labeling, BERT-mini LCR, DDQN pruning controller, and reversible runtime pruning engine used in the thesis implementation.}
 }
 ```
 
-### Additional Citations
+## License
 
-- Michel, P., Levy, O., & Neubig, G. (2019). Are Sixteen Heads Really Better than One? NeurIPS.
-- Sanh, V., Wolf, T., & Rush, A. M. (2020). Movement Pruning: Adaptive Sparsity by Fine-Tuning. NeurIPS.
-- Zhang, T., Wang, S., Li, W., Qi, X., Zhang, Y., Wang, Z., & Tao, D. (2023). LLM-Pruner: On the Structural Pruning of Large Language Models. arXiv.
-- Frantar, E., & Alistarh, D. (2023). SparseGPT: Massive Language Models Can Be Accurately Pruned in One-Shot. ICML.
-- Sun, M., Liu, Z., Bair, A., & Kolter, J. Z. (2023). Wanda: Pruning by Magnitude of Weights and Activations. ICML.
-- NVIDIA. (2023). Exploiting Ampere Structured Sparsity with cuSPARSELt.
-- PyTorch AO. (2024). Semi-Structured Sparse Tensors.
-
-## Acknowledgments
-
-- Hugging Face Transformers and Datasets for model and data handling.
-- PyTorch for deep learning framework.
-- lm-eval-harness for standardized evaluation.
+MIT License.

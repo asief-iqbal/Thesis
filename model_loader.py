@@ -2,7 +2,12 @@ import os
 import shutil
 import torch
 import copy
-os.environ['HF_HOME'] = 'd:\\LLM Research\\hf_cache'
+from typing import Optional
+_DEFAULT_HF_HOME = os.path.join(os.getcwd(), ".hf_cache")
+if not os.getenv("HF_HOME"):
+    # Avoid hard-coding a machine-specific drive path.
+    os.environ["HF_HOME"] = _DEFAULT_HF_HOME
+os.makedirs(os.environ["HF_HOME"], exist_ok=True)
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 from pruners.head_pruner import HeadPruner
@@ -13,10 +18,18 @@ from pruners.layer_skipper import LayerSkipper
 
 
 def _load_hf_token_from_env(env_path: str = ".env") -> str:
-    """Load Hugging Face token from .env or environment variables."""
-    token = os.getenv("HUGGINGFACE_HUB_TOKEN")
-    if token:
-        return token
+    """Load Hugging Face token from .env or environment variables.
+
+    Supported keys (env var or .env):
+    - HUGGINGFACE_HUB_TOKEN (preferred)
+    - HF_TOKEN
+    - HUGGINGFACE_TOKEN (also matches user-style 'HuggingFace_token')
+    """
+
+    for key in ("HUGGINGFACE_HUB_TOKEN", "HF_TOKEN", "HUGGINGFACE_TOKEN"):
+        token = os.getenv(key)
+        if token:
+            return token.strip().strip('"').strip("'")
     # Minimal .env reader to avoid extra deps
     try:
         if os.path.exists(env_path):
@@ -25,29 +38,50 @@ def _load_hf_token_from_env(env_path: str = ".env") -> str:
                     line = line.strip()
                     if not line or line.startswith("#"):
                         continue
-                    if line.startswith("HUGGINGFACE_HUB_TOKEN="):
-                        return line.split("=", 1)[1].strip()
+                    if line.lower().startswith("export "):
+                        line = line[7:].lstrip()
+                    if "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = (k or "").strip()
+                    v = (v or "").strip().strip('"').strip("'")
+                    if k.upper() in ("HUGGINGFACE_HUB_TOKEN", "HF_TOKEN", "HUGGINGFACE_TOKEN"):
+                        return v
     except Exception:
         pass
     return ""
 
 
 class RealModelEngine:
-    def __init__(self, device: str = "auto", enable_static_profiles: bool = False, enable_2to4: bool = False, enable_compile: bool = False, enable_kv_compression: bool = False, kv_keep_ratio: float = 1.0):
+    def __init__(
+        self,
+        device: str = "auto",
+        enable_static_profiles: bool = False,
+        enable_2to4: bool = False,
+        enable_compile: bool = False,
+        enable_kv_compression: bool = False,
+        kv_keep_ratio: float = 1.0,
+        model_name: Optional[str] = None,
+        local_files_only: bool = False,
+    ):
         token = _load_hf_token_from_env()
         if token:
             login(token=token)
         else:
             print("[Engine] Warning: No HF token found in env/.env. Using cached auth if available.")
 
-        self.model_name = "meta-llama/Llama-3.2-1B"
+        self.model_name = model_name or os.getenv("BACKBONE_MODEL_NAME") or "meta-llama/Llama-3.2-1B"
         print(f"[Engine] Loading model: {self.model_name} on device {device}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=bool(local_files_only))
         if device == "cpu":
             self.device_map = None
         else:
             self.device_map = "auto"
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, device_map=self.device_map)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            device_map=self.device_map,
+            local_files_only=bool(local_files_only),
+        )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         print(f"[Engine] Llama 3.2 1B model loaded to {self.model.device}.")
@@ -281,7 +315,7 @@ class RealModelEngine:
         target = getattr(action, "target", "none")
         intensity = float(getattr(action, "intensity", 0.0) or 0.0)
         # Static profile fast-path (Phase A): swap entire model to a prebuilt profile
-        if getattr(self, 'enable_static_profiles', False) and target in ("attention_heads", "ffn_neurons", "none"):
+        if getattr(self, 'enable_static_profiles', False) and target in ("attention_heads", "none"):
             self.activate_profile(action)
             return
         
@@ -322,41 +356,11 @@ class RealModelEngine:
                 per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
             print(f"[Engine] Applying GQA-CORRECT STRUCTURAL head pruning: removing {groups_to_remove_count}/{num_kv_heads} KV groups per layer.")
             self.structured_head.prune(per_layer_removed_q, per_layer_removed_kv)
-        elif target == "ffn_neurons" and intensity > 0.0:
-            layers = getattr(self.model.model, "layers", [])
-            if not layers:
-                print("[Engine] No layers found; cannot apply FFN pruning.")
-                return
-            inter_size = layers[0].mlp.down_proj.weight.shape[1]
-            # Compute removal to produce a hardware-friendly new intermediate size
-            multiple = 128
-            target_size = int(round(inter_size * (1.0 - intensity)))
-            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
-            new_inter = min(inter_size - 1, new_inter)
-            k = max(1, inter_size - new_inter)
-            per_layer_removed = {}
-            for i, layer in enumerate(layers):
-                if i in self.ffn_importance:
-                    scores = self.ffn_importance[i]
-                    removed = torch.topk(scores, k, largest=False).indices.tolist()
-                else: # Fallback to magnitude
-                    mlp = getattr(layer, "mlp", None)
-                    gate, up, down = mlp.gate_proj, mlp.up_proj, mlp.down_proj
-                    with torch.no_grad():
-                        scores = torch.linalg.vector_norm(gate.weight, ord=2, dim=1) + \
-                                 torch.linalg.vector_norm(up.weight, ord=2, dim=1) + \
-                                 torch.linalg.vector_norm(down.weight, ord=2, dim=0)
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                per_layer_removed[i] = removed
-                
-            print(f"[Engine] Applying STRUCTURAL FFN pruning: removing {k}/{inter_size} channels per layer.")
-            self.structured_ffn.prune(per_layer_removed)
         elif target == "transformer_layers" and intensity > 0.0:
             layers = getattr(self.model.model, "layers", [])
             L = len(layers)
             if L == 0: return
             k = max(1, int(round(L * intensity)))
-            k = min(k, max(1, L // 8)) # Cap skipping to 12.5% to preserve quality
             
             if self.layer_importance and len(self.layer_importance) == L:
                 scores = torch.tensor(self.layer_importance)
@@ -375,6 +379,89 @@ class RealModelEngine:
             
         elif target == "none":
             self.restore_model()
+
+    def extract_early_features(self, prompt: str) -> dict:
+        """Run only embedding + layer-0 of Llama to extract cheap runtime features.
+
+        Returns dict with keys: hidden_norm, attn_entropy, attn_max
+        All values are scalars suitable for RL state vector.
+        Must be called BEFORE any pruning is applied.
+        """
+        import math
+        device = next(self.model.parameters()).device
+        inputs = self.tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=128
+        ).to(device)
+        input_ids = inputs["input_ids"]
+        seq_len = input_ids.shape[1]
+
+        with torch.no_grad():
+            # 1. Embedding
+            hidden = self.model.model.embed_tokens(input_ids)
+
+            # 2. Run only layer 0
+            layer_0 = self.model.model.layers[0]
+            position_ids = torch.arange(seq_len, device=device).unsqueeze(0)
+
+            # Compute rotary embeddings (required by transformers >= 4.45 where
+            # rotary_emb moved from per-layer attention to the parent LlamaModel)
+            position_embeddings = None
+            if hasattr(self.model.model, 'rotary_emb'):
+                cos, sin = self.model.model.rotary_emb(hidden, position_ids)
+                position_embeddings = (cos, sin)
+            elif hasattr(layer_0.self_attn, 'rotary_emb'):
+                cos, sin = layer_0.self_attn.rotary_emb(hidden, position_ids)
+                position_embeddings = (cos, sin)
+
+            # Build kwargs for the layer call
+            layer_kwargs = dict(
+                attention_mask=None,
+                position_ids=position_ids,
+                output_attentions=True,
+            )
+            if position_embeddings is not None:
+                layer_kwargs['position_embeddings'] = position_embeddings
+
+            try:
+                layer_out = layer_0(hidden, **layer_kwargs)
+                hidden_out = layer_out[0]
+                attn_weights = layer_out[1]  # may be None with SDPA backend
+            except Exception:
+                # Fallback: run without requesting attention weights
+                layer_kwargs['output_attentions'] = False
+                layer_out = layer_0(hidden, **layer_kwargs)
+                hidden_out = layer_out[0]
+                attn_weights = None
+
+            # Feature 1: mean L2 norm of hidden states (normalised by hidden_dim)
+            hidden_dim = hidden_out.shape[-1]  # 2048 for Llama-3.2-1B
+            token_norms = torch.linalg.vector_norm(hidden_out, ord=2, dim=-1)  # (1, seq_len)
+            hidden_norm = float(token_norms.mean()) / hidden_dim
+
+            if attn_weights is not None:
+                # Feature 2: mean attention entropy (normalised by log(seq_len))
+                eps = 1e-9
+                log_attn = torch.log(attn_weights + eps)
+                entropy = -(attn_weights * log_attn).sum(dim=-1)  # (1, heads, seq_len)
+                max_entropy = math.log(max(seq_len, 2))
+                attn_entropy = float(entropy.mean()) / max_entropy
+
+                # Feature 3: mean attention max (already in [0, 1])
+                attn_max = float(attn_weights.max(dim=-1).values.mean())
+            else:
+                # Derive proxy features from hidden states when SDPA hides attn weights
+                token_vecs = hidden_out.squeeze(0)  # (seq_len, hidden_dim)
+                norms = token_norms.squeeze(0)       # (seq_len,)
+                # Proxy entropy: coefficient of variation of token norms, capped to [0, 1]
+                attn_entropy = min(1.0, float(norms.std() / (norms.mean() + 1e-9)))
+                # Proxy concentration: 1 - (mean/max) norm ratio — 0=uniform, 1=one token dominates
+                attn_max = 1.0 - float(norms.mean() / (norms.max() + 1e-9))
+
+        return {
+            "hidden_norm": hidden_norm,
+            "attn_entropy": attn_entropy,
+            "attn_max": attn_max,
+        }
 
     def restore_model(self) -> None:
         # Restore functional masks

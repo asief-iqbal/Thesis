@@ -123,6 +123,27 @@ python Adaptive_pruning.py --mode train --episodes 200 --train-samples 1200 --tr
 python Adaptive_pruning.py --mode test --checkpoint "checkpoints/rl_policy.pt" --device gpu --max-new-tokens 50
 ```
 
+## Dataset Files (Use Just One)
+
+If you only want a single clean mixture dataset (GSM8K + MBPP + WikiText-2 + MMLU + BoolQ) with answers/options/tests where available, use:
+
+- `lcr_mixture.final.csv` (canonical; audited clean)
+
+It contains a unified schema with optional evaluation columns:
+
+- **Always present**: `Prompt, Category, Subject, Context Dependency, SourceDataset, SourceSplit, SourceId`
+- **MMLU + BoolQ**: `Choices, AnswerIndex, AnswerLetter, AnswerText`
+- **GSM8K only**: `Gsm8kAnswer`
+- **MBPP only**: `MbppTests` (JSON list of `assert ...` tests)
+- **WikiText-2**: no ground-truth answer (evaluation columns are empty)
+
+Other dataset-related files are intermediate artifacts (kept for reproducibility / thesis appendices):
+
+- `lcr_mixture.raw.csv`: initial build output (may contain noisy WikiText rows)
+- `lcr_mixture.csv`: cleaned prompt-only mixture (no answers/options)
+- `lcr_mixture_with_eval_fields.csv`: same content as `lcr_mixture.final.csv` (older name)
+- `*_audit.json`: audit reports for the corresponding CSV
+
 ## Usage
 
 ### Training

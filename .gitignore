@@ -27,6 +27,7 @@ export/
 # Project specific
 checkpoints/
 hf_cache/
+.hf_cache/
 nltk_data/
 spacy_data/
 .env

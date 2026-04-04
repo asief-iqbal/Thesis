@@ -15,7 +15,7 @@ import psutil
 import time
 import numpy as np
 import random
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from collections import deque
 import matplotlib.pyplot as plt
@@ -24,6 +24,14 @@ import os
 import re
 import itertools
 import warnings
+
+try:
+    from lcr_tinybert import TinyBertLcrConfig, TinyBertLcrScorer
+    _TINYBERT_LCR_AVAILABLE = True
+except Exception:
+    TinyBertLcrConfig = None
+    TinyBertLcrScorer = None
+    _TINYBERT_LCR_AVAILABLE = False
 try:
     import pynvml as nvml
     _NVML_AVAILABLE = True
@@ -136,7 +144,7 @@ class PruningAction:
 class ActionSpace:
     """Defines all possible pruning actions: none, heads, layers at various intensities."""
     def __init__(self):
-        # Include layer skipping alongside heads (layer skipping capped inside engine at <=12.5%)
+        # Head pruning (structural, GQA-safe) + layer skipping (functional, uncapped)
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
             # Attention heads (structural, GQA-safe): 5–50%
@@ -184,7 +192,26 @@ class RLControllerAgent:
         self.device_monitor = EnhancedDeviceMonitor()
         self.action_space = ActionSpace()
 
-        self.state_dim = 7
+        self.lcr_scorer = None
+        if _TINYBERT_LCR_AVAILABLE:
+            try:
+                backbone_dir = os.path.join("checkpoints", "tinybert_lcr_backbone")
+                model_name = backbone_dir if os.path.isdir(backbone_dir) else "prajjwal1/bert-mini"
+                self.lcr_scorer = TinyBertLcrScorer(
+                    TinyBertLcrConfig(
+                        model_name=model_name,
+                        max_length=128,
+                        device="cpu",
+                        head_checkpoint_path=os.path.join("checkpoints", "tinybert_lcr_head.pt"),
+                    )
+                )
+                if not self.lcr_scorer.enabled:
+                    self.lcr_scorer = None
+            except Exception as e:
+                print(f"[LCR] Warning: MiniBERT LCR scorer init failed, using heuristic complexity. Error: {e}")
+                self.lcr_scorer = None
+
+        self.state_dim = 10  # 6 hardware + 1 LCR + 3 early-Llama features
         self.action_dim = len(self.action_space.actions)
         
         self.policy_net = DQN(self.state_dim, self.action_dim)
@@ -217,6 +244,12 @@ class RLControllerAgent:
 
     def load(self, path: str):
         ckpt = torch.load(path, map_location='cpu')
+        # Guard: warn and skip if state_dim changed (requires fresh training)
+        saved_dim = ckpt.get('state_dim', None)
+        if saved_dim is not None and saved_dim != self.state_dim:
+            print(f"[RL Agent] WARNING: Checkpoint state_dim={saved_dim} != current state_dim={self.state_dim}. "
+                  f"Skipping load — start fresh training with the new state vector.")
+            return
         # Load policy net with tolerance for action_dim changes (strict=False)
         try:
             self.policy_net.load_state_dict(ckpt['policy_state'], strict=False)
@@ -245,35 +278,55 @@ class RLControllerAgent:
         self.epsilon = 0.0  # exploitation by default when loading
         print(f"[RL Agent] Checkpoint loaded from {path}")
 
-    def _get_state_vector(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None) -> torch.Tensor:
+    def _get_state_vector(
+        self,
+        prompt: str,
+        prompt_ppl: Optional[float] = None,
+        token_len: Optional[int] = None,
+        lcr_score: Optional[float] = None,
+        early_features: Optional[Dict[str, float]] = None,
+    ) -> torch.Tensor:
         device_state = self.device_monitor.get_state()
-        
-        # Enhanced prompt complexity: token length, perplexity, math density, code density
-        tokens = token_len if token_len is not None else len(self.tokenizer.encode(prompt))
-        
-        # Analyze content for structural complexity (math/code)
-        math_ops, code_syms = self._analyze_prompt_content(prompt)
-        text_len = max(1, len(prompt))
-        math_density = math_ops / text_len
-        code_density = code_syms / text_len
-        
-        # Normalization
-        llm_norm = min(1.0, tokens / 200.0)
-        ppl_norm = min(1.0, prompt_ppl / 50.0) if prompt_ppl is not None else 0.5
-        math_norm = min(1.0, math_density / 0.05)  # 5% math symbols is very high
-        code_norm = min(1.0, code_density / 0.05)  # 5% code symbols is very high
-        
-        # Weighted complexity score
-        complexity_score = (0.4 * llm_norm) + (0.3 * ppl_norm) + (0.15 * math_norm) + (0.15 * code_norm)
-        
+
+        # Prompt complexity / sensitivity signal (LCR)
+        # Primary: MiniBERT-based scorer returning a scalar in [0, 1].
+        # Fallback: previous heuristic (token length + PPL + math/code density).
+        if lcr_score is not None:
+            complexity_score = float(lcr_score)
+        elif self.lcr_scorer is not None:
+            complexity_score = float(self.lcr_scorer.score(prompt))
+        else:
+            tokens = token_len if token_len is not None else len(self.tokenizer.encode(prompt))
+
+            math_ops, code_syms = self._analyze_prompt_content(prompt)
+            text_len = max(1, len(prompt))
+            math_density = math_ops / text_len
+            code_density = code_syms / text_len
+
+            llm_norm = min(1.0, tokens / 200.0)
+            ppl_norm = min(1.0, prompt_ppl / 50.0) if prompt_ppl is not None else 0.5
+            math_norm = min(1.0, math_density / 0.05)
+            code_norm = min(1.0, code_density / 0.05)
+            complexity_score = (0.4 * llm_norm) + (0.3 * ppl_norm) + (0.15 * math_norm) + (0.15 * code_norm)
+
+        # Early-Llama features (layer-0 partial forward, computed before pruning)
+        ef = early_features or {}
+        hidden_norm = float(ef.get("hidden_norm", 0.0))
+        attn_entropy = float(ef.get("attn_entropy", 0.0))
+        attn_max = float(ef.get("attn_max", 0.0))
+
         state = [
             device_state.cpu_utilization / 100.0,
-            device_state.memory_available_gb / 16.0,
+            device_state.memory_available_gb / 16.0,   # 16 GB system RAM
             device_state.battery_percent / 100.0,
             float(device_state.gpu_available),
-            device_state.gpu_memory_free_gb / 24.0,
+            device_state.gpu_memory_free_gb / 8.0,     # RTX 4060 8 GB VRAM
             device_state.gpu_utilization / 100.0,
-            complexity_score
+            complexity_score,
+            # Early-Llama runtime features (dims 7-9)
+            hidden_norm,      # Layer-0 hidden-state L2 norm / hidden_dim
+            attn_entropy,     # Layer-0 attention entropy / log(seq_len)
+            attn_max,         # Layer-0 attention max (already [0,1])
         ]
         return torch.FloatTensor(state).unsqueeze(0)
 
@@ -501,7 +554,8 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
     plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
 
-    # 5) Time breakdown: RL Agent Time, Model Time, Total Time per Episode (Stacked Bar Chart)
+    # 5) Time breakdown: LCR + RL Agent + Model Time per Episode (Stacked Bar Chart)
+    lcr_times = [m.get('lcr_inference_time_ms', 0) for m in metrics]
     rl_times = [m.get('rl_inference_time_ms', 0) for m in metrics]
     model_times = [m.get('model_time_ms', 0) for m in metrics]
     total_times = [m['time_ms'] for m in metrics]
@@ -520,15 +574,23 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     # Since times are related, filter based on total time outliers
     filtered_indices = [i for i, t in enumerate(total_times) if t in remove_outliers_times(total_times)]
     episodes_filtered = [episodes[i] for i in filtered_indices]
+    lcr_times_filtered = [lcr_times[i] for i in filtered_indices]
     rl_times_filtered = [rl_times[i] for i in filtered_indices]
     model_times_filtered = [model_times[i] for i in filtered_indices]
     total_times_filtered = [total_times[i] for i in filtered_indices]
     
     plt.figure(figsize=(14, 8))
     x = np.arange(len(episodes_filtered))
-    plt.bar(x, rl_times_filtered, color='orange', label='RL Agent Time (ms)', alpha=0.8)
-    plt.bar(x, model_times_filtered, bottom=rl_times_filtered, color='blue', label='Model Time (ms)', alpha=0.8)
-    plt.plot(x, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=4, label='Total Time (ms)')
+    bottom_lcr = np.array(lcr_times_filtered)
+    bottom_rl = bottom_lcr + np.array(rl_times_filtered)
+    plt.bar(x, lcr_times_filtered, color='green', label='LCR Inference (ms)', alpha=0.8)
+    plt.bar(x, rl_times_filtered, bottom=bottom_lcr, color='orange', label='RL Agent Time (ms)', alpha=0.8)
+    plt.bar(x, model_times_filtered, bottom=bottom_rl, color='blue', label='Model Inference (ms)', alpha=0.8)
+    plt.plot(x, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=4, label='Total Pruned Time (ms)')
+    # Also show baseline (unpruned model inference only) as a dashed line
+    baseline_times = [m.get('baseline_time_ms', 0) for m in metrics]
+    baseline_filtered = [baseline_times[i] for i in filtered_indices]
+    plt.plot(x, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
     plt.title('Inference Time Breakdown per Episode', fontsize=16, fontweight='bold')
     plt.xlabel('Episode', fontsize=12)
     plt.ylabel('Time (ms)', fontsize=12)
@@ -539,6 +601,95 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     plt.savefig('time_breakdown.png', dpi=300, bbox_inches='tight')
     plt.close()
     print("[Report] Time breakdown plot saved to time_breakdown.png")
+
+    # 6) Reward progression with moving average
+    rewards = [m.get('reward', 0) for m in metrics]
+    if rewards and any(r != 0 for r in rewards):
+        episodes_r = [m['episode'] for m in metrics]
+        plt.figure(figsize=(10, 6))
+        plt.scatter(episodes_r, rewards, alpha=0.5, color='teal', label='Reward', s=30)
+        # Moving average (window=5)
+        window = min(5, len(rewards))
+        if len(rewards) >= window:
+            ma = np.convolve(rewards, np.ones(window)/window, mode='valid')
+            ma_x = episodes_r[window-1:]
+            plt.plot(ma_x, ma, color='red', linewidth=2, label=f'Moving Avg (w={window})')
+        if len(episodes_r) > 1:
+            coeff = np.polyfit(episodes_r, rewards, 1)
+            plt.plot(episodes_r, np.polyval(coeff, episodes_r), color='purple', linestyle='--', label='Trendline')
+        plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        plt.title('Reward Progression per Episode', fontsize=16, fontweight='bold')
+        plt.xlabel('Episode', fontsize=12)
+        plt.ylabel('Reward', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('reward_progression.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("[Report] Reward progression plot saved to reward_progression.png")
+
+    # 7) Quality vs Speed tradeoff (Pareto scatter)
+    speed_gains = []
+    ppl_ratios = []
+    action_labels_scatter = []
+    for m in metrics:
+        base_tok = m.get('baseline_tok_s', 0)
+        pruned_tok = m.get('tok_s', 0)
+        base_ppl_val = m.get('baseline_ppl', 1)
+        pruned_ppl_val = m.get('ppl', 1)
+        if base_tok > 0 and base_ppl_val > 0:
+            speed_gains.append((pruned_tok - base_tok) / base_tok * 100)
+            ppl_ratios.append((pruned_ppl_val - base_ppl_val) / base_ppl_val * 100)
+            action_labels_scatter.append(m.get('target', 'none'))
+    if speed_gains:
+        plt.figure(figsize=(10, 6))
+        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
+        for label in set(action_labels_scatter):
+            idx = [j for j, a in enumerate(action_labels_scatter) if a == label]
+            plt.scatter([speed_gains[j] for j in idx], [ppl_ratios[j] for j in idx],
+                       alpha=0.6, label=label, color=colors_map.get(label, 'purple'), s=40)
+        plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        plt.title('Quality vs Speed Tradeoff', fontsize=16, fontweight='bold')
+        plt.xlabel('Speed Change (%)', fontsize=12)
+        plt.ylabel('PPL Change (%)', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig('quality_vs_speed.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("[Report] Quality vs speed plot saved to quality_vs_speed.png")
+
+    # 8) Epsilon decay (if tracked)
+    epsilons = [m.get('epsilon', None) for m in metrics]
+    if epsilons and any(e is not None for e in epsilons):
+        eps_vals = [e for e in epsilons if e is not None]
+        eps_episodes = [m['episode'] for m, e in zip(metrics, epsilons) if e is not None]
+        plt.figure(figsize=(10, 6))
+        plt.plot(eps_episodes, eps_vals, color='darkorange', linewidth=2)
+        plt.title('Epsilon Decay During Training', fontsize=16, fontweight='bold')
+        plt.xlabel('Episode', fontsize=12)
+        plt.ylabel('Epsilon', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("[Report] Epsilon decay plot saved to epsilon_decay.png")
+
+    # 9) Cumulative reward over episodes
+    if rewards and any(r != 0 for r in rewards):
+        cumulative = np.cumsum(rewards)
+        plt.figure(figsize=(10, 6))
+        plt.plot(episodes_r, cumulative, color='darkgreen', linewidth=2)
+        plt.fill_between(episodes_r, cumulative, alpha=0.2, color='green')
+        plt.title('Cumulative Reward Over Episodes', fontsize=16, fontweight='bold')
+        plt.xlabel('Episode', fontsize=12)
+        plt.ylabel('Cumulative Reward', fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('cumulative_reward.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("[Report] Cumulative reward plot saved to cumulative_reward.png")
 
 def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = 'training_report.txt', header: str = 'Training Report'):
     """Generate post-training report with averages by prune type/intensity and plots."""
@@ -684,14 +835,28 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
     # Save report to file
     with open(report_filename, 'w') as f:
         f.write(f"{header}\n")
+        f.write(f"{'='*60}\n")
         f.write(f"Episodes: {n}\n")
-        f.write(f"Overall Avg Time: {total_time/n:.2f}ms\n")
-        f.write(f"Overall Avg PPL: {total_ppl/n:.2f}\n\n")
+        f.write(f"Overall Avg Total Time (LCR+RL+Model): {total_time/n:.2f}ms\n")
+        avg_lcr = sum(m.get('lcr_inference_time_ms', 0) for m in metrics_list) / n
+        avg_rl = sum(m.get('rl_inference_time_ms', 0) for m in metrics_list) / n
+        avg_model = sum(m.get('model_time_ms', 0) for m in metrics_list) / n
+        avg_baseline = sum(m.get('baseline_time_ms', 0) for m in metrics_list) / n
+        f.write(f"  Avg LCR Inference: {avg_lcr:.2f}ms\n")
+        f.write(f"  Avg RL Agent: {avg_rl:.2f}ms\n")
+        f.write(f"  Avg Model Inference (pruned): {avg_model:.2f}ms\n")
+        f.write(f"  Avg Baseline Inference (unpruned): {avg_baseline:.2f}ms\n")
+        f.write(f"Overall Avg PPL (pruned): {total_ppl/n:.2f}\n")
+        avg_baseline_ppl = sum(m.get('baseline_ppl', 0) for m in metrics_list) / n
+        f.write(f"Overall Avg PPL (baseline): {avg_baseline_ppl:.2f}\n\n")
+        avg_reward = sum(m.get('reward', 0) for m in metrics_list) / n
+        f.write(f"Overall Avg Reward: {avg_reward:.4f}\n\n")
         f.write("Averages by Prune Type and Intensity:\n")
-        for (target, intensity), ms in groups.items():
+        for (target, intensity), ms in sorted(groups.items(), key=lambda x: x[1][0]['action_index']):
             avg_time = sum(m['time_ms'] for m in ms) / len(ms)
             avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
-            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f} ({len(ms)} samples)\n")
+            avg_r = sum(m.get('reward', 0) for m in ms) / len(ms)
+            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f}, Avg Reward {avg_r:.4f} ({len(ms)} samples)\n")
     print(f"[Report] Report saved to {report_filename}")
 def organize_training_reports(is_report_mode: bool = False):
     """Organize training reports into numbered subfolders under 'Training Report'."""
@@ -727,6 +892,10 @@ def organize_training_reports(is_report_mode: bool = False):
         'perplexity_per_action.png',
         'token_speed_compare.png',
         'time_breakdown.png',
+        'reward_progression.png',
+        'quality_vs_speed.png',
+        'epsilon_decay.png',
+        'cumulative_reward.png',
         'training_report.txt'
     ]
     if not is_report_mode:
@@ -828,7 +997,9 @@ def main(num_episodes: int = 50,
          sparsity_2to4: bool = False,
          compile_profiles: bool = False,
          kv_compress: bool = False,
-         kv_keep_ratio: float = 1.0):
+         kv_keep_ratio: float = 1.0,
+         split_ratio: float = 1.0,
+         test_samples: int = 100):
     model_engine = RealModelEngine(
         device=device,
         enable_static_profiles=static_profiles,
@@ -843,11 +1014,28 @@ def main(num_episodes: int = 50,
     validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
     metrics_list = []
     # Load a proper training prompt pool from the specified dataset
-    prompt_pool = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
+    all_prompts = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
+
+    # Apply train-test split if split_ratio < 1.0
+    test_prompts_split = []
+    if 0.0 < split_ratio < 1.0:
+        split_idx = int(len(all_prompts) * split_ratio)
+        prompt_pool = all_prompts[:split_idx]
+        test_prompts_split = all_prompts[split_idx:]
+        print(f"[System] Dataset split: {len(prompt_pool)} train ({split_ratio*100:.0f}%) / {len(test_prompts_split)} test ({(1-split_ratio)*100:.0f}%)")
+    else:
+        prompt_pool = all_prompts
+
     # Honor CLI episodes: cap to requested number
     limit = min(num_episodes, len(prompt_pool))
     prompt_pool = prompt_pool[:limit]
     num_episodes = limit
+
+    # Adaptive epsilon decay: reach epsilon_min by the last episode
+    import math as _math
+    rl_agent.epsilon_decay = _math.exp(_math.log(rl_agent.epsilon_min) / max(num_episodes, 1))
+    print(f"[System] Epsilon decay set to {rl_agent.epsilon_decay:.4f} for {num_episodes} episodes "
+          f"(will reach {rl_agent.epsilon_min} by end)")
 
     # Calibrate importance scores for heads/FFN/layers using a small subset
     try:
@@ -875,22 +1063,37 @@ def main(num_episodes: int = 50,
         )
         print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
 
-        # Phase 1.3: Compute and print complexity score
-        llm_norm = min(1.0, token_len / 200.0)
-        ppl_norm = min(1.0, prompt_ppl / 50.0)
-        complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
-        print(f"[Complexity] Score: {complexity_score:.3f} (llm_norm={llm_norm:.3f}, ppl_norm={ppl_norm:.3f})")
+        # Phase 1.3: Compute LCR score + early-Llama features (timed together as LCR overhead)
+        start_lcr = time.time()
+        if getattr(rl_agent, 'lcr_scorer', None) is not None:
+            complexity_score = float(rl_agent.lcr_scorer.score(prompt))
+            print(f"[LCR] Score: {complexity_score:.3f} (MiniBERT)")
+        else:
+            llm_norm = min(1.0, token_len / 200.0)
+            ppl_norm = min(1.0, prompt_ppl / 50.0)
+            complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
+            print(f"[Complexity] Score: {complexity_score:.3f} (llm_norm={llm_norm:.3f}, ppl_norm={ppl_norm:.3f})")
+
+        # Phase 1.3b: Extract cheap early-Llama features (layer-0 only, before pruning)
+        try:
+            early_features = model_engine.extract_early_features(prompt)
+            print(f"[Early-Llama] hidden_norm={early_features['hidden_norm']:.4f} | attn_entropy={early_features['attn_entropy']:.4f} | attn_max={early_features['attn_max']:.4f}")
+        except Exception as e:
+            print(f"[Early-Llama] Warning: extraction failed ({e}), using zeros.")
+            early_features = {"hidden_norm": 0.0, "attn_entropy": 0.0, "attn_max": 0.0}
+        lcr_inference_time_ms = (time.time() - start_lcr) * 1000
 
         # Phase 1.4: RL-based pruning and pruned metrics
         start_rl = time.time()
-        state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
+        state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
         pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len, state_tensor=state_tensor)
         rl_inference_time_ms = (time.time() - start_rl) * 1000
         model_engine.apply_pruning(pruning_action)
         pruned_metrics = benchmark.benchmark_and_get_reward(
             model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
         )
-        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {rl_inference_time_ms + pruned_metrics['time_ms']:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
+        total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
+        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
         # Reward: balanced speed/quality with stability
         alpha, beta = 0.7, 0.3
@@ -900,18 +1103,7 @@ def main(num_episodes: int = 50,
             - beta * (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps)
         )
 
-        # Track effective layer-skip intensity (post-cap) for fair analysis
-        effective_intensity = pruning_action.intensity
-        if pruning_action.target == 'transformer_layers':
-            layers = getattr(model_engine.model.model, 'layers', [])
-            L = len(layers)
-            if L > 0:
-                k = max(1, int(round(L * pruning_action.intensity)))
-                k = min(k, max(1, L // 8))
-                k = min(k, L)
-                effective_intensity = k / float(L)
-
-        next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len)
+        next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
         rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
         print(f"[reward] {relative_reward:.3f}")
         
@@ -925,17 +1117,18 @@ def main(num_episodes: int = 50,
             'baseline_tok_s': base_metrics['tok_s'],
             'baseline_ppl': base_metrics['perplexity'],
             'baseline_gen_tokens': base_metrics.get('gen_tokens', None),
-            'time_ms': pruned_metrics['time_ms'] + rl_inference_time_ms,
+            'time_ms': lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms'],
             'model_time_ms': pruned_metrics['time_ms'],
             'rl_inference_time_ms': rl_inference_time_ms,
+            'lcr_inference_time_ms': lcr_inference_time_ms,
             'tok_s': pruned_metrics['tok_s'],
             'ppl': pruned_metrics['perplexity'],
             'gen_tokens': pruned_metrics.get('gen_tokens', None),
             'action_index': pruning_action.action_index,
             'target': pruning_action.target,
             'intensity': pruning_action.intensity,
-            'effective_intensity': effective_intensity,
-            'reward': relative_reward
+            'reward': relative_reward,
+            'epsilon': rl_agent.epsilon
         })
         
         model_engine.restore_model()
@@ -957,6 +1150,15 @@ def main(num_episodes: int = 50,
     
     # Organize training reports into folders
     organize_training_reports()
+
+    # Auto-run testing on held-out split if train-test split was used
+    if test_prompts_split:
+        test_cap = min(len(test_prompts_split), test_samples)
+        print(f"\n[System] Running evaluation on {test_cap} held-out test prompts (of {len(test_prompts_split)} available)...")
+        test_agent(model_engine, rl_agent, benchmark,
+                   num_test_episodes=test_cap,
+                   max_new_tokens=max_new_tokens,
+                   prompts=test_prompts_split[:test_cap])
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -1004,6 +1206,10 @@ def organize_test_reports(is_report_mode: bool = False):
         'perplexity_per_action.png',
         'token_speed_compare.png',
         'time_breakdown.png',
+        'reward_progression.png',
+        'quality_vs_speed.png',
+        'epsilon_decay.png',
+        'cumulative_reward.png',
         'test_report.txt'
     ]
     if not is_report_mode:
@@ -1018,7 +1224,7 @@ def organize_test_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Test reports organized into {test_path}")
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -1027,7 +1233,9 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     rl_agent.epsilon = 0.0
     metrics_list = []
     
-    if test_dataset and test_dataset.endswith('.csv'):
+    if prompts is not None:
+        test_prompts = prompts
+    elif test_dataset and test_dataset.endswith('.csv'):
         test_prompts = load_training_prompts(test_dataset, samples=max(num_test_episodes, 50))
     else:
         # Ensure we always have >= num_test_episodes prompts by sampling with replacement
@@ -1046,7 +1254,9 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     if len(test_prompts) < num_test_episodes:
         test_prompts = random.choices(test_prompts, k=num_test_episodes)
     else:
-        random.shuffle(test_prompts)
+        if prompts is None:  # Only shuffle if not pre-split
+            random.shuffle(test_prompts)
+    test_prompts = test_prompts[:num_test_episodes]
     
     if force_action:
         try:
@@ -1060,10 +1270,10 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     else:
         forced_action = None
     
-    for i in range(num_test_episodes):
+    for i in range(len(test_prompts)):
         prompt = test_prompts[i]
-        print(f"\n[Test Episode {i+1}/{num_test_episodes}]")
-        print(f"[Test] Prompt: '{prompt}'")
+        print(f"\n[Test Episode {i+1}/{len(test_prompts)}]")
+        print(f"[Test] Prompt: '{prompt[:80]}...'")
         
         # Calculate prompt perplexity and token length for metrics
         token_len = len(rl_agent.tokenizer.encode(prompt))
@@ -1074,29 +1284,34 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         base_metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
         print(f"[Test Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f}")
         
+        # LCR score + early-Llama features (timed together)
+        start_lcr = time.time()
+        if getattr(rl_agent, 'lcr_scorer', None) is not None:
+            complexity_score = float(rl_agent.lcr_scorer.score(prompt))
+        else:
+            llm_norm = min(1.0, token_len / 200.0)
+            ppl_norm = min(1.0, prompt_ppl / 50.0)
+            complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
+        try:
+            early_features = model_engine.extract_early_features(prompt)
+        except Exception:
+            early_features = {"hidden_norm": 0.0, "attn_entropy": 0.0, "attn_max": 0.0}
+        lcr_inference_time_ms = (time.time() - start_lcr) * 1000
+        
         # Pruned: forced or RL-selected action
         if forced_action:
             action = forced_action
             rl_inference_time_ms = 0.0  # No RL inference for forced actions
         else:
             start_rl = time.time()
-            state = rl_agent._get_state_vector(prompt)
-            action = rl_agent.get_action(prompt, state_tensor=state)
+            state = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
+            action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len, state_tensor=state)
             rl_inference_time_ms = (time.time() - start_rl) * 1000
-        
-        effective_intensity = action.intensity
-        if action.target == 'transformer_layers':
-            layers = getattr(model_engine.model.model, 'layers', [])
-            L = len(layers)
-            if L > 0:
-                k = max(1, int(round(L * action.intensity)))
-                k = min(k, max(1, L // 8))
-                k = min(k, L)
-                effective_intensity = k / float(L)
         
         model_engine.apply_pruning(action)
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
-        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {rl_inference_time_ms + metrics['time_ms']:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f}")
+        total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + metrics['time_ms']
+        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f}")
         
         model_engine.restore_model()
         
@@ -1104,19 +1319,19 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'episode': i+1,
             'token_len': token_len,
             'prompt_ppl': prompt_ppl,
-            'complexity': 0.0,  # Not calculated for test
+            'complexity': complexity_score,
             'baseline_time_ms': base_metrics['time_ms'],
             'baseline_tok_s': base_metrics['tok_s'],
             'baseline_ppl': base_metrics['perplexity'],
-            'time_ms': metrics['time_ms'] + rl_inference_time_ms,
+            'time_ms': total_pruned_time,
             'model_time_ms': metrics['time_ms'],
             'rl_inference_time_ms': rl_inference_time_ms,
+            'lcr_inference_time_ms': lcr_inference_time_ms,
             'tok_s': metrics['tok_s'],
             'ppl': metrics['perplexity'],
             'action_index': action.action_index,
             'target': action.target,
             'intensity': action.intensity,
-            'effective_intensity': effective_intensity
         })
     
     # Generate test reports
@@ -1220,12 +1435,17 @@ def _tokenize_ids(tokenizer, text: str) -> List[int]:
         except Exception:
             return []
 
-def _compute_ppl_on_ids(engine: RealModelEngine, prompt_ids: List[int], cont_ids: List[int]) -> float:
+def _compute_loss_ppl_and_tokens_on_ids(
+    engine: RealModelEngine,
+    prompt_ids: List[int],
+    cont_ids: List[int],
+) -> Tuple[float, float, int]:
+    cont_ids = list(cont_ids or [])
     if not cont_ids:
-        return 50000.0
-    ids = (prompt_ids or []) + (cont_ids or [])
+        return 20.0, 50000.0, 0
+    ids = (prompt_ids or []) + cont_ids
     if not ids:
-        return 50000.0
+        return 20.0, 50000.0, 0
     input_ids = torch.tensor([ids], dtype=torch.long, device=engine.model.device)
     labels = input_ids.clone()
     pl = len(prompt_ids or [])
@@ -1233,9 +1453,15 @@ def _compute_ppl_on_ids(engine: RealModelEngine, prompt_ids: List[int], cont_ids
         labels[:, :pl] = -100
     with torch.no_grad():
         out = engine.model(input_ids=input_ids, labels=labels)
-    ppl = torch.exp(out.loss).item()
-    if ppl is None or not torch.isfinite(torch.tensor(ppl)):
-        return 50000.0
+    loss = float(out.loss.detach().float().item())
+    ppl = float(torch.exp(out.loss).detach().float().item())
+    if (ppl is None) or (not torch.isfinite(torch.tensor(ppl))):
+        return 20.0, 50000.0, 0
+    return loss, ppl, int(len(cont_ids))
+
+
+def _compute_ppl_on_ids(engine: RealModelEngine, prompt_ids: List[int], cont_ids: List[int]) -> float:
+    _, ppl, _ = _compute_loss_ppl_and_tokens_on_ids(engine, prompt_ids, cont_ids)
     return float(ppl)
 
 def _score_options_mean_logprob(engine: RealModelEngine, prompt: str, options: List[str], max_seq_len: int = 512) -> List[float]:
@@ -1294,7 +1520,17 @@ def _score_options_mean_logprob(engine: RealModelEngine, prompt: str, options: L
         scores.append(float(pred_lp.sum().item() / denom))
     return scores
 
-def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBenchmark, samples: int = 1000, split: str = 'test', seed: int = 42, max_new_tokens: int = 50, max_seq_len: int = 512, force_action_str: Optional[str] = None):
+def run_wikitext2_comparative_eval(
+    engine: RealModelEngine,
+    benchmark: RealBenchmark,
+    samples: int = 1000,
+    split: str = 'test',
+    seed: int = 42,
+    max_new_tokens: int = 50,
+    max_seq_len: int = 512,
+    min_cont_tokens: int = 32,
+    force_action_str: Optional[str] = None,
+):
     print(f"\n[Eval] Running WikiText-2 comparative eval on {samples} samples...")
     rows = _load_streaming_samples('wikitext', 'wikitext-2-raw-v1', split=split, samples=samples, seed=seed)
     texts = []
@@ -1310,14 +1546,37 @@ def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBench
 
     def make_prompt_cont(text: str):
         ids = _tokenize_ids(engine.tokenizer, text)
-        if len(ids) < 8:
+        min_prompt_tokens = 8
+        cont_len = max(1, int(min_cont_tokens))
+        if cont_len >= int(max_seq_len):
+            cont_len = max(1, int(max_seq_len) - 1)
+        if len(ids) < (min_prompt_tokens + cont_len):
             return None, None
-        cut = min(len(ids) - 1, max(8, max_seq_len // 2))
-        prompt_ids = ids[:cut]
-        cont_ids = ids[cut:min(len(ids), cut + max(1, max_seq_len - cut))]
-        if not cont_ids:
+
+        max_prompt_len = max(1, int(max_seq_len) - cont_len)
+        ideal_prompt_len = max(min_prompt_tokens, int(max_seq_len) // 2)
+        prompt_len = min(max_prompt_len, ideal_prompt_len, len(ids) - cont_len)
+        prompt_len = max(min_prompt_tokens, int(prompt_len))
+        if prompt_len + cont_len > len(ids):
+            return None, None
+
+        prompt_ids = ids[:prompt_len]
+        cont_ids = ids[prompt_len:prompt_len + cont_len]
+        if len(cont_ids) < cont_len:
             return None, None
         return prompt_ids, cont_ids
+
+    pairs = []
+    skipped_too_short = 0
+    for t in texts:
+        prompt_ids, cont_ids = make_prompt_cont(t)
+        if prompt_ids is None or cont_ids is None:
+            skipped_too_short += 1
+            continue
+        pairs.append((prompt_ids, cont_ids))
+    if not pairs:
+        print("[Eval] WikiText-2: no usable prompt/continuation pairs after filtering")
+        return
 
     print("[Eval] Baseline pass...")
     try:
@@ -1326,12 +1585,10 @@ def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBench
         pass
     base_times = []
     base_ppls = []
+    base_losses = []
+    base_eval_toks = []
     base_tok_s = []
-    for i, t in enumerate(texts, start=1):
-        pc = make_prompt_cont(t)
-        if not pc or pc[0] is None:
-            continue
-        prompt_ids, cont_ids = pc
+    for i, (prompt_ids, cont_ids) in enumerate(pairs, start=1):
         prompt_text = engine.tokenizer.decode(prompt_ids, skip_special_tokens=True)
         start = time.time()
         gen = engine.generate_response(prompt_text, max_length=max_new_tokens)
@@ -1339,9 +1596,12 @@ def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBench
         tok_count = len(engine.tokenizer.encode(gen))
         base_times.append(elapsed * 1000.0)
         base_tok_s.append((tok_count / elapsed) if elapsed > 0 else 0.0)
-        base_ppls.append(_compute_ppl_on_ids(engine, prompt_ids, cont_ids))
+        loss, ppl, eval_toks = _compute_loss_ppl_and_tokens_on_ids(engine, prompt_ids, cont_ids)
+        base_losses.append(float(loss))
+        base_ppls.append(float(ppl))
+        base_eval_toks.append(int(eval_toks))
         if i % 50 == 0:
-            print(f"[Eval] Baseline {i}/{len(texts)}")
+            print(f"[Eval] Baseline {i}/{len(pairs)}")
 
     target_action = _parse_force_action(force_action_str)
     if not target_action:
@@ -1363,12 +1623,10 @@ def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBench
     print("[Eval] Pruned pass...")
     pr_times = []
     pr_ppls = []
+    pr_losses = []
+    pr_eval_toks = []
     pr_tok_s = []
-    for i, t in enumerate(texts, start=1):
-        pc = make_prompt_cont(t)
-        if not pc or pc[0] is None:
-            continue
-        prompt_ids, cont_ids = pc
+    for i, (prompt_ids, cont_ids) in enumerate(pairs, start=1):
         prompt_text = engine.tokenizer.decode(prompt_ids, skip_special_tokens=True)
         start = time.time()
         gen = engine.generate_response(prompt_text, max_length=max_new_tokens)
@@ -1376,38 +1634,70 @@ def run_wikitext2_comparative_eval(engine: RealModelEngine, benchmark: RealBench
         tok_count = len(engine.tokenizer.encode(gen))
         pr_times.append(elapsed * 1000.0)
         pr_tok_s.append((tok_count / elapsed) if elapsed > 0 else 0.0)
-        pr_ppls.append(_compute_ppl_on_ids(engine, prompt_ids, cont_ids))
+        loss, ppl, eval_toks = _compute_loss_ppl_and_tokens_on_ids(engine, prompt_ids, cont_ids)
+        pr_losses.append(float(loss))
+        pr_ppls.append(float(ppl))
+        pr_eval_toks.append(int(eval_toks))
         if i % 50 == 0:
-            print(f"[Eval] Pruned {i}/{len(texts)}")
+            print(f"[Eval] Pruned {i}/{len(pairs)}")
 
-    n = min(len(base_times), len(pr_times), len(base_ppls), len(pr_ppls))
+    n = min(len(base_times), len(pr_times), len(base_ppls), len(pr_ppls), len(base_losses), len(pr_losses), len(base_eval_toks), len(pr_eval_toks))
     if n <= 0:
         print("[Eval] WikiText-2: no aligned samples")
         return
     for i in range(n):
         metrics.append({
             'sample': i + 1,
+            'prompt_tokens': int(len(pairs[i][0])) if i < len(pairs) else 0,
+            'eval_tokens': int(base_eval_toks[i]),
             'baseline_time_ms': float(base_times[i]),
             'baseline_tok_s': float(base_tok_s[i]),
+            'baseline_loss': float(base_losses[i]),
             'baseline_ppl': float(base_ppls[i]),
             'time_ms': float(pr_times[i]),
             'tok_s': float(pr_tok_s[i]),
+            'loss': float(pr_losses[i]),
             'ppl': float(pr_ppls[i]),
         })
+
+    def _token_weighted_ppl(losses: List[float], tokens: List[int]) -> Tuple[float, float, int]:
+        total_toks = int(sum(int(t) for t in tokens))
+        if total_toks <= 0:
+            return 50000.0, 20.0, 0
+        weighted_loss = float(sum(float(l) * float(t) for l, t in zip(losses, tokens)))
+        mean_loss = float(weighted_loss / float(total_toks))
+        ppl = float(np.exp(mean_loss))
+        return ppl, mean_loss, total_toks
+
+    base_ppl_tw, base_loss_tw, base_total_toks = _token_weighted_ppl(base_losses[:n], base_eval_toks[:n])
+    pr_ppl_tw, pr_loss_tw, pr_total_toks = _token_weighted_ppl(pr_losses[:n], pr_eval_toks[:n])
 
     import json
     with open('wikitext2_metrics.json', 'w') as f:
         json.dump({
             'samples_used': n,
+            'samples_skipped_too_short': int(skipped_too_short),
+            'min_cont_tokens': int(min_cont_tokens),
+            'max_seq_len': int(max_seq_len),
             'baseline': {
                 'avg_time_ms': float(sum(base_times[:n]) / n),
                 'avg_tok_s': float(sum(base_tok_s[:n]) / n),
+                # Legacy (arithmetic mean of per-sample PPL). Kept for backward-compat.
                 'avg_ppl': float(sum(base_ppls[:n]) / n),
+                # Defense-safe: token-weighted PPL = exp(weighted mean loss)
+                'ppl_token_weighted': float(base_ppl_tw),
+                'mean_loss_token_weighted': float(base_loss_tw),
+                'total_eval_tokens': int(base_total_toks),
             },
             'pruned': {
                 'avg_time_ms': float(sum(pr_times[:n]) / n),
                 'avg_tok_s': float(sum(pr_tok_s[:n]) / n),
+                # Legacy (arithmetic mean of per-sample PPL). Kept for backward-compat.
                 'avg_ppl': float(sum(pr_ppls[:n]) / n),
+                # Defense-safe: token-weighted PPL = exp(weighted mean loss)
+                'ppl_token_weighted': float(pr_ppl_tw),
+                'mean_loss_token_weighted': float(pr_loss_tw),
+                'total_eval_tokens': int(pr_total_toks),
             },
             'per_sample': metrics,
         }, f)
@@ -2009,6 +2299,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval-samples', type=int, default=1000)
     parser.add_argument('--eval-seed', type=int, default=42)
     parser.add_argument('--eval-max-seq-len', type=int, default=512)
+    parser.add_argument('--wikitext-min-cont-tokens', type=int, default=32, help='Minimum continuation tokens used when computing WikiText-2 perplexity (avoids degenerate 1-token PPL).')
     parser.add_argument('--train-dataset', type=str, default='Prompt Dataset Train.csv')
     parser.add_argument('--test-dataset', type=str, default='Prompt Dataset Test.csv')
     parser.add_argument('--train-split', type=str, default='train')
@@ -2019,6 +2310,8 @@ if __name__ == "__main__":
     parser.add_argument('--compile', dest='compile_profiles', action='store_true', help='Compile profiles with torch.compile if available (Phase B)')
     parser.add_argument('--kv-compress', action='store_true', help='Enable KV-cache compression scaffold (Phase D)')
     parser.add_argument('--kv-keep-ratio', type=float, default=1.0, help='KV tokens keep ratio [0,1] (Phase D)')
+    parser.add_argument('--split-ratio', type=float, default=1.0, help='Train-test split ratio (e.g. 0.7 for 70%% train, 30%% test). Default: 1.0 (no split)')
+    parser.add_argument('--test-samples', type=int, default=100, help='Max test episodes for auto-test after training (default: 100)')
     parser.add_argument('--force-action', type=str, default=None, help='Force a specific action for test mode (format: target:intensity, e.g., ffn_neurons:0.2)')
     parser.add_argument('--lm-eval', action='store_true', help='Enable lm-eval harness benchmarks (BoolQ, MMLU, HellaSwag)')
     parser.add_argument('--eval-limit', type=int, default=None, help='Limit number of samples per lm-eval task (e.g., 100)')
@@ -2029,7 +2322,7 @@ if __name__ == "__main__":
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
              train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train', device=args.device,
              static_profiles=args.static_profiles, sparsity_2to4=args.sparsity_2to4, compile_profiles=args.compile_profiles,
-             kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio)
+             kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, split_ratio=args.split_ratio, test_samples=args.test_samples)
     elif args.mode == 'report':
         import json
         with open('training_metrics.json', 'r') as f:
@@ -2058,7 +2351,7 @@ if __name__ == "__main__":
                 run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
         else:
             if getattr(args, 'wikitext2', False):
-                run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+                run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, min_cont_tokens=args.wikitext_min_cont_tokens, force_action_str=args.force_action)
             if getattr(args, 'boolq', False):
                 run_zeroshoot_accuracy(engine, 'boolq', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
             if getattr(args, 'hellaswag', False):

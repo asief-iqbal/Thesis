@@ -1,0 +1,25 @@
+{
+  "input": "lcr_mixture.final.csv",
+  "output": "oracle_lcr_mixture.llama32.csv",
+  "rows": 500,
+  "text_column": "Prompt",
+  "carry_columns": [
+    "Category",
+    "Subject",
+    "Context Dependency",
+    "SourceDataset",
+    "SourceSplit",
+    "SourceId"
+  ],
+  "backbone_model": "meta-llama/Llama-3.2-1B",
+  "sparse_target": "attention_heads",
+  "sparse_intensity": 0.5,
+  "max_length": 256,
+  "normalization": {
+    "method": "pclip_minmax",
+    "p_low": 5.0,
+    "p_high": 95.0,
+    "clip_low": 38.9392129488174,
+    "clip_high": 334.8527186795063
+  }
+}

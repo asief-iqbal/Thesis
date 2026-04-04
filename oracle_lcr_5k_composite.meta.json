@@ -1,0 +1,45 @@
+{
+  "input": "lcr_mixture_5k.csv",
+  "output": "oracle_lcr_5k_composite.csv",
+  "rows": 4374,
+  "text_column": "Prompt",
+  "carry_columns": [
+    "Category",
+    "Subject",
+    "Context Dependency",
+    "SourceDataset",
+    "SourceSplit",
+    "SourceId"
+  ],
+  "backbone_model": "meta-llama/Llama-3.2-1B",
+  "multi_method": true,
+  "sparse_configs": [
+    {
+      "target": "attention_heads",
+      "intensity": 0.3,
+      "weight": 0.5
+    },
+    {
+      "target": "transformer_layers",
+      "intensity": 0.25,
+      "weight": 0.5
+    }
+  ],
+  "max_length": 128,
+  "normalization": {
+    "method": "pclip_minmax",
+    "p_low": 5.0,
+    "p_high": 95.0,
+    "clip_low": 0.3759079575538635,
+    "clip_high": 1.0948499679565429,
+    "gap_metric": "loss_gap",
+    "allow_negative_gaps": false
+  },
+  "cross_method_correlation": {
+    "spearman_attention_heads_0p30_vs_transformer_layers_0p25": 0.31252446546556495,
+    "spearman_pvalue_attention_heads_0p30_vs_transformer_layers_0p25": 1.0301820375158028e-99,
+    "pearson_attention_heads_0p30_vs_transformer_layers_0p25": 0.3679164458303675
+  },
+  "elapsed_seconds": 533.6,
+  "samples_per_second": 8.2
+}

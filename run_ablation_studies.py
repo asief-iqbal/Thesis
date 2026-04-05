@@ -19,8 +19,10 @@ is included as the comparison baseline for Studies 2A-2D.
 
 Each experiment trains a fresh DDQN for N episodes (default 100) on the
 same fixed prompt set from the test split of Oracle_dataset.csv.
-Baseline (unpruned) metrics, LCR scores, and early-Llama features are
+Prompt-static signals (prompt PPL, LCR score, early-Llama features) are
 precomputed once and reused across all experiments for controlled comparison.
+Live hardware telemetry and baseline/pruned benchmark metrics are sampled at
+episode time so the control run mirrors the normal train/test pipeline.
 
 Usage:
     python run_ablation_studies.py
@@ -251,20 +253,19 @@ def init_lcr_scorer():
 def precompute_prompt_data(engine: RealModelEngine, benchmark: RealBenchmark,
                            prompts: List[str], lcr_scorer,
                            max_new_tokens: int = 50) -> List[dict]:
-    """Compute per-prompt: baseline metrics, LCR score, early-Llama features,
-    hardware snapshot.  Run once — reused across all ablation variants."""
-    monitor = EnhancedDeviceMonitor()
+    """Compute prompt-static features reused across ablation variants.
+
+    Only prompt-intrinsic signals are cached here.  Live hardware telemetry and
+    live baseline/pruned benchmark metrics are sampled inside each episode so
+    the ablation environment matches the normal train/test controller flow.
+    """
     data = []
     n = len(prompts)
-    print(f"\n[Precompute] Computing baseline data for {n} prompts...")
+    print(f"\n[Precompute] Computing prompt-static features for {n} prompts...")
 
     for i, prompt in enumerate(prompts):
         token_len = len(engine.tokenizer.encode(prompt))
         prompt_ppl = benchmark._calculate_perplexity(engine, prompt)
-
-        engine.restore_model()
-        base = benchmark.benchmark_and_get_reward(
-            engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
 
         # LCR score
         if lcr_scorer is not None:
@@ -280,26 +281,14 @@ def precompute_prompt_data(engine: RealModelEngine, benchmark: RealBenchmark,
         except Exception:
             ef = {"hidden_norm": 0.0, "attn_entropy": 0.0, "attn_max": 0.0}
 
-        ds = monitor.get_state()
-
         data.append({
             "prompt": prompt,
             "token_len": token_len,
             "prompt_ppl": prompt_ppl,
-            "baseline_time_ms": base["time_ms"],
-            "baseline_tok_s":   base["tok_s"],
-            "baseline_ppl":     base["perplexity"],
-            "baseline_gen_tokens": base.get("gen_tokens", 0),
             "lcr_score":    lcr,
             "hidden_norm":  ef["hidden_norm"],
             "attn_entropy": ef["attn_entropy"],
             "attn_max":     ef["attn_max"],
-            "hw_cpu":       ds.cpu_utilization / 100.0,
-            "hw_ram":       ds.memory_available_gb / 16.0,
-            "hw_battery":   ds.battery_percent / 100.0,
-            "hw_gpu_avail": float(ds.gpu_available),
-            "hw_gpu_mem":   ds.gpu_memory_free_gb / 8.0,
-            "hw_gpu_util":  ds.gpu_utilization / 100.0,
         })
 
         if (i + 1) % 10 == 0 or (i + 1) == n:
@@ -313,11 +302,63 @@ def precompute_prompt_data(engine: RealModelEngine, benchmark: RealBenchmark,
 # STATE BUILDING UTILITIES
 # =========================================================================
 
-def build_full_state(d: dict) -> np.ndarray:
-    """Build the full 10-D state vector from precomputed data."""
+PROMPT_STATIC_KEYS = (
+    "prompt",
+    "token_len",
+    "prompt_ppl",
+    "lcr_score",
+    "hidden_norm",
+    "attn_entropy",
+    "attn_max",
+)
+
+
+def validate_prompt_record(d: dict) -> None:
+    """Fail fast on malformed prompt data instead of silently emitting junk."""
+    missing = [key for key in PROMPT_STATIC_KEYS if key not in d]
+    if missing:
+        raise KeyError(f"Prompt record missing required keys: {missing}")
+
+    if not isinstance(d["prompt"], str) or not d["prompt"].strip():
+        raise ValueError("Prompt record must contain a non-empty prompt string.")
+
+    for key in PROMPT_STATIC_KEYS[1:]:
+        value = float(d[key])
+        if not np.isfinite(value):
+            raise ValueError(f"Prompt record field '{key}' must be finite, got {d[key]!r}.")
+
+
+def validate_ablation_config(label: str,
+                             state_indices: List[int],
+                             action_indices: List[int]) -> None:
+    """Validate state/action subsets so ablations only differ as intended."""
+    if not state_indices:
+        raise ValueError(f"{label}: state_indices cannot be empty.")
+    if not action_indices:
+        raise ValueError(f"{label}: action_indices cannot be empty.")
+    if len(set(state_indices)) != len(state_indices):
+        raise ValueError(f"{label}: state_indices contain duplicates: {state_indices}")
+    if len(set(action_indices)) != len(action_indices):
+        raise ValueError(f"{label}: action_indices contain duplicates: {action_indices}")
+
+    invalid_states = [idx for idx in state_indices if idx not in FULL_INDICES]
+    invalid_actions = [idx for idx in action_indices if idx not in ALL_ACTIONS]
+    if invalid_states:
+        raise ValueError(f"{label}: invalid state indices {invalid_states}")
+    if invalid_actions:
+        raise ValueError(f"{label}: invalid action indices {invalid_actions}")
+
+
+def build_full_state(d: dict, device_state) -> np.ndarray:
+    """Build the full 10-D state vector from live hardware + static prompt data."""
+    validate_prompt_record(d)
     return np.array([
-        d["hw_cpu"], d["hw_ram"], d["hw_battery"],
-        d["hw_gpu_avail"], d["hw_gpu_mem"], d["hw_gpu_util"],
+        device_state.cpu_utilization / 100.0,
+        device_state.memory_available_gb / 16.0,
+        device_state.battery_percent / 100.0,
+        float(device_state.gpu_available),
+        device_state.gpu_memory_free_gb / 8.0,
+        device_state.gpu_utilization / 100.0,
         d["lcr_score"],
         d["hidden_norm"], d["attn_entropy"], d["attn_max"],
     ], dtype=np.float32)
@@ -334,11 +375,26 @@ def select_state(full_state: np.ndarray, indices: List[int]) -> torch.Tensor:
 
 def run_episode(engine: RealModelEngine, benchmark: RealBenchmark,
                 agent: AblationAgent, prompt_data: dict,
+                monitor: EnhancedDeviceMonitor,
                 state_indices: List[int],
                 alpha: float, beta: float,
                 max_new_tokens: int = 50) -> dict:
-    """Run one training episode and return episode metrics."""
-    full_state = build_full_state(prompt_data)
+    """Run one training episode using the same live flow as train/test.
+
+    Sequence:
+        1. Live unpruned baseline benchmark
+        2. Live hardware state sampling for RL state
+        3. Action selection / pruning / live pruned benchmark
+        4. Live next-state sampling and DDQN update
+    """
+    validate_prompt_record(prompt_data)
+
+    engine.restore_model()
+    baseline = benchmark.benchmark_and_get_reward(
+        engine, prompt_data["prompt"],
+        max_new_tokens=max_new_tokens, return_metrics=True)
+
+    full_state = build_full_state(prompt_data, monitor.get_state())
     state_t = select_state(full_state, state_indices)
 
     action, internal_idx = agent.select_action(state_t)
@@ -352,18 +408,23 @@ def run_episode(engine: RealModelEngine, benchmark: RealBenchmark,
 
     # Reward (same formula as Adaptive_pruning.py)
     eps_r = 1e-8
-    speed_gain = (pruned["tok_s"] - prompt_data["baseline_tok_s"]) / (prompt_data["baseline_tok_s"] + eps_r)
-    log_ppl_base   = np.log(max(prompt_data["baseline_ppl"], 1.01))
+    speed_gain = (pruned["tok_s"] - baseline["tok_s"]) / (baseline["tok_s"] + eps_r)
+    log_ppl_base   = np.log(max(baseline["perplexity"], 1.01))
     log_ppl_pruned = np.log(max(pruned["perplexity"], 1.01))
     ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
     reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -2.0, 2.0))
 
-    next_state_t = select_state(full_state, state_indices)
+    next_full_state = build_full_state(prompt_data, monitor.get_state())
+    next_state_t = select_state(next_full_state, state_indices)
     agent.train_step(state_t, internal_idx, reward, next_state_t)
 
     speedup_pct = speed_gain * 100.0
 
     return {
+        "baseline_time_ms": baseline["time_ms"],
+        "baseline_tok_s": baseline["tok_s"],
+        "baseline_ppl": baseline["perplexity"],
+        "baseline_gen_tokens": baseline.get("gen_tokens", 0),
         "action_idx": action.action_index,
         "target":     action.target,
         "intensity":  action.intensity,
@@ -375,8 +436,6 @@ def run_episode(engine: RealModelEngine, benchmark: RealBenchmark,
         "ppl_penalty":    ppl_penalty,
         "reward":         reward,
         "epsilon":        agent.epsilon,
-        "baseline_tok_s": prompt_data["baseline_tok_s"],
-        "baseline_ppl":   prompt_data["baseline_ppl"],
     }
 
 
@@ -392,6 +451,9 @@ def run_ablation(engine: RealModelEngine, benchmark: RealBenchmark,
     """Train a fresh agent for len(prompt_data_list) episodes and return metrics."""
     n = len(prompt_data_list)
     state_dim = len(state_indices)
+    validate_ablation_config(label or "Ablation run", state_indices, action_indices)
+    for pd in prompt_data_list:
+        validate_prompt_record(pd)
 
     # Reset seeds for reproducible agent init (same DQN weights for all variants)
     torch.manual_seed(SEED)
@@ -405,10 +467,12 @@ def run_ablation(engine: RealModelEngine, benchmark: RealBenchmark,
         n_episodes=n,
         shared_action_space=shared_action_space,
     )
+    monitor = EnhancedDeviceMonitor()
 
     metrics = []
     for i, pd in enumerate(prompt_data_list):
         m = run_episode(engine, benchmark, agent, pd,
+                        monitor,
                         state_indices, alpha, beta, max_new_tokens)
         m["episode"] = i + 1
         metrics.append(m)
@@ -717,11 +781,14 @@ def run_framework_ablation(engine, benchmark, prompt_data, max_new_tokens,
     Returns dict[label -> (metrics, summary)].
     """
     n = len(prompt_data)
+    for pd in prompt_data:
+        validate_prompt_record(pd)
 
     # ── 1. Initialise all agents (identical torch seed per agent) ───────
     agents: Dict[str, AblationAgent] = {}
     for cfg in study_configs:
         label = cfg["label"]
+        validate_ablation_config(label, cfg["state_indices"], cfg["action_indices"])
         torch.manual_seed(SEED)
         np.random.seed(SEED)
         random.seed(SEED)
@@ -749,6 +816,7 @@ def run_framework_ablation(engine, benchmark, prompt_data, max_new_tokens,
             max_new_tokens=max_new_tokens, return_metrics=True)
         engine.restore_model()
     print("[Warmup] Done.")
+    live_monitor = EnhancedDeviceMonitor()
 
     # ── 3. Interleaved episode loop ─────────────────────────────────────
     all_metrics: Dict[str, List[dict]] = {cfg["label"]: [] for cfg in study_configs}
@@ -767,6 +835,7 @@ def run_framework_ablation(engine, benchmark, prompt_data, max_new_tokens,
         for cfg in variant_order:
             label = cfg["label"]
             m = run_episode(engine, benchmark, agents[label], pd,
+                            live_monitor,
                             cfg["state_indices"], cfg["alpha"], cfg["beta"],
                             max_new_tokens)
             m["episode"] = i + 1
@@ -1070,7 +1139,7 @@ def main():
     print(f"  Loaded {len(prompts)} prompts")
 
     # ── Step 3: Precompute baseline data ─────────────────────────────────
-    print(f"\nStep 3/6: Precomputing baseline + LCR + early features...")
+    print(f"\nStep 3/6: Precomputing prompt-static signals (prompt PPL + LCR + early features)...")
     t0 = time.time()
     benchmark = RealBenchmark()
     benchmark._warmup_once(engine)

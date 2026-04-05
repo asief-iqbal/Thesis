@@ -213,7 +213,7 @@ def load_prompt_rows_from_csv(
     max_samples: int,
     carry_columns: Sequence[str],
 ) -> Tuple[List[PromptRow], List[str]]:
-    with open(path, "r", encoding="utf-8", newline="") as f:
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
         if text_column not in fieldnames:
@@ -228,7 +228,7 @@ def load_prompt_rows_from_csv(
                 continue
             meta = {c: (row.get(c) or "") for c in carry}
             rows.append(PromptRow(prompt=prompt, meta=meta))
-            if len(rows) >= int(max_samples):
+            if int(max_samples) > 0 and len(rows) >= int(max_samples):
                 break
 
     return rows, carry

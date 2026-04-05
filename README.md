@@ -525,7 +525,36 @@ python Adaptive_pruning.py --mode test --wikitext2 --eval-samples 1000 --device 
 ### Train the LCR router
 
 ```bash
-python train_minibert_lcr.py --train-file oracle_lcr_10k_dual.csv --output-dir checkpoints
+python oracle_labeler.py --input Oracle_dataset.csv --output oracle_lcr_labels.csv --samples 0 --sparse-configs "attention_heads:0.30,transformer_layers:0.25" --device gpu
+python train_minibert_lcr.py --data Oracle_dataset.csv --labels-file oracle_lcr_labels.csv --label-columns "normalized_sensitivity" --output-dir checkpoints
+```
+
+The second command trains and evaluates the TinyBERT router over the full dataset while keeping the original dataset CSV unchanged. The trainer uses the dataset's existing `Split` column for train/test assignment and only reads labels from the separate oracle file.
+
+### One-click full TinyBERT pipeline
+
+```bash
+python run_minibert_lcr_pipeline.py
+```
+
+This wrapper runs the full thesis-facing pipeline with tuned defaults for the final full-dataset run:
+
+- Oracle labels kept in a separate file: `oracle_lcr_labels.csv`
+- Composite oracle configs: `attention_heads:0.30,transformer_layers:0.25`
+- Full dataset labeling: `--samples 0`
+- Training defaults: `epochs=50`, `patience=20`, `batch_size=48`, `lr=4e-5`, `backbone_lr_factor=0.20`, `weight_decay=0.03`, `warmup_ratio=0.15`, `dropout=0.20`, `label_smooth=0.01`, `loss=huber`, `huber_delta=0.15`
+
+For a dry run that prints both commands without executing them:
+
+```bash
+python run_minibert_lcr_pipeline.py --dry-run
+```
+
+For an explicit final-report command set without the wrapper:
+
+```bash
+python oracle_labeler.py --input Oracle_dataset.csv --output oracle_lcr_labels.csv --samples 0 --sparse-configs "attention_heads:0.30,transformer_layers:0.25" --device gpu
+python train_minibert_lcr.py --data Oracle_dataset.csv --labels-file oracle_lcr_labels.csv --label-columns "normalized_sensitivity" --epochs 50 --patience 20 --batch-size 48 --lr 4e-5 --backbone-lr-factor 0.20 --weight-decay 0.03 --warmup-ratio 0.15 --dropout 0.20 --label-smooth 0.01 --loss huber --huber-delta 0.15 --output-dir checkpoints
 ```
 
 ### Force a specific pruning action (ablation)
@@ -576,6 +605,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)        |
 | `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                            |
 | `train_minibert_lcr.py`        | LCR training script                                                    |
+| `run_minibert_lcr_pipeline.py` | One-click oracle labeling + TinyBERT/MiniBERT LCR training pipeline    |
 | `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                   |
 | `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                         |
 | `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns             |

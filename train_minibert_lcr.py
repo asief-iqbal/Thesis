@@ -18,6 +18,13 @@ Usage (dual-output):
     --aux-features "log_token_count,compression_ratio,avg_word_length,special_char_ratio,unique_token_ratio,has_code_markers" \\
     --epochs 30 --patience 10 --dropout 0.20 --backbone-lr-factor 0.08 \\
     --label-smooth 0.015 --balance-sources
+
+Usage (raw dataset + separate oracle labels file):
+    python train_minibert_lcr.py \
+        --data Oracle_dataset.csv \
+        --labels-file oracle_lcr_labels.csv \
+        --label-columns "normalized_sensitivity" \
+        --output-dir checkpoints
 """
 
 from __future__ import annotations
@@ -132,6 +139,39 @@ def _resolve_existing_column(fieldnames: Sequence[str], preferred: str, fallback
     raise ValueError(f"None of the columns exist: preferred='{preferred}', fallbacks={list(fallbacks)}")
 
 
+def _read_csv_rows(path: str) -> Tuple[List[Dict[str, str]], List[str]]:
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        return list(reader), fieldnames
+
+
+def _build_join_key(row: Dict[str, str], join_columns: Sequence[str]) -> Tuple[str, ...]:
+    return tuple((row.get(c) or "").strip() for c in join_columns)
+
+
+def _format_join_key(join_columns: Sequence[str], key: Sequence[str]) -> str:
+    return ", ".join(f"{col}={val!r}" for col, val in zip(join_columns, key))
+
+
+def _resolve_join_columns(
+    data_fields: Sequence[str],
+    label_fields: Sequence[str],
+    join_columns: Sequence[str],
+    text_column: str,
+) -> List[str]:
+    requested = [c.strip() for c in join_columns if c and c.strip()]
+    shared = [c for c in requested if c in data_fields and c in label_fields]
+    if shared:
+        return shared
+    if text_column in data_fields and text_column in label_fields:
+        return [text_column]
+    raise ValueError(
+        "Could not resolve shared join columns between data CSV and labels CSV. "
+        f"Requested={requested}, data_fields={list(data_fields)}, label_fields={list(label_fields)}"
+    )
+
+
 def load_oracle_csv(
     path: str,
     text_column: str,
@@ -139,80 +179,140 @@ def load_oracle_csv(
     source_column: str,
     aux_feature_columns: List[str],
     split_column: str = "Split",
+    labels_path: str = "",
+    join_columns: Optional[List[str]] = None,
 ) -> Tuple[List[Sample], Dict[str, str]]:
     """Load samples with potentially multiple label columns and auxiliary features."""
     out: List[Sample] = []
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        fieldnames = list(reader.fieldnames or [])
-        if text_column not in fieldnames:
-            raise ValueError(f"CSV column '{text_column}' not found. Columns: {fieldnames}")
+    data_rows, fieldnames = _read_csv_rows(path)
+    if text_column not in fieldnames:
+        raise ValueError(f"CSV column '{text_column}' not found. Columns: {fieldnames}")
 
-        # Resolve label columns
-        resolved_labels: List[str] = []
-        for lc in label_columns:
-            resolved = _resolve_existing_column(
-                fieldnames, preferred=lc,
-                fallbacks=["normalized_sensitivity", "sensitivity_score"],
+    label_rows = data_rows
+    label_fieldnames = fieldnames
+    resolved_join_columns: List[str] = []
+    labels_map: Dict[Tuple[str, ...], Dict[str, str]] = {}
+
+    if labels_path:
+        label_rows, label_fieldnames = _read_csv_rows(labels_path)
+        resolved_join_columns = _resolve_join_columns(
+            fieldnames,
+            label_fieldnames,
+            join_columns or [text_column],
+            text_column,
+        )
+        duplicate_keys: List[Tuple[str, ...]] = []
+        for label_row in label_rows:
+            key = _build_join_key(label_row, resolved_join_columns)
+            if key in labels_map:
+                duplicate_keys.append(key)
+                continue
+            labels_map[key] = label_row
+        if duplicate_keys:
+            raise ValueError(
+                "Duplicate keys found in labels CSV. "
+                f"Join columns={resolved_join_columns}. Example: {_format_join_key(resolved_join_columns, duplicate_keys[0])}"
             )
-            resolved_labels.append(resolved)
 
-        used_source: Optional[str] = None
-        if source_column in fieldnames:
-            used_source = source_column
-        elif "SourceDataset" in fieldnames:
-            used_source = "SourceDataset"
+    # Resolve label columns from the source that actually contains them.
+    resolved_labels: List[str] = []
+    for lc in label_columns:
+        resolved = _resolve_existing_column(
+            label_fieldnames, preferred=lc,
+            fallbacks=["normalized_sensitivity", "sensitivity_score"],
+        )
+        resolved_labels.append(resolved)
 
-        # Check for Split column
-        has_split_col = split_column in fieldnames
+    used_source: Optional[str] = None
+    if source_column in fieldnames:
+        used_source = source_column
+    elif labels_path and source_column in label_fieldnames:
+        used_source = source_column
+    elif "SourceDataset" in fieldnames:
+        used_source = "SourceDataset"
+    elif labels_path and "SourceDataset" in label_fieldnames:
+        used_source = "SourceDataset"
 
-        # Resolve aux feature columns
-        resolved_aux: List[str] = [c for c in aux_feature_columns if c in fieldnames]
-        has_aux = len(resolved_aux) > 0
+    has_split_col = split_column in fieldnames or (labels_path and split_column in label_fieldnames)
 
-        for row in reader:
-            t = (row.get(text_column) or "").strip()
-            if not t:
+    resolved_aux: List[str] = []
+    for c in aux_feature_columns:
+        if c in fieldnames or (labels_path and c in label_fieldnames):
+            resolved_aux.append(c)
+    has_aux = len(resolved_aux) > 0
+
+    missing_label_keys: List[Tuple[str, ...]] = []
+    for row in data_rows:
+        t = (row.get(text_column) or "").strip()
+        if not t:
+            continue
+
+        label_row = row
+        if labels_path:
+            key = _build_join_key(row, resolved_join_columns)
+            label_row = labels_map.get(key)
+            if label_row is None:
+                missing_label_keys.append(key)
                 continue
-            # Parse all label columns
-            y_vals: List[float] = []
-            valid = True
-            for lc in resolved_labels:
-                try:
-                    y_vals.append(_clamp01(float(row.get(lc))))
-                except Exception:
-                    valid = False
-                    break
-            if not valid:
-                continue
 
-            src = (row.get(used_source) if used_source else None) if isinstance(row, dict) else None
-            src_s = (src or "unknown").strip() or "unknown"
+        y_vals: List[float] = []
+        valid = True
+        for lc in resolved_labels:
+            try:
+                y_vals.append(_clamp01(float(label_row.get(lc))))
+            except Exception:
+                valid = False
+                break
+        if not valid:
+            continue
 
-            # Aux features from CSV (pre-computed) or compute on-the-fly
-            aux: Optional[List[float]] = None
-            if has_aux:
-                try:
-                    csv_aux = [float(row.get(c, 0.0)) for c in resolved_aux]
-                    # If CSV has fewer features than expected (e.g., old 6 vs new 9),
-                    # always recompute so dimensionality matches AUX_FEATURE_DIM.
-                    if len(csv_aux) == len(aux_feature_columns):
-                        aux = csv_aux
+        src = None
+        if used_source:
+            if used_source in fieldnames:
+                src = row.get(used_source)
+            elif used_source in label_fieldnames:
+                src = label_row.get(used_source)
+        src_s = (src or "unknown").strip() or "unknown"
+
+        aux: Optional[List[float]] = None
+        if has_aux:
+            try:
+                csv_aux: List[float] = []
+                for c in resolved_aux:
+                    if c in fieldnames:
+                        csv_aux.append(float(row.get(c, 0.0)))
                     else:
-                        aux = compute_aux_features(t)
-                except Exception:
+                        csv_aux.append(float(label_row.get(c, 0.0)))
+                if len(csv_aux) == len(aux_feature_columns):
+                    aux = csv_aux
+                else:
                     aux = compute_aux_features(t)
-            else:
-                # Compute on-the-fly if not in CSV
-                aux = compute_aux_features(t) if aux_feature_columns else None
+            except Exception:
+                aux = compute_aux_features(t)
+        else:
+            aux = compute_aux_features(t) if aux_feature_columns else None
 
-            ds_split = (row.get(split_column) or "").strip().lower() if has_split_col else None
-            out.append(Sample(text=t, y=y_vals, source=src_s, aux_features=aux, dataset_split=ds_split))
+        ds_split = None
+        if has_split_col:
+            if split_column in fieldnames:
+                ds_split = (row.get(split_column) or "").strip().lower()
+            elif split_column in label_fieldnames:
+                ds_split = (label_row.get(split_column) or "").strip().lower()
+        out.append(Sample(text=t, y=y_vals, source=src_s, aux_features=aux, dataset_split=ds_split))
+
+    if missing_label_keys:
+        raise ValueError(
+            f"Failed to match {len(missing_label_keys)} data rows to labels in '{labels_path}'. "
+            f"Join columns={resolved_join_columns}. Example missing key: "
+            f"{_format_join_key(resolved_join_columns, missing_label_keys[0])}"
+        )
 
     meta = {
         "used_label_columns": resolved_labels,
+        "labels_source": labels_path or path,
         "used_source_column": used_source or "(none)",
         "used_aux_features": resolved_aux if resolved_aux else ("computed" if aux_feature_columns else "none"),
+        "used_join_columns": resolved_join_columns if labels_path else [text_column],
         "n_outputs": len(resolved_labels),
         "has_split_column": has_split_col,
     }
@@ -394,11 +494,18 @@ def _metrics_by_source(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True, help="Oracle CSV (from prepare_dual_labels.py)")
+    parser.add_argument("--labels-file", default="",
+                        help="Optional separate CSV containing oracle labels to join onto --data.")
     parser.add_argument("--text-column", default="Prompt")
     # Multi-output: comma-separated label columns
     parser.add_argument("--label-columns", default="sensitivity_head,sensitivity_layer",
                         help="Comma-separated label columns. 2 columns = dual-output, 1 = single-output.")
     parser.add_argument("--source-column", default="SourceDataset")
+    parser.add_argument(
+        "--join-columns",
+        default="SourceDataset,SourceSplit,SourceId,Category,Subject,Split,Prompt",
+        help="Comma-separated columns used to join --data with --labels-file.",
+    )
     # Auxiliary features
     parser.add_argument("--aux-features", default=",".join(AUX_FEATURE_NAMES),
                         help="Comma-separated aux feature column names (or empty to disable).")
@@ -438,6 +545,8 @@ def main() -> None:
                              "instead of random splitting. Set to '' to disable.")
 
     parser.add_argument("--run-dir", default="")
+    parser.add_argument("--output-dir", default="",
+                        help="Convenience alias to export runtime artifacts into this directory.")
     parser.add_argument("--export-head", default=os.path.join("checkpoints", "minibert_lcr_head.pt"))
     parser.add_argument("--export-backbone-dir", default=os.path.join("checkpoints", "minibert_lcr_backbone"))
     args = parser.parse_args()
@@ -455,6 +564,14 @@ def main() -> None:
     use_aux = len(aux_feature_cols) > 0
     print(f"[LCR-v2] Auxiliary features: {'ON' if use_aux else 'OFF'} ({len(aux_feature_cols)} features)")
 
+    join_columns = [c.strip() for c in str(args.join_columns).split(",") if c.strip()]
+    labels_path = str(args.labels_file).strip()
+
+    output_dir = str(args.output_dir).strip()
+    if output_dir:
+        args.export_head = os.path.join(output_dir, "minibert_lcr_head.pt")
+        args.export_backbone_dir = os.path.join(output_dir, "minibert_lcr_backbone")
+
     # Load data
     split_col = str(args.split_column).strip() if hasattr(args, 'split_column') else "Split"
     samples, load_meta = load_oracle_csv(
@@ -464,11 +581,15 @@ def main() -> None:
         source_column=str(args.source_column),
         aux_feature_columns=aux_feature_cols,
         split_column=split_col,
+        labels_path=labels_path,
+        join_columns=join_columns,
     )
     if not samples:
         raise SystemExit("No samples loaded from oracle CSV.")
 
     print(f"[LCR-v2] Loaded {len(samples)} samples from {args.data}")
+    if labels_path:
+        print(f"[LCR-v2] Joined labels from {labels_path} using {load_meta.get('used_join_columns')}")
 
     # Splitting: use dataset Split column if present, otherwise random stratified split
     use_dataset_split = bool(load_meta.get("has_split_column")) and split_col and any(
@@ -871,6 +992,7 @@ def main() -> None:
     metrics_out = {
         "run_dir": run_dir,
         "data": str(args.data),
+        "labels_file": labels_path or None,
         "load": load_meta,
         "splits": {
             "train": len(split.train), "val": len(split.val), "test": len(split.test),
@@ -916,6 +1038,9 @@ def main() -> None:
         f.write("MiniBERT LCR v2 — Multi-Output Training Report\n")
         f.write("=" * 50 + "\n\n")
         f.write(f"Data: {args.data}\n")
+        if labels_path:
+            f.write(f"Labels file: {labels_path}\n")
+            f.write(f"Join columns: {', '.join(load_meta.get('used_join_columns', []))}\n")
         f.write(f"Label columns: {', '.join(label_columns)}\n")
         f.write(f"Outputs: {n_outputs} ({', '.join(output_names)})\n")
         f.write(f"Aux features: {'ON' if use_aux else 'OFF'}\n\n")

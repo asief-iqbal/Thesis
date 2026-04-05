@@ -352,7 +352,7 @@ The framework automatically produces per-run plots:
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
 - Controller overhead breakdown (stacked bar)
-- VRAM usage per episode (available vs used during pruning + inference)
+- Process VRAM per episode (loaded-model baseline, peak during pruning + inference, and extra episode delta)
 - Reward progression
 - Quality-vs-speed tradeoff scatter
 - Action usage distribution
@@ -841,7 +841,7 @@ If NVML is unavailable, GPU utilization falls back to `0.0`. The pipeline still 
 
 ### VRAM chart issues on CUDA
 
-If training crashes while writing the per-episode VRAM chart, update to the latest version of `Adaptive_pruning.py`. The VRAM plot uses PyTorch CUDA device properties and expects the standard `total_memory` field when reading available GPU memory.
+If training crashes while writing the per-episode VRAM chart, update to the latest version of `Adaptive_pruning.py`. The VRAM plot now tracks the current PyTorch process only: loaded-model baseline VRAM, peak VRAM during pruning plus generation, and the extra per-episode delta above that baseline.
 
 ### Slow or unstable training
 

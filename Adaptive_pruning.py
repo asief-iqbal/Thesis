@@ -143,13 +143,11 @@ class PruningAction:
     action_index: int
 
 class ActionSpace:
-    """Defines all possible pruning actions: none, layers at various intensities, and a few head options."""
+    """Defines all possible pruning actions: none, layers, heads, and FFN neurons."""
     def __init__(self):
-        # Layer skipping (physical removal, real speedups) with fine granularity
-        # + a few structural head pruning options for completeness
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            # Transformer layer skipping — fine-grained in the 6–30% sweet-spot
+            # Transformer layer skipping — fine-grained in the 6–50% range
             PruningAction(level=3, intensity=0.06, target="transformer_layers", action_index=1),
             PruningAction(level=3, intensity=0.10, target="transformer_layers", action_index=2),
             PruningAction(level=3, intensity=0.12, target="transformer_layers", action_index=3),
@@ -161,12 +159,19 @@ class ActionSpace:
             PruningAction(level=3, intensity=0.35, target="transformer_layers", action_index=9),
             PruningAction(level=3, intensity=0.40, target="transformer_layers", action_index=10),
             PruningAction(level=3, intensity=0.50, target="transformer_layers", action_index=11),
-            # Structural attention-head pruning (GQA-safe) — limited set
+            # Structural attention-head pruning (MHA/GQA-safe)
             PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=12),
             PruningAction(level=2, intensity=0.20, target="attention_heads", action_index=13),
             PruningAction(level=2, intensity=0.30, target="attention_heads", action_index=14),
+            # Structural FFN intermediate-dimension pruning (Wanda-style importance)
+            PruningAction(level=2, intensity=0.10, target="ffn_neurons", action_index=15),
+            PruningAction(level=2, intensity=0.20, target="ffn_neurons", action_index=16),
+            PruningAction(level=2, intensity=0.30, target="ffn_neurons", action_index=17),
+            PruningAction(level=2, intensity=0.40, target="ffn_neurons", action_index=18),
+            PruningAction(level=2, intensity=0.50, target="ffn_neurons", action_index=19),
         ]
-        print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
+        print(f"[RL Agent] Action space initialized with {len(self.actions)} actions "
+              f"(1 none + 11 layer-skip + 3 head + 5 FFN).")
 
     def get_action(self, index: int) -> PruningAction:
         return self.actions[index]
@@ -673,7 +678,7 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
             print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
 
         plt.figure(figsize=(10, 6))
-        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
+        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'ffn_neurons': 'orange', 'none': 'gray'}
         for label in set(al_f):
             idx = [j for j, a in enumerate(al_f) if a == label]
             plt.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
@@ -862,6 +867,22 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
     plt.close()
     print("[Report] Perplexity plot saved to perplexity.png")
 
+    # Compute token-weighted PPL (academically correct aggregate PPL)
+    def _token_weighted_ppl(mlist, ppl_key='ppl', tok_key='gen_tokens', default_tok=50):
+        total_loss, total_tokens = 0.0, 0
+        for m in mlist:
+            gen_tok = m.get(tok_key) or default_tok
+            ppl_val = m.get(ppl_key, 1.01)
+            loss = np.log(max(ppl_val, 1.01))
+            total_loss += loss * gen_tok
+            total_tokens += gen_tok
+        if total_tokens == 0:
+            return 0.0
+        return float(np.exp(total_loss / total_tokens))
+
+    tw_ppl_pruned = _token_weighted_ppl(metrics_list, 'ppl')
+    tw_ppl_baseline = _token_weighted_ppl(metrics_list, 'baseline_ppl')
+
     # Save report to file
     with open(report_filename, 'w') as f:
         f.write(f"{header}\n")
@@ -876,9 +897,11 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
         f.write(f"  Avg RL Agent: {avg_rl:.2f}ms\n")
         f.write(f"  Avg Model Inference (pruned): {avg_model:.2f}ms\n")
         f.write(f"  Avg Baseline Inference (unpruned): {avg_baseline:.2f}ms\n")
-        f.write(f"Overall Avg PPL (pruned): {total_ppl/n:.2f}\n")
+        f.write(f"Overall Avg PPL (pruned, arithmetic): {total_ppl/n:.2f}\n")
+        f.write(f"Overall PPL (pruned, token-weighted): {tw_ppl_pruned:.2f}\n")
         avg_baseline_ppl = sum(m.get('baseline_ppl', 0) for m in metrics_list) / n
-        f.write(f"Overall Avg PPL (baseline): {avg_baseline_ppl:.2f}\n\n")
+        f.write(f"Overall Avg PPL (baseline, arithmetic): {avg_baseline_ppl:.2f}\n")
+        f.write(f"Overall PPL (baseline, token-weighted): {tw_ppl_baseline:.2f}\n\n")
         avg_reward = sum(m.get('reward', 0) for m in metrics_list) / n
         f.write(f"Overall Avg Reward: {avg_reward:.4f}\n\n")
         f.write("Averages by Prune Type and Intensity:\n")
@@ -886,7 +909,8 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
             avg_time = sum(m['time_ms'] for m in ms) / len(ms)
             avg_ppl = sum(m['ppl'] for m in ms) / len(ms)
             avg_r = sum(m.get('reward', 0) for m in ms) / len(ms)
-            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f}, Avg Reward {avg_r:.4f} ({len(ms)} samples)\n")
+            tw_ppl = _token_weighted_ppl(ms)
+            f.write(f"  {target} {intensity}: Avg Time {avg_time:.2f}ms, Avg PPL {avg_ppl:.2f}, TW-PPL {tw_ppl:.2f}, Avg Reward {avg_r:.4f} ({len(ms)} samples)\n")
     print(f"[Report] Report saved to {report_filename}")
 def organize_training_reports(is_report_mode: bool = False):
     """Organize training reports into numbered subfolders under 'Training Report'."""
@@ -2776,8 +2800,8 @@ if __name__ == "__main__":
     parser.add_argument('--eval-seed', type=int, default=42)
     parser.add_argument('--eval-max-seq-len', type=int, default=512)
     parser.add_argument('--wikitext-min-cont-tokens', type=int, default=32, help='Minimum continuation tokens used when computing WikiText-2 perplexity (avoids degenerate 1-token PPL).')
-    parser.add_argument('--train-dataset', type=str, default='Prompt Dataset Train.csv')
-    parser.add_argument('--test-dataset', type=str, default='Prompt Dataset Test.csv')
+    parser.add_argument('--train-dataset', type=str, default='lcr_mixture.final.csv')
+    parser.add_argument('--test-dataset', type=str, default='lcr_mixture.final.csv')
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
     parser.add_argument('--device', type=str, default='auto', choices=['cpu', 'gpu', 'auto'], help='Device to load model on: cpu, gpu, or auto')

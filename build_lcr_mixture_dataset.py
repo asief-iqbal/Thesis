@@ -153,12 +153,24 @@ def main() -> None:
     )
 
     parser.add_argument("--split", default="train", help="Preferred split (falls back if missing)")
+    parser.add_argument(
+        "--oversample",
+        action="store_true",
+        help="If a source has fewer unique samples than requested, oversample (with replacement) to reach the target count.",
+    )
+    parser.add_argument(
+        "--add-split-column",
+        action="store_true",
+        help="Add an 80/20 stratified train/test 'Split' column to the output CSV.",
+    )
     args = parser.parse_args()
 
     random.seed(int(args.seed))
     disable_caching()
 
     rows = 0
+    # Track all row dicts for post-processing (oversampling, split column)
+    all_rows = []
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     fieldnames = [
@@ -180,11 +192,13 @@ def main() -> None:
     if bool(args.include_mbpp_code):
         fieldnames += ["MbppReferenceCode"]
 
-    with open(args.out, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+    # Track rows per source for oversampling support
+    source_rows: Dict[str, list] = {}
 
-        def write_prompt(
+    with open(args.out, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames if not args.add_split_column else fieldnames + ["Split"])
+
+        def make_row(
             prompt: str,
             category: str,
             subject: str,
@@ -193,11 +207,10 @@ def main() -> None:
             source_id: str,
             extra: Optional[Dict[str, str]] = None,
             context_dependency: str = "No",
-        ) -> None:
-            nonlocal rows
+        ) -> Optional[Dict]:
             prompt = (prompt or "").strip()
             if not prompt:
-                return
+                return None
             row = {
                 "Prompt": prompt,
                 "Category": category,
@@ -210,7 +223,6 @@ def main() -> None:
             if extra:
                 row.update(extra)
             if include_any_extras:
-                # Ensure optional columns exist for rows that don't have them.
                 if bool(args.include_mmlu_answers):
                     row.setdefault("Choices", "")
                     row.setdefault("AnswerIndex", "")
@@ -222,14 +234,12 @@ def main() -> None:
                     row.setdefault("MbppTests", "")
                 if bool(args.include_mbpp_code):
                     row.setdefault("MbppReferenceCode", "")
-
-            writer.writerow(row)
-            rows += 1
+            return row
 
         # GSM8K (Logic/Math)
         if int(args.gsm8k) > 0:
             print(f"[Mixture] GSM8K: sampling {int(args.gsm8k)}")
-            # gsm8k has config 'main'
+            source_rows["gsm8k"] = []
             split = args.split
             try:
                 stream = _stream_dataset("gsm8k", "main", split)
@@ -243,19 +253,21 @@ def main() -> None:
                 extra = None
                 if bool(args.include_gsm8k_answer):
                     extra = {"Gsm8kAnswer": str(ex.get("answer", "") or "").strip()}
-                write_prompt(prompt, "Logic/Math", "GSM8K", "gsm8k", split, str(ex.get("idx", "")), extra=extra)
+                row = make_row(prompt, "Logic/Math", "GSM8K", "gsm8k", split, str(ex.get("idx", "")), extra=extra)
+                if row:
+                    source_rows["gsm8k"].append(row)
+            print(f"[Mixture] GSM8K: collected {len(source_rows['gsm8k'])} unique")
 
         # MBPP (Code)
         # MBPP is a small dataset: train=374, test=500, validation=90 (~964 total).
-        # To reach 1000 samples, we combine ALL available splits automatically.
+        # To reach the target, we combine ALL available splits and oversample if --oversample.
         if int(args.mbpp) > 0:
             print(f"[Mixture] MBPP: sampling {int(args.mbpp)}")
-            collected = 0
+            source_rows["mbpp"] = []
             target = int(args.mbpp)
-            # Try all splits in priority order to maximize sample count.
             mbpp_splits = ["train", "test", "validation", "prompt"]
             for sp in mbpp_splits:
-                if collected >= target:
+                if len(source_rows["mbpp"]) >= target:
                     break
                 try:
                     stream = _stream_dataset("mbpp", None, sp)
@@ -263,7 +275,7 @@ def main() -> None:
                     continue
                 if int(args.shuffle_buffer) > 0:
                     stream = stream.shuffle(seed=int(args.seed), buffer_size=int(args.shuffle_buffer))
-                remaining = target - collected
+                remaining = target - len(source_rows["mbpp"])
                 for ex in _take(stream, remaining):
                     prompt = _format_mbpp(ex)
                     extra = None
@@ -274,13 +286,26 @@ def main() -> None:
                             extra["MbppTests"] = json.dumps(list(tests) if isinstance(tests, (list, tuple)) else [], ensure_ascii=False)
                         if bool(args.include_mbpp_code):
                             extra["MbppReferenceCode"] = str(ex.get("code", "") or "").strip()
-                    write_prompt(prompt, "Code", "MBPP", "mbpp", sp, str(ex.get("task_id", "")), extra=extra)
-                    collected += 1
-            print(f"[Mixture] MBPP: collected {collected} from {len(mbpp_splits)} splits")
+                    row = make_row(prompt, "Code", "MBPP", "mbpp", sp, str(ex.get("task_id", "")), extra=extra)
+                    if row:
+                        source_rows["mbpp"].append(row)
+            unique_count = len(source_rows["mbpp"])
+            print(f"[Mixture] MBPP: collected {unique_count} unique from {len(mbpp_splits)} splits")
+            # Oversample if needed and flag is set
+            if args.oversample and unique_count < target and unique_count > 0:
+                deficit = target - unique_count
+                oversampled = random.choices(source_rows["mbpp"], k=deficit)
+                # Mark oversampled rows
+                for r in oversampled:
+                    r = dict(r)
+                    r["SourceId"] = r.get("SourceId", "") + "_dup"
+                    source_rows["mbpp"].append(r)
+                print(f"[Mixture] MBPP: oversampled {deficit} rows to reach {len(source_rows['mbpp'])}")
 
         # WikiText-2 (Narrative)
         if int(args.wikitext2) > 0:
             print(f"[Mixture] WikiText-2: sampling {int(args.wikitext2)}")
+            source_rows["wikitext"] = []
             split = args.split
             try:
                 stream = _stream_dataset("wikitext", "wikitext-2-raw-v1", split)
@@ -292,14 +317,16 @@ def main() -> None:
             stream = _non_empty_wikitext_paragraphs(stream)
             for ex in _take(stream, int(args.wikitext2)):
                 prompt = _format_wikitext2(ex)
-                write_prompt(prompt, "Narrative", "WikiText-2", "wikitext", split, "")
+                row = make_row(prompt, "Narrative", "WikiText-2", "wikitext", split, "")
+                if row:
+                    source_rows["wikitext"].append(row)
+            print(f"[Mixture] WikiText-2: collected {len(source_rows['wikitext'])} unique")
 
         # MMLU (Reasoning)
         if int(args.mmlu) > 0:
             print(f"[Mixture] MMLU: sampling {int(args.mmlu)}")
+            source_rows["mmlu"] = []
             split = args.split
-            # MMLU requires a config name; prefer the aggregated 'all' config.
-            # Some environments require using 'test' instead of 'train'.
             cfg_candidates = ["all"]
             try:
                 cfg_candidates = ["all"] + [c for c in get_dataset_config_names("cais/mmlu") if c != "all"]
@@ -346,11 +373,15 @@ def main() -> None:
                         "AnswerLetter": answer_letter,
                         "AnswerText": answer_text,
                     }
-                write_prompt(prompt, "Reasoning", subject, f"cais/mmlu:{used_cfg}", used_split, src_id, extra=extra)
+                row = make_row(prompt, "Reasoning", subject, f"cais/mmlu:{used_cfg}", used_split, src_id, extra=extra)
+                if row:
+                    source_rows["mmlu"].append(row)
+            print(f"[Mixture] MMLU: collected {len(source_rows['mmlu'])} unique")
 
         # BoolQ (QA / Reading Comprehension)
         if int(args.boolq) > 0:
             print(f"[Mixture] BoolQ: sampling {int(args.boolq)}")
+            source_rows["boolq"] = []
             split = args.split
             try:
                 stream = _stream_dataset("boolq", None, split)
@@ -363,7 +394,6 @@ def main() -> None:
                 prompt = _format_boolq(ex)
                 extra = None
                 if bool(args.include_mmlu_answers):
-                    # Reuse the same choice/answer columns.
                     choices = ["False", "True"]
                     answer_val = ex.get("answer")
                     answer_index = 1 if bool(answer_val) else 0
@@ -375,18 +405,43 @@ def main() -> None:
                         "AnswerLetter": answer_letter,
                         "AnswerText": answer_text,
                     }
-                write_prompt(
-                    prompt,
-                    "QA",
-                    "BoolQ",
-                    "boolq",
-                    split,
-                    str(j),
-                    extra=extra,
-                    context_dependency="Yes",
+                row = make_row(
+                    prompt, "QA", "BoolQ", "boolq", split, str(j),
+                    extra=extra, context_dependency="Yes",
                 )
+                if row:
+                    source_rows["boolq"].append(row)
+            print(f"[Mixture] BoolQ: collected {len(source_rows['boolq'])} unique")
+
+        # --- Post-processing: combine, add Split column, shuffle, write ---
+        all_rows = []
+        for src_key, src_list in source_rows.items():
+            all_rows.extend(src_list)
+
+        # Add stratified 80/20 train/test Split column
+        if args.add_split_column:
+            # Per-source stratified split: 80% train, 20% test within each source
+            final_rows = []
+            for src_key, src_list in source_rows.items():
+                random.shuffle(src_list)
+                split_idx = int(len(src_list) * 0.8)
+                for r in src_list[:split_idx]:
+                    r["Split"] = "train"
+                for r in src_list[split_idx:]:
+                    r["Split"] = "test"
+                final_rows.extend(src_list)
+            all_rows = final_rows
+
+        random.shuffle(all_rows)
+        writer.writeheader()
+        for row in all_rows:
+            writer.writerow(row)
+            rows += 1
 
     print(f"[Mixture] Wrote {rows} prompts -> {args.out}")
+    # Per-source summary
+    for src_key, src_list in source_rows.items():
+        print(f"  {src_key}: {len(src_list)} rows")
 
 
 if __name__ == "__main__":

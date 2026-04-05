@@ -17,6 +17,17 @@ from pruners.structured_head_slicer import StructuredHeadSlicer
 from pruners.layer_skipper import LayerSkipper
 
 
+def _infer_attention_type(config) -> str:
+    """Detect attention architecture: MHA, GQA, or MQA from model config."""
+    num_heads = getattr(config, "num_attention_heads", None)
+    num_kv_heads = getattr(config, "num_key_value_heads", None)
+    if num_kv_heads is None or num_kv_heads == num_heads:
+        return "MHA"
+    elif num_kv_heads == 1:
+        return "MQA"
+    return "GQA"
+
+
 def _load_hf_token_from_env(env_path: str = ".env") -> str:
     """Load Hugging Face token from .env or environment variables.
 
@@ -311,7 +322,7 @@ class RealModelEngine:
         self.active_profile_key = key
 
     def apply_pruning(self, action) -> None:
-        """Apply pruning according to the action, with corrected GQA-aware head pruning."""
+        """Apply pruning according to the action, architecture-aware (MHA/GQA/MQA)."""
         target = getattr(action, "target", "none")
         intensity = float(getattr(action, "intensity", 0.0) or 0.0)
         # Static profile fast-path (Phase A): swap entire model to a prebuilt profile
@@ -326,54 +337,107 @@ class RealModelEngine:
                 return
             cfg = getattr(self.model, "config", None)
             num_heads = getattr(cfg, "num_attention_heads", 32)
-            num_kv_heads = getattr(cfg, "num_key_value_heads", 8)
-            
-            # Correct GQA logic: Determine how many KV heads (and their corresponding Q head groups) to remove.
-            heads_per_group = num_heads // num_kv_heads
-            groups_to_remove_count = int(round(intensity * num_kv_heads))
-            # Ensure at least one KV group is removed when intensity > 0 to realize an effect
-            if groups_to_remove_count <= 0 and intensity > 0.0:
-                groups_to_remove_count = 1
+            num_kv_heads = getattr(cfg, "num_key_value_heads", None)
+            if num_kv_heads is None:
+                num_kv_heads = num_heads  # MHA default
+
+            attn_type = _infer_attention_type(cfg)
             per_layer_removed_q = {}
             per_layer_removed_kv = {}
-            for i, layer in enumerate(layers):
-                # Use importance scores to find the least important KV groups to prune.
-                # We will score each group by the average importance of its Q heads.
-                q_head_scores = self.head_importance.get(i, torch.ones(num_heads))
-                
-                # Reshape scores to (num_kv_heads, heads_per_group) and find the mean score for each group.
-                group_scores = q_head_scores.view(num_kv_heads, heads_per_group).mean(dim=1)
-                
-                # Find the indices of the least important KV groups.
-                kv_heads_to_remove = torch.topk(group_scores, groups_to_remove_count, largest=False).indices.tolist()
-                
-                # Determine all corresponding Q heads that belong to the groups being removed.
-                q_heads_to_remove = []
-                for kv_idx in kv_heads_to_remove:
-                    start_q_idx = kv_idx * heads_per_group
-                    q_heads_to_remove.extend(range(start_q_idx, start_q_idx + heads_per_group))
-                per_layer_removed_q[i] = sorted(q_heads_to_remove)
-                per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
-            print(f"[Engine] Applying GQA-CORRECT STRUCTURAL head pruning: removing {groups_to_remove_count}/{num_kv_heads} KV groups per layer.")
+
+            if attn_type == "MHA":
+                # MHA: num_heads == num_kv_heads — simple per-head pruning
+                heads_to_remove_count = max(1, int(round(intensity * num_heads)))
+                # Keep at least 25% of heads to prevent degenerate model
+                min_keep = max(1, num_heads // 4)
+                heads_to_remove_count = min(heads_to_remove_count, num_heads - min_keep)
+                for i, layer in enumerate(layers):
+                    q_head_scores = self.head_importance.get(i, torch.ones(num_heads))
+                    removed = torch.topk(q_head_scores, heads_to_remove_count, largest=False).indices.tolist()
+                    per_layer_removed_q[i] = sorted(removed)
+                    per_layer_removed_kv[i] = sorted(removed)  # Same for MHA
+                print(f"[Engine] Applying MHA STRUCTURAL head pruning: removing {heads_to_remove_count}/{num_heads} heads per layer.")
+            else:
+                # GQA/MQA: map Q heads to KV groups
+                heads_per_group = num_heads // num_kv_heads
+                if num_heads % num_kv_heads != 0:
+                    print(f"[Engine] WARNING: {num_heads} Q-heads not divisible by {num_kv_heads} KV-heads. Skipping head pruning.")
+                    return
+                groups_to_remove_count = int(round(intensity * num_kv_heads))
+                if groups_to_remove_count <= 0 and intensity > 0.0:
+                    groups_to_remove_count = 1
+                # Keep at least 25% of KV groups
+                min_keep_groups = max(1, num_kv_heads // 4)
+                groups_to_remove_count = min(groups_to_remove_count, num_kv_heads - min_keep_groups)
+                for i, layer in enumerate(layers):
+                    q_head_scores = self.head_importance.get(i, torch.ones(num_heads))
+                    group_scores = q_head_scores.view(num_kv_heads, heads_per_group).mean(dim=1)
+                    kv_heads_to_remove = torch.topk(group_scores, groups_to_remove_count, largest=False).indices.tolist()
+                    q_heads_to_remove = []
+                    for kv_idx in kv_heads_to_remove:
+                        start_q_idx = kv_idx * heads_per_group
+                        q_heads_to_remove.extend(range(start_q_idx, start_q_idx + heads_per_group))
+                    per_layer_removed_q[i] = sorted(q_heads_to_remove)
+                    per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
+                print(f"[Engine] Applying {attn_type} STRUCTURAL head pruning: removing {groups_to_remove_count}/{num_kv_heads} KV groups per layer.")
             self.structured_head.prune(per_layer_removed_q, per_layer_removed_kv)
+
+        elif target == "ffn_neurons" and intensity > 0.0:
+            layers = getattr(self.model.model, "layers", [])
+            if not layers:
+                print("[Engine] No layers found; cannot apply FFN pruning.")
+                return
+            mlp0 = getattr(layers[0], "mlp", None)
+            if mlp0 is None or not hasattr(mlp0, "down_proj"):
+                print("[Engine] MLP structure not recognized; skipping FFN pruning.")
+                return
+            inter_size = mlp0.down_proj.weight.shape[1]
+            # Compute hardware-friendly target intermediate size (aligned to 128)
+            multiple = 128
+            target_size = int(round(inter_size * (1.0 - intensity)))
+            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
+            new_inter = min(inter_size - 1, new_inter)
+            k = max(1, inter_size - new_inter)
+            per_layer_removed = {}
+            for i, layer in enumerate(layers):
+                if i in self.ffn_importance and self.ffn_importance[i].shape[0] == inter_size:
+                    scores = self.ffn_importance[i]
+                    removed = torch.topk(scores, k, largest=False).indices.tolist()
+                else:
+                    # Wanda-style fallback: weight magnitude
+                    mlp = layer.mlp
+                    with torch.no_grad():
+                        g_scores = torch.linalg.vector_norm(mlp.gate_proj.weight, ord=2, dim=1)
+                        u_scores = torch.linalg.vector_norm(mlp.up_proj.weight, ord=2, dim=1)
+                        d_scores = torch.linalg.vector_norm(mlp.down_proj.weight, ord=2, dim=0)
+                        scores = g_scores + u_scores + d_scores
+                        removed = torch.topk(scores, k, largest=False).indices.tolist()
+                per_layer_removed[i] = removed
+            print(f"[Engine] Applying STRUCTURAL FFN pruning: {inter_size} -> {new_inter} neurons ({intensity*100:.0f}% reduction)")
+            self.structured_ffn.prune(per_layer_removed)
+
         elif target == "transformer_layers" and intensity > 0.0:
             layers = getattr(self.model.model, "layers", [])
             L = len(layers)
             if L == 0: return
             k = max(1, int(round(L * intensity)))
+            # Safety: keep at least 2 layers (first + last minimum)
+            max_removable = max(0, L - 2)
+            k = min(k, max_removable)
+            if k <= 0:
+                print(f"[Engine] Cannot skip layers: only {L} layers, minimum 2 required.")
+                return
             
             if self.layer_importance and len(self.layer_importance) == L:
                 scores = torch.tensor(self.layer_importance)
                 to_skip = torch.topk(scores, k, largest=False).indices.tolist()
-            else: # Fallback to skipping trailing layers
+            else:
                 to_skip = list(range(L - k, L))
             
-            # Crucially, never skip the first or last layers of the model
+            # Never skip the first or last layers of the model
             to_skip_safe = [idx for idx in to_skip if idx != 0 and idx != L-1]
             
             if to_skip_safe:
-                # Physical layer removal (reversible via restore_model) with layer_idx
-                # reassignment for correct KV-cache alignment.
                 print(f"[Engine] Skipping {len(to_skip_safe)}/{L} layers (reversible): {to_skip_safe}")
                 self.layer_skipper.apply(to_skip_safe)
             
@@ -473,8 +537,12 @@ class RealModelEngine:
         self.structured_head.restore()
 
     def calibrate_importances(self, prompts, max_samples: int = 64, max_seq_len: int = 128) -> None:
-        """Collect activation-aware importance for heads and FFN channels using a small calibration set.
-        Importance is average absolute activation per head/channel across tokens and samples.
+        """Calibrate structural importance scores using established academic methods:
+        - Heads: Activation-based Head Sensitivity (Michel et al., 2019)
+        - FFN: Weight-Activation Product inspired by Wanda (Sun et al., 2023)
+        - Layers: Block Influence (BI) from ShortGPT (Men et al., 2024) —
+          BI(i) = 1 - cosine_similarity(layer_input, layer_output).
+          Low BI → layer barely transforms hidden state → safe to remove.
         """
         layers = getattr(self.model.model, "layers", [])
         if not layers:
@@ -485,9 +553,9 @@ class RealModelEngine:
         ffn_acc = {}
         hooks = []
         total_tokens = 0
-        # Layer-wise accumulators
-        layer_sums = {}
-        layer_counts = {}
+        # Block Influence accumulators for layers
+        bi_cos_sum = {}   # layer_idx -> cumulative cosine similarity
+        bi_count = {}     # layer_idx -> token count
 
         # Infer num_heads and inter_size
         try:
@@ -513,21 +581,19 @@ class RealModelEngine:
         if num_heads is not None and head_dim is not None:
             for i, layer in enumerate(layers):
                 head_acc[i] = torch.zeros(num_heads, device=self.model.device)
-                # register head hook on o_proj pre-hook
                 attn = layer.self_attn
                 def make_head_hook(idx):
                     def pre_hook(module, inputs):
                         nonlocal total_tokens
                         if not inputs or inputs[0] is None:
                             return inputs
-                        x = inputs[0]  # [..., h*dim]
+                        x = inputs[0]
                         B, T, D = x.shape if x.dim() == 3 else (1, x.shape[0], x.shape[-1])
                         total_tokens += (B*T)
                         try:
                             x_ = x.view(B*T, num_heads, head_dim)
                         except Exception:
                             return inputs
-                        # sum abs over head_dim and tokens
                         vals = x_.abs().sum(dim=2).sum(dim=0)
                         head_acc[idx][:] += vals.to(head_acc[idx].device)
                         return inputs
@@ -543,11 +609,11 @@ class RealModelEngine:
                         nonlocal total_tokens
                         if not inputs or inputs[0] is None:
                             return inputs
-                        x = inputs[0]  # [..., inter_size]
+                        x = inputs[0]
                         if x.dim() == 3:
                             B, T, C = x.shape
                             total_tokens += (B * T)
-                            vals = x.abs().sum(dim=(0, 1))  # -> [C]
+                            vals = x.abs().sum(dim=(0, 1))
                         else:
                             total_tokens += x.shape[0] if x.dim() > 0 else 1
                             vals = x.abs().sum(dim=0)
@@ -556,27 +622,28 @@ class RealModelEngine:
                     return pre_hook
                 hooks.append(mlp.down_proj.register_forward_pre_hook(make_ffn_hook(i)))
 
-        # Layer output importance via forward hooks (avg |activation| per token)
+        # Block Influence hooks: capture layer input and output for cosine similarity
         for i, layer in enumerate(layers):
-            layer_sums[i] = 0.0
-            layer_counts[i] = 0
-            def make_layer_hook(idx):
+            bi_cos_sum[i] = 0.0
+            bi_count[i] = 0
+            def make_bi_hook(idx):
                 def fwd_hook(module, inputs, output):
                     try:
-                        hs = output[0] if isinstance(output, (tuple, list)) else output
-                        if hs is None:
+                        inp = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
+                        out = output[0] if isinstance(output, (tuple, list)) else output
+                        if inp is None or out is None:
                             return
-                        if hasattr(hs, 'dim') and hs.dim() >= 1:
-                            if hs.dim() == 3:
-                                B, T, _ = hs.shape
-                                layer_counts[idx] += (B * T)
-                            else:
-                                layer_counts[idx] += hs.shape[0] if hs.dim() > 0 else 1
-                            layer_sums[idx] += hs.detach().abs().sum().item()
+                        # Flatten to (num_tokens, hidden_dim) for cosine similarity
+                        inp_flat = inp.detach().reshape(-1, inp.shape[-1]).float()
+                        out_flat = out.detach().reshape(-1, out.shape[-1]).float()
+                        # Per-token cosine similarity, then average
+                        cos = torch.nn.functional.cosine_similarity(inp_flat, out_flat, dim=-1)
+                        bi_cos_sum[idx] += float(cos.sum().item())
+                        bi_count[idx] += cos.shape[0]
                     except Exception:
                         pass
                 return fwd_hook
-            hooks.append(layer.register_forward_hook(make_layer_hook(i)))
+            hooks.append(layer.register_forward_hook(make_bi_hook(i)))
 
         # Run calibration forward passes
         used = 0
@@ -602,14 +669,18 @@ class RealModelEngine:
             self.head_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in head_acc.items()}
         if used > 0 and inter_size is not None:
             self.ffn_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in ffn_acc.items()}
-        # Layer importance: average abs activation per token per layer
+        # Block Influence layer importance: BI = 1 - mean_cosine_similarity
+        # Low BI → layer is redundant → low importance → safe to skip
         if used > 0 and layers:
             L = len(layers)
             self.layer_importance = []
             for i in range(L):
-                s = float(layer_sums.get(i, 0.0))
-                c = float(layer_counts.get(i, 0))
-                self.layer_importance.append(s / max(1.0, c))
+                cos_avg = bi_cos_sum.get(i, 0.0) / max(1.0, float(bi_count.get(i, 1)))
+                bi_score = 1.0 - cos_avg  # Block Influence
+                self.layer_importance.append(bi_score)
+            # Log BI scores for transparency
+            bi_str = ", ".join(f"L{i}:{bi:.4f}" for i, bi in enumerate(self.layer_importance))
+            print(f"[Calib] Block Influence scores: {bi_str}")
         # Retain a copy of prompts for later reconstruction passes (Phase C)
         try:
             self._calib_prompts_recent = list(prompts[:max_samples]) if prompts else []

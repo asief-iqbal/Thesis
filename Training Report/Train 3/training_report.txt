@@ -1,0 +1,34 @@
+Training Report
+============================================================
+Episodes: 100
+Overall Avg Total Time (LCR+RL+Model): 2990.78ms
+  Avg LCR Inference: 20.01ms
+  Avg RL Agent: 0.75ms
+  Avg Model Inference (pruned): 2970.02ms
+  Avg Baseline Inference (unpruned): 1649.96ms
+Overall Avg PPL (pruned, arithmetic): 134.30
+Overall PPL (pruned, token-weighted): 3.58
+Overall Avg PPL (baseline, arithmetic): 2.27
+Overall PPL (baseline, token-weighted): 2.07
+
+Overall Avg Reward: -0.2884
+
+Averages by Prune Type and Intensity:
+  none 0.0: Avg Time 1599.38ms, Avg PPL 2.14, TW-PPL 2.05, Avg Reward -0.1184 (2 samples)
+  transformer_layers 0.06: Avg Time 1697.36ms, Avg PPL 1.53, TW-PPL 1.53, Avg Reward 0.0927 (1 samples)
+  transformer_layers 0.1: Avg Time 1435.91ms, Avg PPL 6.41, TW-PPL 4.16, Avg Reward -0.0235 (40 samples)
+  transformer_layers 0.12: Avg Time 1513.97ms, Avg PPL 4.85, TW-PPL 4.17, Avg Reward -0.2476 (4 samples)
+  transformer_layers 0.15: Avg Time 2020.23ms, Avg PPL 4.55, TW-PPL 4.55, Avg Reward 0.0647 (1 samples)
+  transformer_layers 0.18: Avg Time 1576.10ms, Avg PPL 1738.13, TW-PPL 5.92, Avg Reward -0.4659 (7 samples)
+  transformer_layers 0.2: Avg Time 1672.31ms, Avg PPL 5.50, TW-PPL 3.18, Avg Reward -0.1579 (3 samples)
+  transformer_layers 0.25: Avg Time 1268.51ms, Avg PPL 161.92, TW-PPL 161.92, Avg Reward -1.1141 (1 samples)
+  transformer_layers 0.3: Avg Time 1355.93ms, Avg PPL 338.26, TW-PPL 338.26, Avg Reward -1.3085 (1 samples)
+  transformer_layers 0.35: Avg Time 1141.16ms, Avg PPL 170.84, TW-PPL 169.29, Avg Reward -0.2395 (2 samples)
+  transformer_layers 0.4: Avg Time 1321.45ms, Avg PPL 14.55, TW-PPL 14.55, Avg Reward 0.1572 (1 samples)
+  attention_heads 0.2: Avg Time 1634.65ms, Avg PPL 9.79, TW-PPL 5.75, Avg Reward -0.2376 (2 samples)
+  attention_heads 0.3: Avg Time 1397.98ms, Avg PPL 3.89, TW-PPL 3.84, Avg Reward -0.0259 (4 samples)
+  ffn_neurons 0.1: Avg Time 8902.67ms, Avg PPL 3.22, TW-PPL 2.86, Avg Reward -0.7861 (5 samples)
+  ffn_neurons 0.2: Avg Time 6693.38ms, Avg PPL 2.07, TW-PPL 1.85, Avg Reward -0.7114 (21 samples)
+  ffn_neurons 0.3: Avg Time 3807.48ms, Avg PPL 1.72, TW-PPL 1.72, Avg Reward -0.5350 (1 samples)
+  ffn_neurons 0.4: Avg Time 2914.65ms, Avg PPL 2.19, TW-PPL 2.15, Avg Reward -0.3711 (2 samples)
+  ffn_neurons 0.5: Avg Time 1409.77ms, Avg PPL 1.58, TW-PPL 1.58, Avg Reward 0.1888 (2 samples)

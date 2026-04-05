@@ -31,6 +31,7 @@ This repository accompanies the thesis: _Adaptive Pruning and Acceleration Techn
   - [LCR Results](#lcr-results)
   - [RL Controller Results](#rl-controller-results)
   - [Ablation: Cross-Method Sensitivity](#ablation-cross-method-sensitivity)
+  - [Ablation Studies](#ablation-studies)
 - [Discussion](#discussion)
 - [Limitations and Future Work](#limitations-and-future-work)
 - [Troubleshooting](#troubleshooting)
@@ -606,6 +607,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                            |
 | `train_minibert_lcr.py`        | LCR training script                                                    |
 | `run_minibert_lcr_pipeline.py` | One-click oracle labeling + MiniBERT LCR training pipeline             |
+| `run_ablation_studies.py`      | Automated ablation studies runner (reward sweep, framework ablations)  |
 | `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                   |
 | `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                         |
 | `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns             |
@@ -644,6 +646,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)    |
 | `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)   |
 | `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)   |
+| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations)|
 
 ---
 
@@ -728,6 +731,45 @@ Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correl
 1. Multi-method oracle labeling rather than a single difficulty score.
 2. The layer-skip-heavy action space (layer removal is more effective for latency).
 3. Future work on multi-output routing (separate scores per pruning type).
+
+### Ablation Studies
+
+Five ablation experiments validate the key design choices. All experiments are automated via `run_ablation_studies.py` and output to `Ablation Report/`.
+
+#### Study 1 — Reward Function Sweep
+
+Grid search over $\alpha \in \{0.5, 0.6, 0.7, 0.8, 0.9\}$ and $\beta \in \{0.1, 0.2, 0.3, 0.4, 0.5\}$ (25 combinations). For each $(\alpha, \beta)$, a fresh DDQN is trained for 100 episodes. Metrics: average reward, mean pruned PPL, mean speedup. Produces heatmaps and a radar chart showing the optimal ridge and why $\alpha=0.9, \beta=0.1$ was chosen.
+
+#### Study 2A — Remove LCR Score from State Vector
+
+Trains with a 9-dimensional state (6 hardware + 3 early-Llama, removing the LCR sensitivity index). Demonstrates the LCR router's contribution to action selection quality.
+
+#### Study 2B — Remove Hardware Telemetry from State Vector
+
+Trains with a 4-dimensional state (1 LCR + 3 early-Llama only). Shows that hardware awareness matters for resource-adaptive pruning.
+
+#### Study 2C — Random Action Baseline
+
+Replaces the DDQN with uniform random action selection over the same episode budget and prompts. Quantifies the RL controller's contribution, analogous to RAP's $\text{RAP}^{-\text{RL}}$ ablation.
+
+#### Study 2D — Action Space Sensitivity
+
+Compares the full 17-action space against reduced variants: layer-only (11 actions) and head-only (7 actions). Shows that the broader action space is necessary to cover diverse prompt sensitivities.
+
+**Usage:**
+
+```bash
+# Run all ablation studies
+python run_ablation_studies.py
+
+# Run specific studies only
+python run_ablation_studies.py --studies 1,2a,2c
+
+# Customize sample count
+python run_ablation_studies.py --samples 100 --device auto
+```
+
+Results are saved to `Ablation Report/` with per-study subdirectories, JSON metrics, convergence plots, heatmaps, and a unified summary report (`ablation_summary.txt`).
 
 ---
 

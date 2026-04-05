@@ -4,7 +4,7 @@
 
 The project addresses a focused research question: **can structural pruning be selected at inference time, per prompt, using both prompt sensitivity and system state, rather than a fixed offline compression profile?** The implemented answer is yes. The framework achieves measurable inference speedups of 10–40% through physical transformer-layer removal while maintaining bounded quality degradation, and the learned router generalizes across five public benchmarks.
 
-This repository accompanies the thesis: *Adaptive Pruning and Acceleration Techniques for Local LLM Inference under Resource Constraints*.
+This repository accompanies the thesis: _Adaptive Pruning and Acceleration Techniques for Local LLM Inference under Resource Constraints_.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -104,14 +104,14 @@ This section follows the structure of the thesis methodology chapter.
 
 The project uses a five-source public benchmark mixture designed to cover diverse prompt types:
 
-| Source | Count | Rationale |
-|--------|------:|-----------|
-| GSM8K | 2,000 | Arithmetic and multi-step reasoning sensitivity |
-| MBPP | 974 | Code-generation prompts with syntax sensitivity |
-| WikiText-2 | 2,000 | Redundancy-rich narrative language modeling |
-| MMLU | 2,000 | Mixed-domain reasoning and multiple choice |
-| BoolQ | 2,000 | Passage-grounded binary question answering |
-| **Total** | **8,974** | |
+| Source     |     Count | Rationale                                       |
+| ---------- | --------: | ----------------------------------------------- |
+| GSM8K      |     2,000 | Arithmetic and multi-step reasoning sensitivity |
+| MBPP       |       974 | Code-generation prompts with syntax sensitivity |
+| WikiText-2 |     2,000 | Redundancy-rich narrative language modeling     |
+| MMLU       |     2,000 | Mixed-domain reasoning and multiple choice      |
+| BoolQ      |     2,000 | Passage-grounded binary question answering      |
+| **Total**  | **8,974** |                                                 |
 
 **Construction pipeline:**
 
@@ -120,6 +120,7 @@ The project uses a five-source public benchmark mixture designed to cover divers
 3. The canonical cleaned file is `lcr_mixture.final.csv`.
 
 Two scales were used during development:
+
 - **Pilot**: 5k target → 4,374 usable rows after cleaning.
 - **Final**: 10k target → 8,974 usable rows after cleaning.
 
@@ -143,6 +144,7 @@ This is preferred over a raw perplexity gap because it corresponds to a log-perp
 **Multi-method composite labels:**
 
 The current oracle uses two sparse configurations:
+
 - Attention-head pruning at 30%
 - Transformer-layer skipping at 25%
 
@@ -183,30 +185,30 @@ flowchart TD
 
 **Selected checkpoint** (`Training Report/TinyBERT Train 20`):
 
-| Metric | Value |
-|--------|-------|
-| Held-out MSE | 0.03997 |
-| Held-out $R^2$ | 0.4950 |
-| Held-out Spearman $\rho$ | 0.7009 |
-| 3-bin accuracy | 65.13% |
-| 95% CI for Spearman | [0.6722, 0.7265] |
+| Metric                   | Value            |
+| ------------------------ | ---------------- |
+| Held-out MSE             | 0.03997          |
+| Held-out $R^2$           | 0.4950           |
+| Held-out Spearman $\rho$ | 0.7009           |
+| 3-bin accuracy           | 65.13%           |
+| 95% CI for Spearman      | [0.6722, 0.7265] |
 
 **Training configuration:**
 
-| Parameter | Value |
-|-----------|-------|
-| Backbone | `prajjwal1/bert-mini` |
-| Max sequence length | 128 |
-| Fused input dimension | 304 |
-| Dropout | 0.20 |
-| Batch size | 48 |
-| Epochs | 50 (patience 20) |
-| Learning rate | $4 \times 10^{-5}$ |
-| Backbone LR factor | 0.20 |
-| Weight decay | 0.03 |
-| Label smoothing | 0.01 |
-| Source-balanced oversampling | Enabled |
-| Loss | Huber/SmoothL1 ($\delta = 0.15$) |
+| Parameter                    | Value                            |
+| ---------------------------- | -------------------------------- |
+| Backbone                     | `prajjwal1/bert-mini`            |
+| Max sequence length          | 128                              |
+| Fused input dimension        | 304                              |
+| Dropout                      | 0.20                             |
+| Batch size                   | 48                               |
+| Epochs                       | 50 (patience 20)                 |
+| Learning rate                | $4 \times 10^{-5}$               |
+| Backbone LR factor           | 0.20                             |
+| Weight decay                 | 0.03                             |
+| Label smoothing              | 0.01                             |
+| Source-balanced oversampling | Enabled                          |
+| Loss                         | Huber/SmoothL1 ($\delta = 0.15$) |
 
 ### DDQN Pruning Controller
 
@@ -214,28 +216,28 @@ The controller is a **Double Deep Q-Network** (DDQN). Compared with standard DQN
 
 **State vector (10-D):**
 
-| Dim | Feature | Source |
-|-----|---------|--------|
-| 1 | CPU utilization | `psutil` |
-| 2 | Available system memory | `psutil` |
-| 3 | Battery percentage | `psutil` |
-| 4 | GPU availability | NVML |
-| 5 | Free GPU memory | NVML |
-| 6 | GPU utilization | NVML |
-| 7 | LCR sensitivity score | BERT-mini router |
-| 8 | Layer-0 hidden-state norm | Llama backbone |
-| 9 | Layer-0 attention-entropy proxy | Llama backbone |
-| 10 | Layer-0 attention-concentration proxy | Llama backbone |
+| Dim | Feature                               | Source           |
+| --- | ------------------------------------- | ---------------- |
+| 1   | CPU utilization                       | `psutil`         |
+| 2   | Available system memory               | `psutil`         |
+| 3   | Battery percentage                    | `psutil`         |
+| 4   | GPU availability                      | NVML             |
+| 5   | Free GPU memory                       | NVML             |
+| 6   | GPU utilization                       | NVML             |
+| 7   | LCR sensitivity score                 | BERT-mini router |
+| 8   | Layer-0 hidden-state norm             | Llama backbone   |
+| 9   | Layer-0 attention-entropy proxy       | Llama backbone   |
+| 10  | Layer-0 attention-concentration proxy | Llama backbone   |
 
 This state design is central to the methodology. The controller observes hardware pressure, prompt sensitivity, and early representation behavior jointly, allowing the policy to condition on all three.
 
 **Action space (16 discrete actions):**
 
-| Actions | Intensities |
-|---------|-------------|
-| `none` | — |
+| Actions                           | Intensities                                          |
+| --------------------------------- | ---------------------------------------------------- |
+| `none`                            | —                                                    |
 | `transformer_layers` (11 actions) | 6%, 10%, 12%, 15%, 18%, 20%, 25%, 30%, 35%, 40%, 50% |
-| `attention_heads` (3 actions) | 10%, 20%, 30% |
+| `attention_heads` (3 actions)     | 10%, 20%, 30%                                        |
 
 The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). Structural FFN slicing exists in the engine but is excluded from the RL action space to limit instability.
 
@@ -262,16 +264,16 @@ flowchart TD
 
 **Training hyperparameters:**
 
-| Parameter | Value |
-|-----------|-------|
-| Policy/target MLP | $10 \rightarrow 128 \rightarrow 128 \rightarrow 16$ |
-| Replay buffer | 10,000 transitions |
-| Batch size | 32 |
-| Optimizer | AdamW |
-| Learning rate | $1 \times 10^{-4}$ |
-| Discount factor $\gamma$ | 0.95 |
-| Target network update | Every 200 steps |
-| Epsilon schedule | Decays toward 0.1 during training; 0 during evaluation |
+| Parameter                | Value                                                  |
+| ------------------------ | ------------------------------------------------------ |
+| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 16$    |
+| Replay buffer            | 10,000 transitions                                     |
+| Batch size               | 32                                                     |
+| Optimizer                | AdamW                                                  |
+| Learning rate            | $1 \times 10^{-4}$                                     |
+| Discount factor $\gamma$ | 0.95                                                   |
+| Target network update    | Every 200 steps                                        |
+| Epsilon schedule         | Decays toward 0.1 during training; 0 during evaluation |
 
 ### Dynamic Pruning Engine
 
@@ -305,6 +307,7 @@ The engine can also shrink MLP intermediate dimensions (`pruners/structured_ffn_
 #### Importance calibration
 
 Before training begins, the engine runs an importance-calibration pass on a small prompt subset. Forward hooks collect activation-based importance scores for:
+
 - Attention heads (at `o_proj` input)
 - FFN channels (at `down_proj` input)
 - Transformer layers (via output activations)
@@ -314,6 +317,7 @@ These scores determine which components are removed first during pruning, so the
 ### Benchmarking and Reward
 
 Each episode benchmarks the same prompt under both the dense and pruned model. Measured outputs:
+
 - **Inference time** (ms) — with CUDA synchronization barriers for accurate GPU timing
 - **Throughput** (tokens/second)
 - **Continuation perplexity** — prompt tokens are masked out, so quality reflects only the generated continuation
@@ -331,6 +335,7 @@ with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-2, 2]$.
 **Reporting pipeline:**
 
 The framework automatically produces per-run plots:
+
 - Token speed comparison (baseline vs pruned)
 - Inference time comparison
 - Perplexity comparison
@@ -434,13 +439,13 @@ flowchart LR
 
 Experiments run on consumer-grade local hardware, consistent with the thesis goal of resource-aware local inference:
 
-| Component | Specification |
-|-----------|---------------|
-| GPU | NVIDIA RTX 4060, 8 GB VRAM |
-| CPU | AMD Ryzen 7 5700X |
-| RAM | 16 GB DDR4 |
-| Storage | NVMe SSD |
-| OS | Windows 10/11 |
+| Component | Specification              |
+| --------- | -------------------------- |
+| GPU       | NVIDIA RTX 4060, 8 GB VRAM |
+| CPU       | AMD Ryzen 7 5700X          |
+| RAM       | 16 GB DDR4                 |
+| Storage   | NVMe SSD                   |
+| OS        | Windows 10/11              |
 
 **Software stack:** Python 3.9+, PyTorch 2.5 (CUDA 12.1), Hugging Face Transformers, Hugging Face Datasets, psutil, matplotlib, NVML (optional).
 
@@ -525,27 +530,27 @@ python Adaptive_pruning.py --mode test --wikitext2 --force-action attention_head
 
 Main entrypoint: `Adaptive_pruning.py`
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--mode` | `test` | `train`, `test`, or `report` |
-| `--checkpoint` | `checkpoints/rl_policy.pt` | Save/load path for the RL policy |
-| `--episodes` | `50` | Number of train or test episodes |
-| `--max-new-tokens` | `50` | Maximum generated continuation length |
-| `--train-dataset` | `Prompt Dataset Train.csv` | Training CSV path |
-| `--test-dataset` | `Prompt Dataset Test.csv` | Test CSV path |
-| `--train-samples` | `5000` | Number of training prompts |
-| `--test-samples` | `100` | Number of test prompts in auto-test flows |
-| `--split-ratio` | `0.8` | Train/test split ratio for auto-split mode |
-| `--device` | `auto` | `cpu`, `gpu`, or `auto` |
-| `--wikitext2` | `False` | WikiText-2 comparative evaluation |
-| `--boolq` | `False` | BoolQ zero-shot evaluation |
-| `--hellaswag` | `False` | HellaSwag zero-shot evaluation |
-| `--mmlu` | `False` | MMLU zero-shot evaluation |
-| `--eval-samples` | `1000` | Samples for benchmark-specific evaluation |
-| `--eval-seed` | `42` | Random seed for evaluation sampling |
-| `--force-action` | `None` | Force `target:intensity` instead of RL |
-| `--lm-eval` | `False` | Run lm-eval-harness tasks |
-| `--eval-tasks` | `boolq,hellaswag,mmlu` | lm-eval task list |
+| Argument           | Default                    | Description                                |
+| ------------------ | -------------------------- | ------------------------------------------ |
+| `--mode`           | `test`                     | `train`, `test`, or `report`               |
+| `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy           |
+| `--episodes`       | `50`                       | Number of train or test episodes           |
+| `--max-new-tokens` | `50`                       | Maximum generated continuation length      |
+| `--train-dataset`  | `Prompt Dataset Train.csv` | Training CSV path                          |
+| `--test-dataset`   | `Prompt Dataset Test.csv`  | Test CSV path                              |
+| `--train-samples`  | `5000`                     | Number of training prompts                 |
+| `--test-samples`   | `100`                      | Number of test prompts in auto-test flows  |
+| `--split-ratio`    | `0.8`                      | Train/test split ratio for auto-split mode |
+| `--device`         | `auto`                     | `cpu`, `gpu`, or `auto`                    |
+| `--wikitext2`      | `False`                    | WikiText-2 comparative evaluation          |
+| `--boolq`          | `False`                    | BoolQ zero-shot evaluation                 |
+| `--hellaswag`      | `False`                    | HellaSwag zero-shot evaluation             |
+| `--mmlu`           | `False`                    | MMLU zero-shot evaluation                  |
+| `--eval-samples`   | `1000`                     | Samples for benchmark-specific evaluation  |
+| `--eval-seed`      | `42`                       | Random seed for evaluation sampling        |
+| `--force-action`   | `None`                     | Force `target:intensity` instead of RL     |
+| `--lm-eval`        | `False`                    | Run lm-eval-harness tasks                  |
+| `--eval-tasks`     | `boolq,hellaswag,mmlu`     | lm-eval task list                          |
 
 ---
 
@@ -553,52 +558,52 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Core scripts
 
-| Path | Role |
-|------|------|
-| `Adaptive_pruning.py` | RL training, testing, reporting, benchmark evaluation |
-| `model_loader.py` | Llama loading, pruning application/restoration, importance calibration |
-| `lcr_minibert.py` | Runtime LCR scorer (loads BERT-mini backbone + regression head) |
-| `oracle_labeler.py` | Dense-vs-sparse oracle sensitivity labeling |
-| `train_minibert_lcr.py` | LCR training script |
-| `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets) |
-| `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting |
-| `prepare_dual_labels.py` | Per-method label preparation and auxiliary feature columns |
-| `nlp_analyzer.py` | NLP analysis utilities |
-| `dashboard_gen.py` | Automated dashboard and report generation |
+| Path                           | Role                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `Adaptive_pruning.py`          | RL training, testing, reporting, benchmark evaluation                  |
+| `model_loader.py`              | Llama loading, pruning application/restoration, importance calibration |
+| `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)        |
+| `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                            |
+| `train_minibert_lcr.py`        | LCR training script                                                    |
+| `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                   |
+| `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                         |
+| `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns             |
+| `nlp_analyzer.py`              | NLP analysis utilities                                                 |
+| `dashboard_gen.py`             | Automated dashboard and report generation                              |
 
 ### Pruning primitives (`pruners/`)
 
-| Module | Role |
-|--------|------|
-| `layer_skipper.py` | Physical layer removal with DynamicCache-safe `layer_idx` reassignment |
-| `structured_head_slicer.py` | GQA-safe structural head pruning (rebuilds projection matrices) |
-| `structured_ffn_slicer.py` | Structural FFN intermediate-dimension slicing |
-| `head_pruner.py` | Activation-mask-based head pruning (legacy, used for calibration) |
-| `ffn_pruner.py` | Activation-mask-based FFN pruning (legacy, used for calibration) |
+| Module                      | Role                                                                   |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `layer_skipper.py`          | Physical layer removal with DynamicCache-safe `layer_idx` reassignment |
+| `structured_head_slicer.py` | GQA-safe structural head pruning (rebuilds projection matrices)        |
+| `structured_ffn_slicer.py`  | Structural FFN intermediate-dimension slicing                          |
+| `head_pruner.py`            | Activation-mask-based head pruning (legacy, used for calibration)      |
+| `ffn_pruner.py`             | Activation-mask-based FFN pruning (legacy, used for calibration)       |
 
 ### Data files
 
-| File | Description |
-|------|-------------|
+| File                    | Description                                   |
+| ----------------------- | --------------------------------------------- |
 | `lcr_mixture.final.csv` | Canonical cleaned 8,974-row benchmark mixture |
-| `lcr_mixture_10k.csv` | Raw 10k-target mixture before cleaning |
-| `lcr_mixture_5k.csv` | Pilot 5k-target mixture |
+| `lcr_mixture_10k.csv`   | Raw 10k-target mixture before cleaning        |
+| `lcr_mixture_5k.csv`    | Pilot 5k-target mixture                       |
 
 ### Model checkpoints (`checkpoints/`)
 
-| Path | Content |
-|------|---------|
-| `minibert_lcr_backbone/` | Exported BERT-mini backbone (config, tokenizer, weights) |
-| `minibert_lcr_head.pt` | Exported regression head + auxiliary projector + scalar mixer |
-| `rl_policy.pt` | Saved DDQN policy checkpoint |
+| Path                     | Content                                                       |
+| ------------------------ | ------------------------------------------------------------- |
+| `minibert_lcr_backbone/` | Exported BERT-mini backbone (config, tokenizer, weights)      |
+| `minibert_lcr_head.pt`   | Exported regression head + auxiliary projector + scalar mixer |
+| `rl_policy.pt`           | Saved DDQN policy checkpoint                                  |
 
 ### Reports
 
-| Directory | Content |
-|-----------|---------|
-| `Training Report/Train N/` | RL training runs (metrics JSON, report TXT, plots) |
-| `Training Report/TinyBERT Train N/` | LCR training runs |
-| `Test Report/Test N/` | Evaluation runs (metrics, zero-shot accuracy, plots) |
+| Directory                           | Content                                              |
+| ----------------------------------- | ---------------------------------------------------- |
+| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)   |
+| `Training Report/TinyBERT Train N/` | LCR training runs                                    |
+| `Test Report/Test N/`               | Evaluation runs (metrics, zero-shot accuracy, plots) |
 
 ---
 
@@ -610,23 +615,23 @@ The LCR is the strongest and most mature contribution. The project progressed fr
 
 **Selected checkpoint performance** (`TinyBERT Train 20`):
 
-| Metric | Value |
-|--------|-------|
-| Held-out MSE | 0.03997 |
-| Held-out $R^2$ | 0.4950 |
-| Held-out Spearman $\rho$ | **0.7009** |
-| 3-bin accuracy | 65.13% |
-| 95% CI for Spearman | [0.6722, 0.7265] |
+| Metric                   | Value            |
+| ------------------------ | ---------------- |
+| Held-out MSE             | 0.03997          |
+| Held-out $R^2$           | 0.4950           |
+| Held-out Spearman $\rho$ | **0.7009**       |
+| 3-bin accuracy           | 65.13%           |
+| 95% CI for Spearman      | [0.6722, 0.7265] |
 
 **Per-source held-out performance:**
 
-| Source | Difficulty | Notes |
-|--------|-----------|-------|
-| WikiText-2 | Easiest | High lexical redundancy, stable sensitivity |
-| BoolQ | Easy | Passage grounding provides context |
-| MMLU | Moderate | Diverse domains |
-| MBPP | Hard | Syntax-sensitive, sparse lexical cues |
-| GSM8K | Hardest | Mathematical reasoning, fragile under pruning |
+| Source     | Difficulty | Notes                                         |
+| ---------- | ---------- | --------------------------------------------- |
+| WikiText-2 | Easiest    | High lexical redundancy, stable sensitivity   |
+| BoolQ      | Easy       | Passage grounding provides context            |
+| MMLU       | Moderate   | Diverse domains                               |
+| MBPP       | Hard       | Syntax-sensitive, sparse lexical cues         |
+| GSM8K      | Hardest    | Mathematical reasoning, fragile under pruning |
 
 The Spearman correlation near 0.70 indicates the router learns meaningful **ranking structure** over prompt sensitivity, which is what matters for downstream RL action selection (relative ordering matters more than absolute calibration).
 
@@ -636,35 +641,35 @@ With the corrected pruning engine (physical layer removal, log-PPL reward, updat
 
 **Aggregate results (Train 37, 100 episodes → Test 19, 20 episodes):**
 
-| Metric | Training (incl. exploration) | Test (ε=0, exploitation) |
-|--------|------------------------------|--------------------------|
-| Avg baseline latency | 2,721.62 ms | 2,554.96 ms |
-| Avg pruned latency | 2,355.98 ms | **1,737.04 ms** |
-| **Inference speedup** | **13.4%** | **32.0%** |
-| Avg baseline PPL | 2.06 | 2.43 |
-| Avg pruned PPL | 206.12 (skewed by exploration) | 46.83 (one 560 outlier) |
-| Avg reward | +0.044 | — |
-| Preferred action | layer skip 35–50% | layer skip 50% (20/20) |
+| Metric                | Training (incl. exploration)   | Test (ε=0, exploitation) |
+| --------------------- | ------------------------------ | ------------------------ |
+| Avg baseline latency  | 2,721.62 ms                    | 2,554.96 ms              |
+| Avg pruned latency    | 2,355.98 ms                    | **1,737.04 ms**          |
+| **Inference speedup** | **13.4%**                      | **32.0%**                |
+| Avg baseline PPL      | 2.06                           | 2.43                     |
+| Avg pruned PPL        | 206.12 (skewed by exploration) | 46.83 (one 560 outlier)  |
+| Avg reward            | +0.044                         | —                        |
+| Preferred action      | layer skip 35–50%              | layer skip 50% (20/20)   |
 
 **Per-action breakdown (training):**
 
-| Action | Avg Latency (ms) | Avg PPL | Avg Reward | Samples |
-|--------|----------------:|--------:|----------:|---------:|
-| layer skip 12% | 2,285 | 1.20 | **+0.120** | 4 |
-| layer skip 35% | 2,127 | 3.11 | **+0.266** | 17 |
-| layer skip 40% | 2,146 | 2.67 | **+0.252** | 4 |
-| layer skip 50% | 1,821 | 10.47 | **+0.239** | 24 |
-| head pruning 30% | 3,803 | 3.77 | −0.278 | 2 |
+| Action           | Avg Latency (ms) | Avg PPL | Avg Reward | Samples |
+| ---------------- | ---------------: | ------: | ---------: | ------: |
+| layer skip 12%   |            2,285 |    1.20 | **+0.120** |       4 |
+| layer skip 35%   |            2,127 |    3.11 | **+0.266** |      17 |
+| layer skip 40%   |            2,146 |    2.67 | **+0.252** |       4 |
+| layer skip 50%   |            1,821 |   10.47 | **+0.239** |      24 |
+| head pruning 30% |            3,803 |    3.77 |     −0.278 |       2 |
 
 **Representative test episodes (ε=0):**
 
 | Episode | Baseline (ms) | Pruned (ms) | Speedup | PPL base → pruned |
-|---------|-------------:|------------:|--------:|-------------------|
-| 4 | 2,676 | 1,774 | **34%** | 1.79 → 8.13 |
-| 9 | 2,489 | 1,640 | **34%** | 2.69 → 4.55 |
-| 14 | 2,789 | 1,630 | **42%** | 1.63 → 10.21 |
-| 18 | 2,301 | 1,227 | **47%** | 1.64 → 10.47 |
-| 20 | 2,517 | 1,918 | **24%** | 1.89 → 2.25 |
+| ------- | ------------: | ----------: | ------: | ----------------- |
+| 4       |         2,676 |       1,774 | **34%** | 1.79 → 8.13       |
+| 9       |         2,489 |       1,640 | **34%** | 2.69 → 4.55       |
+| 14      |         2,789 |       1,630 | **42%** | 1.63 → 10.21      |
+| 18      |         2,301 |       1,227 | **47%** | 1.64 → 10.47      |
+| 20      |         2,517 |       1,918 | **24%** | 1.89 → 2.25       |
 
 These results confirm that the physical layer-removal fix produces **real, measurable speedups of 24–47%** during exploitation — solving the previous problem where pruned inference was slower than the baseline.
 
@@ -672,12 +677,13 @@ These results confirm that the physical layer-removal fix produces **real, measu
 
 An important empirical finding from the oracle labeling stage:
 
-| Correlation | Head pruning vs Layer skipping |
-|-------------|-------------------------------|
-| Spearman $\rho$ | ≈ 0.309 |
-| Pearson $r$ | ≈ 0.365 |
+| Correlation     | Head pruning vs Layer skipping |
+| --------------- | ------------------------------ |
+| Spearman $\rho$ | ≈ 0.309                        |
+| Pearson $r$     | ≈ 0.365                        |
 
 Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correlated**. This justifies:
+
 1. Multi-method oracle labeling rather than a single difficulty score.
 2. The layer-skip-heavy action space (layer removal is more effective for latency).
 3. Future work on multi-output routing (separate scores per pruning type).
@@ -688,35 +694,35 @@ Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correl
 
 ### What this project contributes
 
-| Component | Status | Contribution level |
-|-----------|--------|--------------------|
-| Benchmark mixture pipeline | Complete | Reproducible, audited, multi-domain |
-| Oracle sensitivity labeling | Complete | Operational definition, multi-method, loss-gap based |
-| Learned Complexity Router | **Strongest** | Spearman 0.70, deployed at runtime, reusable |
-| Physical pruning engine | Complete | DynamicCache-correct, GQA-safe, fully reversible |
-| DDQN controller | Functional | **32% test-time speedup**, converges on effective layer skip |
-| End-to-end integration | Complete | All components connected in a single pipeline |
+| Component                   | Status        | Contribution level                                           |
+| --------------------------- | ------------- | ------------------------------------------------------------ |
+| Benchmark mixture pipeline  | Complete      | Reproducible, audited, multi-domain                          |
+| Oracle sensitivity labeling | Complete      | Operational definition, multi-method, loss-gap based         |
+| Learned Complexity Router   | **Strongest** | Spearman 0.70, deployed at runtime, reusable                 |
+| Physical pruning engine     | Complete      | DynamicCache-correct, GQA-safe, fully reversible             |
+| DDQN controller             | Functional    | **32% test-time speedup**, converges on effective layer skip |
+| End-to-end integration      | Complete      | All components connected in a single pipeline                |
 
 ### Evolution from earlier design
 
-| Earlier project state | Current project state |
-|-----------------------|-----------------------|
-| Heuristic prompt-complexity score | Trained BERT-mini LCR deployed at runtime |
-| Ad hoc prompt pool | Audited five-source benchmark mixture (8,974 rows) |
-| Single sparse label | Multi-method oracle labeling with loss-gap normalization |
-| 7-feature controller state | 10-feature state with LCR + early-Llama signals |
-| Conceptual head pruning | GQA-safe structural head pruning |
-| Identity-forward layer skipping | **Physical layer removal** with DynamicCache alignment |
-| Linear PPL reward ($\alpha$=0.7, $\beta$=0.3) | **Log-PPL reward** ($\alpha$=0.9, $\beta$=0.1) |
-| Limited logging | Per-episode metrics, plots, JSON artifacts, organized runs |
+| Earlier project state                         | Current project state                                      |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| Heuristic prompt-complexity score             | Trained BERT-mini LCR deployed at runtime                  |
+| Ad hoc prompt pool                            | Audited five-source benchmark mixture (8,974 rows)         |
+| Single sparse label                           | Multi-method oracle labeling with loss-gap normalization   |
+| 7-feature controller state                    | 10-feature state with LCR + early-Llama signals            |
+| Conceptual head pruning                       | GQA-safe structural head pruning                           |
+| Identity-forward layer skipping               | **Physical layer removal** with DynamicCache alignment     |
+| Linear PPL reward ($\alpha$=0.7, $\beta$=0.3) | **Log-PPL reward** ($\alpha$=0.9, $\beta$=0.1)             |
+| Limited logging                               | Per-episode metrics, plots, JSON artifacts, organized runs |
 
 ### Runtime overhead
 
-| Component | Average time |
-|-----------|-------------|
-| LCR inference | ~18 ms |
-| RL action selection | ~1 ms |
-| Total controller overhead | ~19 ms |
+| Component                 | Average time |
+| ------------------------- | ------------ |
+| LCR inference             | ~18 ms       |
+| RL action selection       | ~1 ms        |
+| Total controller overhead | ~19 ms       |
 
 Controller overhead is included in total pruned latency reporting, ensuring honest accounting.
 

@@ -10,7 +10,6 @@ env.bak/
 venv.bak/
 .venv
 pip-log.txt
-pip-delete-this-directory.txt
 .tox/
 .coverage
 .coverage.*
@@ -27,7 +26,6 @@ export/
 # Project specific
 hf_cache/
 .hf_cache/
-*.pdf
 nltk_data/
 spacy_data/
 .env

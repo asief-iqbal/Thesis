@@ -1,0 +1,18 @@
+Study 2A: No LCR (9-D)
+============================================================
+State dim:       9
+Action count:    17
+Random policy:   False
+Alpha:           0.9
+Beta:            0.1
+
+Episodes:        50
+Avg Reward:      -0.0626  (std=0.5040)
+Avg PPL:         611.23
+Avg Speedup:     9.51%
+Baseline PPL:    2.48
+
+Converged (last 20 episodes):
+  Reward:        -0.1006
+  PPL:           483.01
+  Speedup:       2.04%

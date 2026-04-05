@@ -237,11 +237,11 @@ This state design is central to the methodology. The controller observes hardwar
 
 Every intensity maps to a **mechanically distinct** outcome for Llama-3.2-1B (16 layers, 8 KV heads), eliminating duplicate actions that would waste exploratory capacity and confuse the RL policy.
 
-| Actions                           | Intensities                                              | Physical effect           |
-| --------------------------------- | -------------------------------------------------------- | ------------------------- |
-| `none`                            | —                                                        | No pruning                |
-| `transformer_layers` (10 actions) | 6%, 12%, 19%, 25%, 31%, 38%, 44%, 50%, 56%, 62%          | Remove 1–10 of 16 layers  |
-| `attention_heads` (6 actions)     | 12.5%, 25%, 37.5%, 50%, 62.5%, 75%                       | Remove 1–6 of 8 KV groups |
+| Actions                           | Intensities                                     | Physical effect           |
+| --------------------------------- | ----------------------------------------------- | ------------------------- |
+| `none`                            | —                                               | No pruning                |
+| `transformer_layers` (10 actions) | 6%, 12%, 19%, 25%, 31%, 38%, 44%, 50%, 56%, 62% | Remove 1–10 of 16 layers  |
+| `attention_heads` (6 actions)     | 12.5%, 25%, 37.5%, 50%, 62.5%, 75%              | Remove 1–6 of 8 KV groups |
 
 The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). The head-pruning granularity covers the full safe range from removing 1 KV group (12.5%) to 6 KV groups (75%, keeping 2/8 minimum). FFN slicing was evaluated during development but consistently produced negative rewards due to high structural overhead and poor quality-speed tradeoffs, so it was removed from the system entirely.
 
@@ -268,17 +268,17 @@ flowchart TD
 
 **Training hyperparameters:**
 
-| Parameter                | Value                                                  |
-| ------------------------ | ------------------------------------------------------ |
-| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 17$    |
-| Replay buffer            | 10,000 transitions                                     |
-| Batch size               | 32                                                     |
-| Optimizer                | AdamW                                                  |
-| Learning rate            | $1 \times 10^{-4}$                                     |
-| Discount factor $\gamma$ | 0.95                                                   |
-| Target network update    | Every 200 steps                                        |
-| Epsilon schedule         | Decays toward 0.20 during training; 0 during evaluation|
-| Exploration bonus        | UCB1: $c \sqrt{\ln N / N_a}$ with $c = 1.0$            |
+| Parameter                | Value                                                                                          |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 17$                                            |
+| Replay buffer            | 10,000 transitions                                                                             |
+| Batch size               | 32                                                                                             |
+| Optimizer                | AdamW                                                                                          |
+| Learning rate            | $1 \times 10^{-4}$                                                                             |
+| Discount factor $\gamma$ | 0.95                                                                                           |
+| Target network update    | Every 200 steps                                                                                |
+| Epsilon schedule         | Dynamic: decays from 1.0 to 0.10 over the actual training-episode horizon; 0 during evaluation |
+| Exploration bonus        | UCB1: $c \sqrt{\ln N / N_a}$ with $c = 1.0$                                                    |
 
 ### Dynamic Pruning Engine
 
@@ -291,7 +291,7 @@ Layer skipping is implemented by **physically removing layers from the model's `
 Previous implementations used identity-forward monkey-patching, which caused DynamicCache misalignment: skipped layers did not call `cache.update()`, so subsequent layers read incorrect KV-cache entries. This bug caused pruned inference to be **slower** than the baseline. Physical removal eliminates this issue entirely.
 
 - The first and last layers are always protected from skipping.
-- Layers are selected for removal by importance score from calibration.
+- Layers are selected for removal by weight-magnitude importance ranking.
 - After removal, all remaining layers receive reassigned `layer_idx` values (0, 1, 2, ...).
 - The model's `config.num_hidden_layers` is updated to match.
 - On restore, original layers are reinserted and original `layer_idx` values are recovered.
@@ -351,10 +351,14 @@ The framework automatically produces per-run plots:
 - Inference time comparison
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
-- Controller overhead breakdown
+- Controller overhead breakdown (stacked bar)
+- VRAM usage per episode (available vs used during pruning + inference)
 - Reward progression
 - Quality-vs-speed tradeoff scatter
 - Action usage distribution
+- Epsilon decay and cumulative reward
+
+All charts are adaptive — figure sizes, marker sizes, tick intervals, and label density scale automatically with episode count so plots remain readable from 10 to 1 000+ episodes. The time-breakdown chart uses round-interval x-axis labels (100, 200, ...) instead of per-episode numbers.
 
 Reports are stored under numbered folders in `Training Report/` and `Test Report/`.
 
@@ -571,27 +575,27 @@ python Adaptive_pruning.py --mode test --wikitext2 --force-action attention_head
 
 Main entrypoint: `Adaptive_pruning.py`
 
-| Argument           | Default                    | Description                                |
-| ------------------ | -------------------------- | ------------------------------------------ |
-| `--mode`           | `test`                     | `train`, `test`, or `report`               |
-| `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy           |
-| `--episodes`       | `50`                       | Number of train or test episodes           |
-| `--max-new-tokens` | `50`                       | Maximum generated continuation length      |
-| `--train-dataset`  | `Prompt Dataset Train.csv` | Training CSV path                          |
-| `--test-dataset`   | `Prompt Dataset Test.csv`  | Test CSV path                              |
-| `--train-samples`  | `5000`                     | Number of training prompts                 |
-| `--test-samples`   | `100`                      | Number of test prompts in auto-test flows  |
-| `--split-ratio`    | `0.8`                      | Train/test split ratio for auto-split mode |
-| `--device`         | `auto`                     | `cpu`, `gpu`, or `auto`                    |
-| `--wikitext2`      | `False`                    | WikiText-2 comparative evaluation          |
-| `--boolq`          | `False`                    | BoolQ zero-shot evaluation                 |
-| `--hellaswag`      | `False`                    | HellaSwag zero-shot evaluation             |
-| `--mmlu`           | `False`                    | MMLU zero-shot evaluation                  |
-| `--eval-samples`   | `1000`                     | Samples for benchmark-specific evaluation  |
-| `--eval-seed`      | `42`                       | Random seed for evaluation sampling        |
-| `--force-action`   | `None`                     | Force `target:intensity` instead of RL     |
-| `--lm-eval`        | `False`                    | Run lm-eval-harness tasks                  |
-| `--eval-tasks`     | `boolq,hellaswag,mmlu`     | lm-eval task list                          |
+| Argument           | Default                    | Description                                                                      |
+| ------------------ | -------------------------- | -------------------------------------------------------------------------------- |
+| `--mode`           | `test`                     | `train`, `test`, or `report`                                                     |
+| `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                                 |
+| `--episodes`       | `50`                       | Number of train or test episodes; also sets the train-mode epsilon-decay horizon |
+| `--max-new-tokens` | `50`                       | Maximum generated continuation length                                            |
+| `--train-dataset`  | `Prompt Dataset Train.csv` | Training CSV path                                                                |
+| `--test-dataset`   | `Prompt Dataset Test.csv`  | Test CSV path                                                                    |
+| `--train-samples`  | `5000`                     | Number of training prompts                                                       |
+| `--test-samples`   | `100`                      | Number of test prompts in auto-test flows                                        |
+| `--split-ratio`    | `0.8`                      | Train/test split ratio for auto-split mode                                       |
+| `--device`         | `auto`                     | `cpu`, `gpu`, or `auto`                                                          |
+| `--wikitext2`      | `False`                    | WikiText-2 comparative evaluation                                                |
+| `--boolq`          | `False`                    | BoolQ zero-shot evaluation                                                       |
+| `--hellaswag`      | `False`                    | HellaSwag zero-shot evaluation                                                   |
+| `--mmlu`           | `False`                    | MMLU zero-shot evaluation                                                        |
+| `--eval-samples`   | `1000`                     | Samples for benchmark-specific evaluation                                        |
+| `--eval-seed`      | `42`                       | Random seed for evaluation sampling                                              |
+| `--force-action`   | `None`                     | Force `target:intensity` instead of RL                                           |
+| `--lm-eval`        | `False`                    | Run lm-eval-harness tasks                                                        |
+| `--eval-tasks`     | `boolq,hellaswag,mmlu`     | lm-eval task list                                                                |
 
 ---
 
@@ -599,20 +603,20 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Core scripts
 
-| Path                           | Role                                                                   |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `Adaptive_pruning.py`          | RL training, testing, reporting, benchmark evaluation                  |
-| `model_loader.py`              | Llama loading, pruning application/restoration, importance calibration |
-| `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)        |
-| `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                            |
-| `train_minibert_lcr.py`        | LCR training script                                                    |
-| `run_minibert_lcr_pipeline.py` | One-click oracle labeling + MiniBERT LCR training pipeline             |
-| `run_ablation_studies.py`      | Automated ablation studies runner (reward sweep, framework ablations)  |
-| `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                   |
-| `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                         |
-| `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns             |
-| `nlp_analyzer.py`              | NLP analysis utilities                                                 |
-| `dashboard_gen.py`             | Automated dashboard and report generation                              |
+| Path                           | Role                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `Adaptive_pruning.py`          | RL training, testing, reporting, benchmark evaluation                               |
+| `model_loader.py`              | Llama loading, pruning application/restoration, weight-magnitude importance ranking |
+| `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)                     |
+| `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                                         |
+| `train_minibert_lcr.py`        | LCR training script                                                                 |
+| `run_minibert_lcr_pipeline.py` | One-click oracle labeling + MiniBERT LCR training pipeline                          |
+| `run_ablation_studies.py`      | Automated ablation studies runner (reward sweep, framework ablations)               |
+| `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                                |
+| `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                                      |
+| `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns                          |
+| `nlp_analyzer.py`              | NLP analysis utilities                                                              |
+| `dashboard_gen.py`             | Automated dashboard and report generation                                           |
 
 ### Pruning primitives (`pruners/`)
 
@@ -640,13 +644,13 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Reports
 
-| Directory                           | Content                                              |
-| ----------------------------------- | ---------------------------------------------------- |
-| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)        |
-| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)    |
-| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)   |
-| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)   |
-| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations)|
+| Directory                           | Content                                                    |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)         |
+| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)     |
+| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)    |
+| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)    |
+| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations) |
 
 ---
 

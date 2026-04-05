@@ -1,0 +1,18 @@
+Control: Full Architecture
+============================================================
+State dim:       10
+Action count:    17
+Random policy:   False
+Alpha:           0.9
+Beta:            0.1
+
+Episodes:        50
+Avg Reward:      0.0144  (std=0.3821)
+Avg PPL:         273.66
+Avg Speedup:     15.08%
+Baseline PPL:    2.48
+
+Converged (last 20 episodes):
+  Reward:        0.0869
+  PPL:           11.76
+  Speedup:       17.61%

@@ -1,0 +1,18 @@
+Study 2B: No Hardware (4-D)
+============================================================
+State dim:       4
+Action count:    17
+Random policy:   False
+Alpha:           0.9
+Beta:            0.1
+
+Episodes:        50
+Avg Reward:      -0.0112  (std=0.4218)
+Avg PPL:         270.95
+Avg Speedup:     12.68%
+Baseline PPL:    2.48
+
+Converged (last 20 episodes):
+  Reward:        -0.0772
+  PPL:           638.86
+  Speedup:       7.45%

@@ -63,6 +63,7 @@ from Adaptive_pruning import (
     PruningAction,
     DQN,
     EnhancedDeviceMonitor,
+    compute_epsilon_decay,
     load_training_prompts,
 )
 
@@ -155,8 +156,12 @@ class AblationAgent:
 
         # Exploration
         self.epsilon = 1.0
-        self.epsilon_min = 0.20
-        self.epsilon_decay = math.exp(math.log(self.epsilon_min) / max(n_episodes, 1))
+        self.epsilon_min = 0.10
+        self.epsilon_decay = compute_epsilon_decay(
+            n_episodes,
+            epsilon_start=self.epsilon,
+            epsilon_end=self.epsilon_min,
+        )
         self.gamma = 0.95
 
         # UCB bonus

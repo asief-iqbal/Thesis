@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from collections import deque
 import matplotlib.pyplot as plt
 import argparse
+import math
 import os
 import re
 import itertools
@@ -68,6 +69,27 @@ random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
+
+DEFAULT_EPSILON_START = 1.0
+DEFAULT_EPSILON_END = 0.10
+
+
+def compute_epsilon_decay(
+    total_episodes: int,
+    epsilon_start: float = DEFAULT_EPSILON_START,
+    epsilon_end: float = DEFAULT_EPSILON_END,
+) -> float:
+    """Return a multiplicative decay that reaches epsilon_end at the horizon."""
+    horizon = max(int(total_episodes), 1)
+    epsilon_start = float(epsilon_start)
+    epsilon_end = float(epsilon_end)
+
+    if epsilon_start <= 0.0 or epsilon_end <= 0.0:
+        raise ValueError("Epsilon schedule requires positive start/end values.")
+    if epsilon_end >= epsilon_start:
+        return 1.0
+
+    return math.exp(math.log(epsilon_end / epsilon_start) / horizon)
 
 # =========================================================================
 # DEVICE MONITORING AND STATE REPRESENTATION
@@ -234,8 +256,11 @@ class RLControllerAgent:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=1e-4)
         self.loss_fn = nn.MSELoss()
         
-        # Full exploration by default; higher epsilon_min to prevent premature convergence
-        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 0.999, 0.20, 0.95
+        # Exploration is configured per run using the actual episode horizon.
+        self.epsilon = DEFAULT_EPSILON_START
+        self.epsilon_decay = 1.0
+        self.epsilon_min = DEFAULT_EPSILON_END
+        self.gamma = 0.95
 
         # UCB exploration bonus: encourages under-visited actions
         self.action_counts = np.zeros(self.action_dim, dtype=np.float64)
@@ -247,6 +272,19 @@ class RLControllerAgent:
         self.batch_size = 32
         self.target_update_interval = 200  # steps
         self.train_steps = 0
+
+    def configure_epsilon_schedule(self, total_episodes: int):
+        horizon = max(int(total_episodes), 1)
+        self.epsilon = DEFAULT_EPSILON_START
+        self.epsilon_decay = compute_epsilon_decay(
+            horizon,
+            epsilon_start=self.epsilon,
+            epsilon_end=self.epsilon_min,
+        )
+        print(
+            f"[System] Epsilon schedule configured: {self.epsilon:.3f} -> {self.epsilon_min:.3f} "
+            f"over {horizon} episodes (decay={self.epsilon_decay:.6f})"
+        )
 
     def save(self, path: str):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -530,6 +568,35 @@ class RealBenchmark:
 def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     """Generate comparative scatter plots (baseline vs pruned) and correlation plots."""
     import numpy as np
+    from matplotlib.ticker import MaxNLocator, MultipleLocator
+
+    n_episodes = len(metrics)
+
+    # --- Adaptive styling based on episode count ---
+    def _adaptive_params(n):
+        """Return (marker_size, alpha, marker_line, tick_step) tuned to episode count."""
+        if n <= 50:
+            return 30, 0.6, 4, None  # use default ticks
+        elif n <= 200:
+            return 18, 0.5, 2, 50
+        elif n <= 500:
+            return 10, 0.4, 0, 100
+        else:
+            return 5, 0.3, 0, max(100, round(n / 10, -2))
+
+    ms, alpha, mline, tick_step = _adaptive_params(n_episodes)
+
+    def _set_episode_xticks(ax, episode_list, step=None):
+        """Set x-axis ticks at round intervals (100, 200, ...) to avoid cramping."""
+        if step is None:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', integer=True))
+            return
+        step = int(step)
+        ticks = list(range(step, max(episode_list) + 1, step))
+        if episode_list and episode_list[0] not in ticks:
+            ticks = [episode_list[0]] + ticks
+        ax.set_xticks(ticks)
+
     def remove_outliers_xy(xs, ys):
         if not ys:
             return xs, ys
@@ -543,72 +610,84 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         return list(fx), list(fy)
 
     episodes = [m['episode'] for m in metrics]
+
     # 1) Token speed comparison
     base_tok_s = [m['baseline_tok_s'] for m in metrics]
     pruned_tok_s = [m['tok_s'] for m in metrics]
     e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
     e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
-    plt.figure(figsize=(10,6))
-    plt.scatter(e_b, base_tok_s, color='red', alpha=0.6, label='Baseline Tok/s')
-    plt.scatter(e_p, pruned_tok_s, color='blue', alpha=0.6, label='Pruned Tok/s')
+    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+    ax.scatter(e_b, base_tok_s, color='red', alpha=alpha, label='Baseline Tok/s', s=ms)
+    ax.scatter(e_p, pruned_tok_s, color='blue', alpha=alpha, label='Pruned Tok/s', s=ms)
     if len(e_b) > 1:
         coeff = np.polyfit(e_b, base_tok_s, 1)
-        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
     if len(e_p) > 1:
         coeff = np.polyfit(e_p, pruned_tok_s, 1)
-        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    plt.title('Token Speed per Episode (Baseline vs Pruned)')
-    plt.xlabel('Episode'); plt.ylabel('Tokens/sec'); plt.grid(True); plt.legend(); plt.tight_layout()
-    plt.savefig('token_speed_compare.png'); plt.close(); print('[Report] Saved token_speed_compare.png')
+        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    ax.set_title('Token Speed per Episode (Baseline vs Pruned)')
+    ax.set_xlabel('Episode'); ax.set_ylabel('Tokens/sec'); ax.grid(True, alpha=0.3); ax.legend()
+    _set_episode_xticks(ax, e_p or e_b, tick_step)
+    fig.tight_layout()
+    fig.savefig('token_speed_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+    print('[Report] Saved token_speed_compare.png')
 
     # 2) Inference time comparison
     base_time = [m['baseline_time_ms'] for m in metrics]
     pruned_time = [m['time_ms'] for m in metrics]
     e_b, base_time = remove_outliers_xy(episodes, base_time)
     e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
-    plt.figure(figsize=(10,6))
-    plt.scatter(e_b, base_time, color='red', alpha=0.6, label='Baseline Time (ms)')
-    plt.scatter(e_p, pruned_time, color='blue', alpha=0.6, label='Pruned Time (ms)')
+    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+    ax.scatter(e_b, base_time, color='red', alpha=alpha, label='Baseline Time (ms)', s=ms)
+    ax.scatter(e_p, pruned_time, color='blue', alpha=alpha, label='Pruned Time (ms)', s=ms)
     if len(e_b) > 1:
         coeff = np.polyfit(e_b, base_time, 1)
-        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
     if len(e_p) > 1:
         coeff = np.polyfit(e_p, pruned_time, 1)
-        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    plt.title('Inference Time per Episode (Baseline vs Pruned)')
-    plt.xlabel('Episode'); plt.ylabel('Time (ms)'); plt.grid(True); plt.legend(); plt.tight_layout()
-    plt.savefig('inference_time_compare.png'); plt.close(); print('[Report] Saved inference_time_compare.png')
+        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    ax.set_title('Inference Time per Episode (Baseline vs Pruned)')
+    ax.set_xlabel('Episode'); ax.set_ylabel('Time (ms)'); ax.grid(True, alpha=0.3); ax.legend()
+    _set_episode_xticks(ax, e_p or e_b, tick_step)
+    fig.tight_layout()
+    fig.savefig('inference_time_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+    print('[Report] Saved inference_time_compare.png')
 
     # 3) Perplexity comparison
     base_ppl = [m['baseline_ppl'] for m in metrics]
     pruned_ppl = [m['ppl'] for m in metrics]
     e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
     e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
-    plt.figure(figsize=(10,6))
-    plt.scatter(e_b, base_ppl, color='red', alpha=0.6, label='Baseline PPL')
-    plt.scatter(e_p, pruned_ppl, color='blue', alpha=0.6, label='Pruned PPL')
+    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+    ax.scatter(e_b, base_ppl, color='red', alpha=alpha, label='Baseline PPL', s=ms)
+    ax.scatter(e_p, pruned_ppl, color='blue', alpha=alpha, label='Pruned PPL', s=ms)
     if len(e_b) > 1:
         coeff = np.polyfit(e_b, base_ppl, 1)
-        plt.plot(e_b, np.polyval(coeff, e_b), color='red')
+        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
     if len(e_p) > 1:
         coeff = np.polyfit(e_p, pruned_ppl, 1)
-        plt.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    plt.title('Perplexity per Episode (Baseline vs Pruned)')
-    plt.xlabel('Episode'); plt.ylabel('Perplexity'); plt.grid(True); plt.legend(); plt.tight_layout()
-    plt.savefig('perplexity_compare.png'); plt.close(); print('[Report] Saved perplexity_compare.png')
+        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+    ax.set_title('Perplexity per Episode (Baseline vs Pruned)')
+    ax.set_xlabel('Episode'); ax.set_ylabel('Perplexity'); ax.grid(True, alpha=0.3); ax.legend()
+    _set_episode_xticks(ax, e_p or e_b, tick_step)
+    fig.tight_layout()
+    fig.savefig('perplexity_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+    print('[Report] Saved perplexity_compare.png')
 
     # 4) Token length vs prompt perplexity correlation
     token_lens = [m['token_len'] for m in metrics]
     prompt_ppls = [m['prompt_ppl'] for m in metrics]
     x, y = remove_outliers_xy(token_lens, prompt_ppls)
-    plt.figure(figsize=(10,6))
-    plt.scatter(x, y, color='purple', alpha=0.6, label='TokenLen vs Prompt PPL')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(x, y, color='purple', alpha=alpha, label='TokenLen vs Prompt PPL', s=ms)
     if len(x) > 1:
         coeff = np.polyfit(x, y, 1)
-        plt.plot(x, np.polyval(coeff, x), color='purple')
-    plt.title('Correlation: Token Length vs Prompt Perplexity')
-    plt.xlabel('Token Length'); plt.ylabel('Prompt PPL'); plt.grid(True); plt.legend(); plt.tight_layout()
-    plt.savefig('length_vs_ppl.png'); plt.close(); print('[Report] Saved length_vs_ppl.png')
+        ax.plot(x, np.polyval(coeff, x), color='purple')
+    ax.set_title('Correlation: Token Length vs Prompt Perplexity')
+    ax.set_xlabel('Token Length'); ax.set_ylabel('Prompt PPL'); ax.grid(True, alpha=0.3); ax.legend()
+    fig.tight_layout()
+    fig.savefig('length_vs_ppl.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+    print('[Report] Saved length_vs_ppl.png')
 
     # 5) Time breakdown: LCR + RL Agent + Model Time per Episode (Stacked Bar Chart)
     lcr_times = [m.get('lcr_inference_time_ms', 0) for m in metrics]
@@ -616,7 +695,7 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     model_times = [m.get('model_time_ms', 0) for m in metrics]
     total_times = [m['time_ms'] for m in metrics]
     episodes = [m['episode'] for m in metrics]
-    
+
     # Remove outliers for consistency
     def remove_outliers_times(data_list):
         import numpy as np
@@ -626,7 +705,7 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         iqr = q3 - q1
         lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
         return [d for d in data_list if lb <= d <= ub]
-    
+
     # Since times are related, filter based on total time outliers
     filtered_indices = [i for i, t in enumerate(total_times) if t in remove_outliers_times(total_times)]
     episodes_filtered = [episodes[i] for i in filtered_indices]
@@ -634,54 +713,66 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     rl_times_filtered = [rl_times[i] for i in filtered_indices]
     model_times_filtered = [model_times[i] for i in filtered_indices]
     total_times_filtered = [total_times[i] for i in filtered_indices]
-    
-    plt.figure(figsize=(14, 8))
-    x = np.arange(len(episodes_filtered))
+
+    n_bars = len(episodes_filtered)
+    fig_w = max(14, min(24, n_bars * 0.04))
+    fig, ax = plt.subplots(figsize=(fig_w, 8))
+    x_pos = np.arange(n_bars)
+    bar_w = max(0.3, min(1.0, 800 / max(n_bars, 1)))
     bottom_lcr = np.array(lcr_times_filtered)
     bottom_rl = bottom_lcr + np.array(rl_times_filtered)
-    plt.bar(x, lcr_times_filtered, color='green', label='LCR Inference (ms)', alpha=0.8)
-    plt.bar(x, rl_times_filtered, bottom=bottom_lcr, color='orange', label='RL Agent Time (ms)', alpha=0.8)
-    plt.bar(x, model_times_filtered, bottom=bottom_rl, color='blue', label='Model Inference (ms)', alpha=0.8)
-    plt.plot(x, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=4, label='Total Pruned Time (ms)')
-    # Also show baseline (unpruned model inference only) as a dashed line
+    ax.bar(x_pos, lcr_times_filtered, width=bar_w, color='green', label='LCR Inference (ms)', alpha=0.8)
+    ax.bar(x_pos, rl_times_filtered, width=bar_w, bottom=bottom_lcr, color='orange', label='RL Agent Time (ms)', alpha=0.8)
+    ax.bar(x_pos, model_times_filtered, width=bar_w, bottom=bottom_rl, color='blue', label='Model Inference (ms)', alpha=0.8)
+    line_ms_size = max(1, 4 - n_bars // 200)
+    ax.plot(x_pos, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=line_ms_size, label='Total Pruned Time (ms)')
     baseline_times = [m.get('baseline_time_ms', 0) for m in metrics]
     baseline_filtered = [baseline_times[i] for i in filtered_indices]
-    plt.plot(x, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
-    plt.title('Inference Time Breakdown per Episode', fontsize=16, fontweight='bold')
-    plt.xlabel('Episode', fontsize=12)
-    plt.ylabel('Time (ms)', fontsize=12)
-    plt.xticks(x, episodes_filtered, rotation=45, ha='right', fontsize=10)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig('time_breakdown.png', dpi=300, bbox_inches='tight')
-    plt.close()
+    ax.plot(x_pos, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
+    ax.set_title('Inference Time Breakdown per Episode', fontsize=16, fontweight='bold')
+    ax.set_xlabel('Episode', fontsize=12)
+    ax.set_ylabel('Time (ms)', fontsize=12)
+    # X-axis: show round-number episode labels (100, 200, ...) instead of every episode
+    if tick_step and n_bars > 50:
+        tick_positions = list(range(tick_step - 1, n_bars, tick_step))
+        tick_labels = [str(episodes_filtered[p]) for p in tick_positions if p < n_bars]
+        tick_positions = [p for p in tick_positions if p < n_bars]
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, fontsize=10)
+    else:
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(episodes_filtered, fontsize=max(6, 10 - n_bars // 30))
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig('time_breakdown.png', dpi=300, bbox_inches='tight')
+    plt.close(fig)
     print("[Report] Time breakdown plot saved to time_breakdown.png")
 
     # 6) Reward progression with moving average
     rewards = [m.get('reward', 0) for m in metrics]
     if rewards and any(r != 0 for r in rewards):
         episodes_r = [m['episode'] for m in metrics]
-        plt.figure(figsize=(10, 6))
-        plt.scatter(episodes_r, rewards, alpha=0.5, color='teal', label='Reward', s=30)
-        # Moving average (window=5)
-        window = min(5, len(rewards))
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.scatter(episodes_r, rewards, alpha=alpha, color='teal', label='Reward', s=ms)
+        window = min(max(5, n_episodes // 20), len(rewards))
         if len(rewards) >= window:
             ma = np.convolve(rewards, np.ones(window)/window, mode='valid')
             ma_x = episodes_r[window-1:]
-            plt.plot(ma_x, ma, color='red', linewidth=2, label=f'Moving Avg (w={window})')
+            ax.plot(ma_x, ma, color='red', linewidth=2, label=f'Moving Avg (w={window})')
         if len(episodes_r) > 1:
             coeff = np.polyfit(episodes_r, rewards, 1)
-            plt.plot(episodes_r, np.polyval(coeff, episodes_r), color='purple', linestyle='--', label='Trendline')
-        plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        plt.title('Reward Progression per Episode', fontsize=16, fontweight='bold')
-        plt.xlabel('Episode', fontsize=12)
-        plt.ylabel('Reward', fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig('reward_progression.png', dpi=300, bbox_inches='tight')
-        plt.close()
+            ax.plot(episodes_r, np.polyval(coeff, episodes_r), color='purple', linestyle='--', label='Trendline')
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        ax.set_title('Reward Progression per Episode', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Episode', fontsize=12)
+        ax.set_ylabel('Reward', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        _set_episode_xticks(ax, episodes_r, tick_step)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig('reward_progression.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
         print("[Report] Reward progression plot saved to reward_progression.png")
 
     # 7) Quality vs Speed tradeoff (Pareto scatter)
@@ -698,7 +789,6 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
             ppl_ratios.append((pruned_ppl_val - base_ppl_val) / base_ppl_val * 100)
             action_labels_scatter.append(m.get('target', 'none'))
     if speed_gains:
-        # Remove extreme outliers using IQR for cleaner visualization
         sg_arr, pr_arr = np.array(speed_gains), np.array(ppl_ratios)
         sg_q1, sg_q3 = np.percentile(sg_arr, 10), np.percentile(sg_arr, 90)
         pr_q1, pr_q3 = np.percentile(pr_arr, 10), np.percentile(pr_arr, 90)
@@ -713,22 +803,22 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         if n_outliers > 0:
             print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
 
-        plt.figure(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(10, 6))
         colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
         for label in set(al_f):
             idx = [j for j, a in enumerate(al_f) if a == label]
-            plt.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
-                       alpha=0.6, label=label, color=colors_map.get(label, 'purple'), s=40)
-        plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        plt.title('Quality vs Speed Tradeoff', fontsize=16, fontweight='bold')
-        plt.xlabel('Speed Change (%)', fontsize=12)
-        plt.ylabel('PPL Change (%)', fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig('quality_vs_speed.png', dpi=300, bbox_inches='tight')
-        plt.close()
+            ax.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
+                       alpha=alpha, label=label, color=colors_map.get(label, 'purple'), s=ms)
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        ax.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        ax.set_title('Quality vs Speed Tradeoff', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Speed Change (%)', fontsize=12)
+        ax.set_ylabel('PPL Change (%)', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig('quality_vs_speed.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
         print("[Report] Quality vs speed plot saved to quality_vs_speed.png")
 
     # 8) Epsilon decay (if tracked)
@@ -736,31 +826,57 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     if epsilons and any(e is not None for e in epsilons):
         eps_vals = [e for e in epsilons if e is not None]
         eps_episodes = [m['episode'] for m, e in zip(metrics, epsilons) if e is not None]
-        plt.figure(figsize=(10, 6))
-        plt.plot(eps_episodes, eps_vals, color='darkorange', linewidth=2)
-        plt.title('Epsilon Decay During Training', fontsize=16, fontweight='bold')
-        plt.xlabel('Episode', fontsize=12)
-        plt.ylabel('Epsilon', fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
-        plt.close()
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.plot(eps_episodes, eps_vals, color='darkorange', linewidth=2)
+        ax.set_title('Epsilon Decay During Training', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Episode', fontsize=12)
+        ax.set_ylabel('Epsilon', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        _set_episode_xticks(ax, eps_episodes, tick_step)
+        fig.tight_layout()
+        fig.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
         print("[Report] Epsilon decay plot saved to epsilon_decay.png")
 
     # 9) Cumulative reward over episodes
     if rewards and any(r != 0 for r in rewards):
         cumulative = np.cumsum(rewards)
-        plt.figure(figsize=(10, 6))
-        plt.plot(episodes_r, cumulative, color='darkgreen', linewidth=2)
-        plt.fill_between(episodes_r, cumulative, alpha=0.2, color='green')
-        plt.title('Cumulative Reward Over Episodes', fontsize=16, fontweight='bold')
-        plt.xlabel('Episode', fontsize=12)
-        plt.ylabel('Cumulative Reward', fontsize=12)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig('cumulative_reward.png', dpi=300, bbox_inches='tight')
-        plt.close()
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.plot(episodes_r, cumulative, color='darkgreen', linewidth=2)
+        ax.fill_between(episodes_r, cumulative, alpha=0.2, color='green')
+        ax.set_title('Cumulative Reward Over Episodes', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Episode', fontsize=12)
+        ax.set_ylabel('Cumulative Reward', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        _set_episode_xticks(ax, episodes_r, tick_step)
+        fig.tight_layout()
+        fig.savefig('cumulative_reward.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
         print("[Report] Cumulative reward plot saved to cumulative_reward.png")
+
+    # 10) VRAM usage per episode: Available vs Used (for pruning + inference only)
+    vram_used = [m.get('vram_used_gb', 0) for m in metrics]
+    vram_total = [m.get('vram_total_gb', 0) for m in metrics]
+    if any(v > 0 for v in vram_total):
+        episodes_v = [m['episode'] for m in metrics]
+        vram_available = [t - u for t, u in zip(vram_total, vram_used)]
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.fill_between(episodes_v, vram_total, alpha=0.15, color='gray', label='Total VRAM (GB)')
+        ax.plot(episodes_v, vram_total, color='gray', linestyle='--', linewidth=1.5)
+        ax.fill_between(episodes_v, vram_used, alpha=0.4, color='red', label='VRAM Used (GB)')
+        ax.plot(episodes_v, vram_used, color='red', linewidth=2, markersize=line_ms_size if n_bars > 0 else 4)
+        ax.plot(episodes_v, vram_available, color='green', linewidth=2, label='VRAM Available (GB)')
+        ax.set_title('VRAM Usage per Episode (Pruning + Inference)', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Episode', fontsize=12)
+        ax.set_ylabel('VRAM (GB)', fontsize=12)
+        ax.set_ylim(bottom=0)
+        ax.grid(True, alpha=0.3)
+        _set_episode_xticks(ax, episodes_v, tick_step)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig('vram_usage.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print("[Report] VRAM usage plot saved to vram_usage.png")
 
 def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = 'training_report.txt', header: str = 'Training Report'):
     """Generate post-training report with averages by prune type/intensity and plots."""
@@ -933,6 +1049,10 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
         f.write(f"  Avg RL Agent: {avg_rl:.2f}ms\n")
         f.write(f"  Avg Model Inference (pruned): {avg_model:.2f}ms\n")
         f.write(f"  Avg Baseline Inference (unpruned): {avg_baseline:.2f}ms\n")
+        avg_vram_used = sum(m.get('vram_used_gb', 0) for m in metrics_list) / n
+        avg_vram_total = max(m.get('vram_total_gb', 0) for m in metrics_list) if any(m.get('vram_total_gb', 0) for m in metrics_list) else 0
+        if avg_vram_total > 0:
+            f.write(f"  Avg VRAM Used (pruning+inference): {avg_vram_used:.2f} GB / {avg_vram_total:.2f} GB ({avg_vram_used/avg_vram_total*100:.1f}%)\n")
         f.write(f"Overall Avg PPL (pruned, arithmetic): {total_ppl/n:.2f}\n")
         f.write(f"Overall PPL (pruned, token-weighted): {tw_ppl_pruned:.2f}\n")
         avg_baseline_ppl = sum(m.get('baseline_ppl', 0) for m in metrics_list) / n
@@ -986,6 +1106,7 @@ def organize_training_reports(is_report_mode: bool = False):
         'quality_vs_speed.png',
         'epsilon_decay.png',
         'cumulative_reward.png',
+        'vram_usage.png',
         'zero_shot_baseline_accuracy.png',
         'zero_shot_baseline_metrics.json',
         'training_report.txt'
@@ -1160,11 +1281,8 @@ def main(num_episodes: int = 50,
     prompt_pool = prompt_pool[:limit]
     num_episodes = limit
 
-    # Adaptive epsilon decay: reach epsilon_min by the last episode
-    import math as _math
-    rl_agent.epsilon_decay = _math.exp(_math.log(rl_agent.epsilon_min) / max(num_episodes, 1))
-    print(f"[System] Epsilon decay set to {rl_agent.epsilon_decay:.4f} for {num_episodes} episodes "
-          f"(will reach {rl_agent.epsilon_min} by end)")
+    # Adaptive epsilon decay: reach epsilon_min by the last actual training episode.
+    rl_agent.configure_epsilon_schedule(num_episodes)
 
     # Calibrate importance scores for heads/FFN/layers using a small subset
     try:
@@ -1229,11 +1347,21 @@ def main(num_episodes: int = 50,
         pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len, state_tensor=state_tensor)
         rl_inference_time_ms = (time.time() - start_rl) * 1000
         model_engine.apply_pruning(pruning_action)
+        # Track VRAM usage specifically for pruning + inference
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         pruned_metrics = benchmark.benchmark_and_get_reward(
             model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
         )
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            vram_used_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            vram_total_gb = torch.cuda.get_device_properties(0).total_mem / (1024 ** 3)
+        else:
+            vram_used_gb = 0.0
+            vram_total_gb = 0.0
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
-        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
+        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM: {vram_used_gb:.2f}/{vram_total_gb:.2f} GB")
 
         # Reward: balanced speed/quality with log-PPL to prevent catastrophic penalty
         alpha, beta = 0.9, 0.1
@@ -1272,7 +1400,9 @@ def main(num_episodes: int = 50,
             'target': pruning_action.target,
             'intensity': pruning_action.intensity,
             'reward': relative_reward,
-            'epsilon': rl_agent.epsilon
+            'epsilon': rl_agent.epsilon,
+            'vram_used_gb': vram_used_gb,
+            'vram_total_gb': vram_total_gb
         })
         
         model_engine.restore_model()
@@ -1385,6 +1515,7 @@ def organize_test_reports(is_report_mode: bool = False):
         'quality_vs_speed.png',
         'epsilon_decay.png',
         'cumulative_reward.png',
+        'vram_usage.png',
         'test_report.txt'
     ]
     if not is_report_mode:
@@ -1487,9 +1618,19 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             rl_inference_time_ms = (time.time() - start_rl) * 1000
         
         model_engine.apply_pruning(action)
+        # Track VRAM usage specifically for pruning + inference
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            vram_used_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            vram_total_gb = torch.cuda.get_device_properties(0).total_mem / (1024 ** 3)
+        else:
+            vram_used_gb = 0.0
+            vram_total_gb = 0.0
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + metrics['time_ms']
-        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f}")
+        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | VRAM: {vram_used_gb:.2f}/{vram_total_gb:.2f} GB")
         
         model_engine.restore_model()
         
@@ -1510,6 +1651,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'action_index': action.action_index,
             'target': action.target,
             'intensity': action.intensity,
+            'vram_used_gb': vram_used_gb,
+            'vram_total_gb': vram_total_gb,
         })
     
     # Generate test reports

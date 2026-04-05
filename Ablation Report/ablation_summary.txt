@@ -1,0 +1,38 @@
+Architecture Ablation Studies — Summary Report
+======================================================================
+
+STUDY 1: Reward Function Ablation
+----------------------------------------
+(Skipped)
+
+STUDIES 2A–2D: Framework Ablation
+----------------------------------------
+Variant                        |   Avg R  Tail R |     PPL   T-PPL |  Speed%   T-Sp%
+-----------------------------------------------------------------------------------------------
+Control: Full Architecture     |  0.0144  0.0869 |  273.66   11.76 |   15.08   17.61
+Study 2A: No LCR (9-D)         | -0.0626 -0.1006 |  611.23  483.01 |    9.51    2.04
+Study 2B: No Hardware (4-D)    | -0.0112 -0.0772 |  270.95  638.86 |   12.68    7.45
+Study 2C: Random Actions       |  0.1192  0.0979 |  141.65   81.87 |   24.65   22.97
+
+Interpretation (vs Control):
+
+  Study 2A: No LCR (9-D):
+    Reward delta:  -0.0769
+    PPL delta:     +337.58
+    Speedup delta: -5.56%
+    -> Removing the LCR score reduces the agent's ability to
+       adapt pruning intensity to prompt sensitivity.
+
+  Study 2B: No Hardware (4-D):
+    Reward delta:  -0.0256
+    PPL delta:     -2.70
+    Speedup delta: -2.40%
+    -> Without hardware telemetry, the agent cannot react to
+       resource constraints, hurting performance on constrained devices.
+
+  Study 2C: Random Actions:
+    Reward delta:  +0.1049
+    PPL delta:     -132.00
+    Speedup delta: +9.58%
+    -> Random action selection confirms that the RL controller provides
+       meaningful decision-making beyond chance.

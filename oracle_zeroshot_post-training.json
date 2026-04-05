@@ -1,0 +1,27 @@
+{
+  "phase": "Post-Training",
+  "split": "test",
+  "dataset": "Oracle_dataset.csv",
+  "results": {
+    "boolq_dense": {
+      "accuracy": 0.62,
+      "correct": 248,
+      "n": 400
+    },
+    "mmlu_dense": {
+      "accuracy": 0.3425,
+      "correct": 137,
+      "n": 400
+    },
+    "boolq_pruned": {
+      "accuracy": 0.45,
+      "correct": 180,
+      "n": 400
+    },
+    "mmlu_pruned": {
+      "accuracy": 0.255,
+      "correct": 102,
+      "n": 400
+    }
+  }
+}

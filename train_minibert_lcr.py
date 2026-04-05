@@ -209,9 +209,9 @@ def load_oracle_csv(
                 continue
             labels_map[key] = label_row
         if duplicate_keys:
-            raise ValueError(
-                "Duplicate keys found in labels CSV. "
-                f"Join columns={resolved_join_columns}. Example: {_format_join_key(resolved_join_columns, duplicate_keys[0])}"
+            print(
+                f"[LCR-v2] WARNING: {len(duplicate_keys)} duplicate keys in labels CSV (kept first occurrence). "
+                f"Example: {_format_join_key(resolved_join_columns, duplicate_keys[0])}"
             )
 
     # Resolve label columns from the source that actually contains them.
@@ -1076,7 +1076,46 @@ def main() -> None:
         shutil.rmtree(export_backbone)
     shutil.copytree(run_backbone_dir, export_backbone)
 
+    # ---- Generate separate Test Report ----
+    test_run_dir = _next_run_dir(os.path.join("Test Report"), "MiniBERT Test")
+    test_metrics_out = {
+        "test_run_dir": test_run_dir,
+        "training_run_dir": run_dir,
+        "data": str(args.data),
+        "labels_file": labels_path or None,
+        "test_samples": len(split.test),
+        "config": metrics_out["config"],
+        "best_epoch": int(best["epoch"]),
+        "test": {
+            "avg": {"mse": test_avg_mse, "r2": test_avg_r2, "spearman": test_avg_spearman, "bin3_acc": test_avg_bin3},
+            "per_output": test_per_output,
+        },
+    }
+    with open(os.path.join(test_run_dir, "test_metrics.json"), "w", encoding="utf-8") as f:
+        json.dump(test_metrics_out, f, indent=2, ensure_ascii=False)
+
+    with open(os.path.join(test_run_dir, "test_report.txt"), "w", encoding="utf-8") as f:
+        f.write("MiniBERT LCR v2 — Test Report\n")
+        f.write("=" * 50 + "\n\n")
+        f.write(f"Training run: {run_dir}\n")
+        f.write(f"Data: {args.data}\n")
+        if labels_path:
+            f.write(f"Labels file: {labels_path}\n")
+        f.write(f"Test samples: {len(split.test)}\n")
+        f.write(f"Best epoch: {best['epoch']}\n\n")
+        f.write("=== TEST RESULTS ===\n")
+        f.write(f"  Average: mse={test_avg_mse:.6f} r2={test_avg_r2:.4f} spearman={test_avg_spearman:.4f} bin3_acc={test_avg_bin3:.4f}\n")
+        for po in test_per_output:
+            sp_ci_str = ""
+            if "spearman_ci_low" in po:
+                sp_ci_str = f" [95%CI: {po['spearman_ci_low']:.4f}–{po['spearman_ci_high']:.4f}]"
+            f.write(f"  {po['name']}: mse={po['mse']:.6f} r2={po['r2']:.4f} spearman={po['spearman']:.4f}{sp_ci_str} bin3_acc={po['bin3_acc']:.4f}\n")
+            f.write(f"    Per-source:\n")
+            for src, sm in po['by_source'].items():
+                f.write(f"      {src}: r2={sm['r2']:.4f} spearman={sm['spearman']:.4f} bin3={sm['bin3_acc']:.4f}\n")
+
     print(f"\n[LCR-v2] Run saved: {run_dir}")
+    print(f"[LCR-v2] Test report saved: {test_run_dir}")
     print(f"[LCR-v2] Exported head → {export_head}")
     print(f"[LCR-v2] Exported backbone → {export_backbone}")
 

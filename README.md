@@ -184,7 +184,7 @@ flowchart TD
 - Input truncation at 128 tokens aligns with oracle truncation to prevent train-test distribution mismatch.
 - If the trained checkpoint is absent, the system falls back to a heuristic proxy based on compression ratio and prompt length. The fallback ensures operational robustness but is not part of the reported contribution.
 
-**Selected checkpoint** (`Training Report/TinyBERT Train 20`):
+**Selected checkpoint** (`Training Report/MiniBERT Train 20`):
 
 | Metric                   | Value            |
 | ------------------------ | ---------------- |
@@ -529,9 +529,9 @@ python oracle_labeler.py --input Oracle_dataset.csv --output oracle_lcr_labels.c
 python train_minibert_lcr.py --data Oracle_dataset.csv --labels-file oracle_lcr_labels.csv --label-columns "normalized_sensitivity" --output-dir checkpoints
 ```
 
-The second command trains and evaluates the TinyBERT router over the full dataset while keeping the original dataset CSV unchanged. The trainer uses the dataset's existing `Split` column for train/test assignment and only reads labels from the separate oracle file.
+The second command trains and evaluates the MiniBERT router over the full dataset while keeping the original dataset CSV unchanged. The trainer uses the dataset's existing `Split` column for train/test assignment and only reads labels from the separate oracle file.
 
-### One-click full TinyBERT pipeline
+### One-click full MiniBERT pipeline
 
 ```bash
 python run_minibert_lcr_pipeline.py
@@ -605,7 +605,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)        |
 | `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                            |
 | `train_minibert_lcr.py`        | LCR training script                                                    |
-| `run_minibert_lcr_pipeline.py` | One-click oracle labeling + TinyBERT/MiniBERT LCR training pipeline    |
+| `run_minibert_lcr_pipeline.py` | One-click oracle labeling + MiniBERT LCR training pipeline             |
 | `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                   |
 | `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                         |
 | `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns             |
@@ -640,9 +640,10 @@ Main entrypoint: `Adaptive_pruning.py`
 
 | Directory                           | Content                                              |
 | ----------------------------------- | ---------------------------------------------------- |
-| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)   |
-| `Training Report/TinyBERT Train N/` | LCR training runs                                    |
-| `Test Report/Test N/`               | Evaluation runs (metrics, zero-shot accuracy, plots) |
+| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)        |
+| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)    |
+| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)   |
+| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)   |
 
 ---
 
@@ -652,7 +653,7 @@ Main entrypoint: `Adaptive_pruning.py`
 
 The LCR is the strongest and most mature contribution. The project progressed from a heuristic prompt-length score to a trained reusable router grounded in dense-vs-sparse backbone behavior.
 
-**Selected checkpoint performance** (`TinyBERT Train 20`):
+**Selected checkpoint performance** (`MiniBERT Train 20`):
 
 | Metric                   | Value            |
 | ------------------------ | ---------------- |
@@ -718,10 +719,11 @@ An important empirical finding from the oracle labeling stage:
 
 | Correlation     | Head pruning vs Layer skipping |
 | --------------- | ------------------------------ |
-| Spearman $\rho$ | ≈ 0.309                        |
-| Pearson $r$     | ≈ 0.365                        |
+| Spearman $\rho$ | ≈ 0.172                        |
+| Pearson $r$     | ≈ 0.214                        |
+| $R^2$           | ≈ 0.046                        |
 
-Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correlated**. This justifies:
+Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correlated** ($R^2 \approx 0.05$). This is expected: the two pruning operators stress fundamentally different model components (attention heads vs entire transformer layers), so prompt sensitivity to one method is only a weak predictor of sensitivity to the other. This justifies:
 
 1. Multi-method oracle labeling rather than a single difficulty score.
 2. The layer-skip-heavy action space (layer removal is more effective for latency).

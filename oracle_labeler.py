@@ -241,7 +241,7 @@ def load_prompt_rows_from_csv(
 def _compute_cross_method_correlation(
     gaps: Dict[str, List[float]],
 ) -> Dict[str, float]:
-    """Compute pairwise Spearman and Pearson correlations between pruning methods."""
+    """Compute pairwise Spearman, Pearson, and R² correlations between pruning methods."""
     result: Dict[str, float] = {}
     keys = sorted(gaps.keys())
     if len(keys) < 2 or not _SCIPY:
@@ -262,7 +262,9 @@ def _compute_cross_method_correlation(
                 pass
             try:
                 pr = _pearsonr(g1[:n], g2[:n])
-                result[f"pearson_{k1}_vs_{k2}"] = float(pr[0]) if pr[0] == pr[0] else 0.0
+                r_val = float(pr[0]) if pr[0] == pr[0] else 0.0
+                result[f"pearson_{k1}_vs_{k2}"] = r_val
+                result[f"r2_{k1}_vs_{k2}"] = r_val ** 2
             except Exception:
                 pass
     return result

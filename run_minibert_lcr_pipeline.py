@@ -1,4 +1,4 @@
-"""One-click full-dataset pipeline for oracle labeling + MiniBERT/TinyBERT LCR training.
+"""One-click full-dataset pipeline for oracle labeling + MiniBERT LCR training.
 
 This keeps the raw dataset intact by writing oracle labels to a separate CSV,
 then trains and evaluates the LCR router using the dataset's existing Split column.
@@ -27,7 +27,7 @@ def _run(cmd: List[str], dry_run: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run oracle labeling and MiniBERT/TinyBERT LCR training in one command.",
+        description="Run oracle labeling and MiniBERT LCR training in one command.",
     )
     parser.add_argument("--input", default="Oracle_dataset.csv", help="Raw dataset CSV.")
     parser.add_argument("--text-column", default="Prompt", help="Prompt column name.")

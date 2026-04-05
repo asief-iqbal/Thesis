@@ -1,5 +1,5 @@
 {
-  "run_dir": "Training Report/TinyBERT Train 22",
+  "run_dir": "Training Report/MiniBERT Train 22",
   "data": "oracle_lcr_10k_dual.csv",
   "load": {
     "used_label_columns": [

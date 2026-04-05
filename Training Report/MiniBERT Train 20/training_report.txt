@@ -1,4 +1,4 @@
-TinyBERT LCR v2 — Multi-Output Training Report
+MiniBERT LCR v2 — Multi-Output Training Report
 ==================================================
 
 Data: oracle_lcr_10k_dual.csv
@@ -31,5 +31,5 @@ Best epoch: 17
       wikitext: r2=0.4203 spearman=0.6492 bin3=0.6275
 
 Artifacts:
-  head: Training Report/TinyBERT Train 20\tinybert_lcr_head.pt
-  backbone: Training Report/TinyBERT Train 20\tinybert_lcr_backbone
+  head: Training Report/MiniBERT Train 20\minibert_lcr_head.pt
+  backbone: Training Report/MiniBERT Train 20\minibert_lcr_backbone

@@ -1356,7 +1356,7 @@ def main(num_episodes: int = 50,
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             vram_used_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            vram_total_gb = torch.cuda.get_device_properties(0).total_mem / (1024 ** 3)
+            vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
         else:
             vram_used_gb = 0.0
             vram_total_gb = 0.0
@@ -1625,7 +1625,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             vram_used_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            vram_total_gb = torch.cuda.get_device_properties(0).total_mem / (1024 ** 3)
+            vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
         else:
             vram_used_gb = 0.0
             vram_total_gb = 0.0

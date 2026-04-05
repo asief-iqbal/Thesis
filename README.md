@@ -839,6 +839,10 @@ If Llama-3.2-1B fails to load, confirm `.env` contains a valid `HUGGINGFACE_HUB_
 
 If NVML is unavailable, GPU utilization falls back to `0.0`. The pipeline still runs but telemetry features are less informative for the controller.
 
+### VRAM chart issues on CUDA
+
+If training crashes while writing the per-episode VRAM chart, update to the latest version of `Adaptive_pruning.py`. The VRAM plot uses PyTorch CUDA device properties and expects the standard `total_memory` field when reading available GPU memory.
+
 ### Slow or unstable training
 
 - Reduce `--episodes` and `--max-new-tokens`

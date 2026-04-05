@@ -1,0 +1,18 @@
+MiniBERT LCR v2 — Test Report
+==================================================
+
+Training run: Training Report\MiniBERT Train 23
+Data: C:\Users\Admin\Desktop\Thesis code\Oracle_dataset.csv
+Labels file: C:\Users\Admin\Desktop\Thesis code\oracle_lcr_labels.csv
+Test samples: 2000
+Best epoch: 40
+
+=== TEST RESULTS ===
+  Average: mse=0.035565 r2=0.5013 spearman=0.7194 bin3_acc=0.6445
+  composite: mse=0.035565 r2=0.5013 spearman=0.7194 [95%CI: 0.6929–0.7451] bin3_acc=0.6445
+    Per-source:
+      gsm8k: r2=0.1758 spearman=0.5127 bin3=0.6175
+      wikitext: r2=0.2980 spearman=0.5967 bin3=0.5700
+      cais/mmlu:all: r2=0.4239 spearman=0.6607 bin3=0.5850
+      boolq: r2=0.6048 spearman=0.7932 bin3=0.6875
+      mbpp: r2=0.6774 spearman=0.8274 bin3=0.7625

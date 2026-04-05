@@ -1,0 +1,37 @@
+MiniBERT LCR v2 — Multi-Output Training Report
+==================================================
+
+Data: C:\Users\Admin\Desktop\Thesis code\Oracle_dataset.csv
+Labels file: C:\Users\Admin\Desktop\Thesis code\oracle_lcr_labels.csv
+Join columns: SourceDataset, SourceSplit, SourceId, Category, Subject, Split, Prompt
+Label columns: normalized_sensitivity
+Outputs: 1 (composite)
+Aux features: ON
+
+Train/Val/Test: 7200/800/2000
+By source:
+  - boolq: {'train': 1440, 'val': 160, 'test': 400, 'total': 2000}
+  - cais/mmlu:all: {'train': 1440, 'val': 160, 'test': 400, 'total': 2000}
+  - gsm8k: {'train': 1440, 'val': 160, 'test': 400, 'total': 2000}
+  - mbpp: {'train': 1440, 'val': 160, 'test': 400, 'total': 2000}
+  - wikitext: {'train': 1440, 'val': 160, 'test': 400, 'total': 2000}
+
+Best epoch: 40
+
+=== VALIDATION (best epoch) ===
+  Average: mse=0.034829 r2=0.5521 spearman=0.7473
+  composite: mse=0.034829 r2=0.5521 spearman=0.7473 bin3=0.6550
+
+=== TEST ===
+  Average: mse=0.035565 r2=0.5013 spearman=0.7194 bin3_acc=0.6445
+  composite: mse=0.035565 r2=0.5013 spearman=0.7194 [95%CI: 0.6929–0.7451] bin3_acc=0.6445
+    Per-source:
+      gsm8k: r2=0.1758 spearman=0.5127 bin3=0.6175
+      wikitext: r2=0.2980 spearman=0.5967 bin3=0.5700
+      cais/mmlu:all: r2=0.4239 spearman=0.6607 bin3=0.5850
+      boolq: r2=0.6048 spearman=0.7932 bin3=0.6875
+      mbpp: r2=0.6774 spearman=0.8274 bin3=0.7625
+
+Artifacts:
+  head: Training Report\MiniBERT Train 23\minibert_lcr_head.pt
+  backbone: Training Report\MiniBERT Train 23\minibert_lcr_backbone

@@ -372,8 +372,8 @@ class RealModelEngine:
             to_skip_safe = [idx for idx in to_skip if idx != 0 and idx != L-1]
             
             if to_skip_safe:
-                # IMPORTANT: do NOT permanently delete layers. It breaks restore_model()
-                # and causes subsequent "baseline" runs to actually be pruned.
+                # Physical layer removal (reversible via restore_model) with layer_idx
+                # reassignment for correct KV-cache alignment.
                 print(f"[Engine] Skipping {len(to_skip_safe)}/{L} layers (reversible): {to_skip_safe}")
                 self.layer_skipper.apply(to_skip_safe)
             

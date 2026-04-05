@@ -32,6 +32,8 @@ class StructuredHeadSlicer:
                 attn.o_proj = saved['o_proj']
                 if hasattr(attn, 'num_heads'):
                     attn.num_heads = saved['num_heads']
+                if 'num_key_value_heads' in saved and hasattr(attn, 'num_key_value_heads'):
+                    attn.num_key_value_heads = saved['num_key_value_heads']
             except Exception:
                 pass
         self._orig.clear()
@@ -46,6 +48,7 @@ class StructuredHeadSlicer:
             'v_proj': attn.v_proj,
             'o_proj': attn.o_proj,
             'num_heads': getattr(attn, 'num_heads', None),
+            'num_key_value_heads': getattr(attn, 'num_key_value_heads', None),
         }
 
     @staticmethod
@@ -134,4 +137,6 @@ class StructuredHeadSlicer:
             attn.o_proj = new_o
             if hasattr(attn, 'num_heads'):
                 attn.num_heads = len(keep_q)
+            if hasattr(attn, 'num_key_value_heads'):
+                attn.num_key_value_heads = len(keep_kv)
         self.active = True

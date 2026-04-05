@@ -24,14 +24,15 @@ import os
 import re
 import itertools
 import warnings
+import csv
 
 try:
-    from lcr_tinybert import TinyBertLcrConfig, TinyBertLcrScorer
-    _TINYBERT_LCR_AVAILABLE = True
+    from lcr_minibert import MiniBertLcrConfig, MiniBertLcrScorer
+    _MINIBERT_LCR_AVAILABLE = True
 except Exception:
-    TinyBertLcrConfig = None
-    TinyBertLcrScorer = None
-    _TINYBERT_LCR_AVAILABLE = False
+    MiniBertLcrConfig = None
+    MiniBertLcrScorer = None
+    _MINIBERT_LCR_AVAILABLE = False
 try:
     import pynvml as nvml
     _NVML_AVAILABLE = True
@@ -142,27 +143,28 @@ class PruningAction:
     action_index: int
 
 class ActionSpace:
-    """Defines all possible pruning actions: none, heads, layers at various intensities."""
+    """Defines all possible pruning actions: none, layers at various intensities, and a few head options."""
     def __init__(self):
-        # Head pruning (structural, GQA-safe) + layer skipping (functional, uncapped)
+        # Layer skipping (physical removal, real speedups) with fine granularity
+        # + a few structural head pruning options for completeness
         self.actions = [
             PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            # Attention heads (structural, GQA-safe): 5–50%
-            PruningAction(level=2, intensity=0.05, target="attention_heads", action_index=1),
-            PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=2),
-            PruningAction(level=2, intensity=0.15, target="attention_heads", action_index=3),
-            PruningAction(level=2, intensity=0.20, target="attention_heads", action_index=4),
-            PruningAction(level=2, intensity=0.25, target="attention_heads", action_index=5),
-            PruningAction(level=2, intensity=0.30, target="attention_heads", action_index=6),
-            PruningAction(level=2, intensity=0.50, target="attention_heads", action_index=7),
-            # Transformer layers (functional skipping): 5–50%
-            PruningAction(level=3, intensity=0.05, target="transformer_layers", action_index=8),
-            PruningAction(level=3, intensity=0.10, target="transformer_layers", action_index=9),
-            PruningAction(level=3, intensity=0.15, target="transformer_layers", action_index=10),
-            PruningAction(level=3, intensity=0.20, target="transformer_layers", action_index=11),
-            PruningAction(level=3, intensity=0.25, target="transformer_layers", action_index=12),
-            PruningAction(level=3, intensity=0.30, target="transformer_layers", action_index=13),
-            PruningAction(level=3, intensity=0.50, target="transformer_layers", action_index=14),
+            # Transformer layer skipping — fine-grained in the 6–30% sweet-spot
+            PruningAction(level=3, intensity=0.06, target="transformer_layers", action_index=1),
+            PruningAction(level=3, intensity=0.10, target="transformer_layers", action_index=2),
+            PruningAction(level=3, intensity=0.12, target="transformer_layers", action_index=3),
+            PruningAction(level=3, intensity=0.15, target="transformer_layers", action_index=4),
+            PruningAction(level=3, intensity=0.18, target="transformer_layers", action_index=5),
+            PruningAction(level=3, intensity=0.20, target="transformer_layers", action_index=6),
+            PruningAction(level=3, intensity=0.25, target="transformer_layers", action_index=7),
+            PruningAction(level=3, intensity=0.30, target="transformer_layers", action_index=8),
+            PruningAction(level=3, intensity=0.35, target="transformer_layers", action_index=9),
+            PruningAction(level=3, intensity=0.40, target="transformer_layers", action_index=10),
+            PruningAction(level=3, intensity=0.50, target="transformer_layers", action_index=11),
+            # Structural attention-head pruning (GQA-safe) — limited set
+            PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=12),
+            PruningAction(level=2, intensity=0.20, target="attention_heads", action_index=13),
+            PruningAction(level=2, intensity=0.30, target="attention_heads", action_index=14),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions.")
 
@@ -193,16 +195,16 @@ class RLControllerAgent:
         self.action_space = ActionSpace()
 
         self.lcr_scorer = None
-        if _TINYBERT_LCR_AVAILABLE:
+        if _MINIBERT_LCR_AVAILABLE:
             try:
-                backbone_dir = os.path.join("checkpoints", "tinybert_lcr_backbone")
+                backbone_dir = os.path.join("checkpoints", "minibert_lcr_backbone")
                 model_name = backbone_dir if os.path.isdir(backbone_dir) else "prajjwal1/bert-mini"
-                self.lcr_scorer = TinyBertLcrScorer(
-                    TinyBertLcrConfig(
+                self.lcr_scorer = MiniBertLcrScorer(
+                    MiniBertLcrConfig(
                         model_name=model_name,
                         max_length=128,
                         device="cpu",
-                        head_checkpoint_path=os.path.join("checkpoints", "tinybert_lcr_head.pt"),
+                        head_checkpoint_path=os.path.join("checkpoints", "minibert_lcr_head.pt"),
                     )
                 )
                 if not self.lcr_scorer.enabled:
@@ -421,7 +423,11 @@ class RealBenchmark:
         if self._warmed:
             return
         try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             _ = engine.generate_response("Hello", max_length=4)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
         except Exception:
             pass
         self._warmed = True
@@ -443,18 +449,24 @@ class RealBenchmark:
 
         # Handle potential NaN/inf values from empty or problematic generation.
         if ppl is None or not torch.isfinite(torch.tensor(ppl)):
-            return 50000.0 # Return a high penalty value.
-        return ppl
+            return 10000.0 # Return a high penalty value.
+        return min(ppl, 10000.0)  # Cap extreme PPL to prevent outliers
 
     def _calculate_perplexity(self, engine: RealModelEngine, text: str) -> float:
         inputs = engine.tokenizer(text, return_tensors="pt").to(engine.model.device)
         with torch.no_grad():
             outputs = engine.model(**inputs, labels=inputs["input_ids"])
-        return torch.exp(outputs.loss).item()
+        ppl = torch.exp(outputs.loss).item()
+        if ppl is None or not torch.isfinite(torch.tensor(ppl)):
+            return 10000.0
+        return min(ppl, 10000.0)
 
     def benchmark_and_get_reward(self, engine: RealModelEngine, prompt: str, max_new_tokens: int = 50, return_metrics: bool = False, profile: bool = False):
         # Use planned token budget for fair throughput comparison
         planned_tokens = max_new_tokens
+        # Synchronize GPU before timing to flush pending ops
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         start_time = time.time()
         if profile:
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
@@ -462,6 +474,9 @@ class RealBenchmark:
             print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
         else:
             generated_response = engine.generate_response(prompt, max_length=planned_tokens)
+        # Synchronize GPU after generation for accurate elapsed time
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         elapsed_s = (time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
         # Actual generated tokens may vary; throughput uses actual for accuracy
@@ -642,11 +657,26 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
             ppl_ratios.append((pruned_ppl_val - base_ppl_val) / base_ppl_val * 100)
             action_labels_scatter.append(m.get('target', 'none'))
     if speed_gains:
+        # Remove extreme outliers using IQR for cleaner visualization
+        sg_arr, pr_arr = np.array(speed_gains), np.array(ppl_ratios)
+        sg_q1, sg_q3 = np.percentile(sg_arr, 10), np.percentile(sg_arr, 90)
+        pr_q1, pr_q3 = np.percentile(pr_arr, 10), np.percentile(pr_arr, 90)
+        sg_iqr, pr_iqr = sg_q3 - sg_q1, pr_q3 - pr_q1
+        sg_lb, sg_ub = sg_q1 - 2.0 * sg_iqr, sg_q3 + 2.0 * sg_iqr
+        pr_lb, pr_ub = pr_q1 - 2.0 * pr_iqr, pr_q3 + 2.0 * pr_iqr
+        inlier = [(sg_lb <= s <= sg_ub) and (pr_lb <= p <= pr_ub) for s, p in zip(speed_gains, ppl_ratios)]
+        sg_f = [s for s, m in zip(speed_gains, inlier) if m]
+        pr_f = [p for p, m in zip(ppl_ratios, inlier) if m]
+        al_f = [a for a, m in zip(action_labels_scatter, inlier) if m]
+        n_outliers = len(speed_gains) - len(sg_f)
+        if n_outliers > 0:
+            print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
+
         plt.figure(figsize=(10, 6))
         colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
-        for label in set(action_labels_scatter):
-            idx = [j for j, a in enumerate(action_labels_scatter) if a == label]
-            plt.scatter([speed_gains[j] for j in idx], [ppl_ratios[j] for j in idx],
+        for label in set(al_f):
+            idx = [j for j, a in enumerate(al_f) if a == label]
+            plt.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
                        alpha=0.6, label=label, color=colors_map.get(label, 'purple'), s=40)
         plt.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
         plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
@@ -896,6 +926,8 @@ def organize_training_reports(is_report_mode: bool = False):
         'quality_vs_speed.png',
         'epsilon_decay.png',
         'cumulative_reward.png',
+        'zero_shot_baseline_accuracy.png',
+        'zero_shot_baseline_metrics.json',
         'training_report.txt'
     ]
     if not is_report_mode:
@@ -913,11 +945,49 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     """Load a proper prompt dataset to train/test the RL controller.
     Default: 'togethercomputer/RedPajama-Data-1T-Sample'
     Returns a list of prompt strings.
+
+    When the CSV contains a 'Split' column, only rows matching `split_type`
+    (train/test) are returned — ensuring the same 80-20 split as LCR training.
     """
+    name = dataset_name.strip()
+
+    # Local CSV training should not depend on Hugging Face datasets.
+    if name.endswith('.csv') and os.path.exists(name):
+        try:
+            with open(name, 'r', encoding='utf-8-sig', newline='') as handle:
+                reader = csv.DictReader(handle)
+                fieldnames = list(reader.fieldnames or [])
+                has_split_col = 'Split' in fieldnames
+                prompts = []
+                for row in reader:
+                    # Filter by Split column when available
+                    if has_split_col and split_type:
+                        row_split = (row.get('Split') or '').strip().lower()
+                        if row_split and row_split != str(split_type).strip().lower():
+                            continue
+                    prompt = (
+                        row.get('Prompt')
+                        or row.get('prompt')
+                        or row.get('text')
+                        or row.get('instruction')
+                        or row.get('content')
+                    )
+                    if prompt and str(prompt).strip():
+                        prompts.append(str(prompt).strip())
+            random.shuffle(prompts)
+            if prompts:
+                selected = prompts[:samples]
+                split_msg = f" (Split={split_type})" if has_split_col else ""
+                print(f"[Train] Loaded {len(selected)} prompts from local CSV {name}{split_msg}.")
+                return selected
+            print(f"[Train] Local CSV {name} contains no usable prompts. Falling back to external datasets.")
+        except Exception as e:
+            print(f"[Train] Failed to read local CSV {name}: {e}. Falling back to external datasets.")
+
     try:
         from datasets import load_dataset
-    except Exception:
-        print("[Train] Install 'datasets' to use training datasets. Falling back to hardcoded prompts.")
+    except Exception as e:
+        print(f"[Train] Hugging Face datasets unavailable ({e}). Falling back to hardcoded prompts.")
         return [
             "What is the capital of France?",
             "Explain the concept of machine learning in simple terms.",
@@ -926,7 +996,6 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
         ]
 
     # Use RedPajama by default if the user hasn't specified a custom CSV
-    name = dataset_name.strip()
     if name == 'Prompt Dataset Train.csv' and not os.path.exists(name):
         print(f"[Train] '{name}' not found locally. Switching to RedPajama sample...")
         name = 'togethercomputer/RedPajama-Data-1T-Sample'
@@ -1043,6 +1112,13 @@ def main(num_episodes: int = 50,
         model_engine.calibrate_importances(prompt_pool, max_samples=calib_samples, max_seq_len=128)
     except Exception as e:
         print(f"[Calib] Warning: calibration skipped due to error: {e}")
+
+    # Pre-training zero-shot accuracy evaluation (dense model baseline)
+    print("\n[System] Running pre-training zero-shot accuracy evaluation...")
+    try:
+        run_zero_shot_baseline_eval(model_engine, samples=200, phase_label='Pre-Training')
+    except Exception as e:
+        print(f"[Zero-shot] Warning: pre-training eval skipped due to error: {e}")
     
     print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
     metrics_list = []  # Collect metrics for report
@@ -1095,13 +1171,17 @@ def main(num_episodes: int = 50,
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
         print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)}")
 
-        # Reward: balanced speed/quality with stability
-        alpha, beta = 0.7, 0.3
+        # Reward: balanced speed/quality with log-PPL to prevent catastrophic penalty
+        alpha, beta = 0.9, 0.1
         eps = 1e-8
-        relative_reward = (
-            alpha * (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
-            - beta * (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps)
-        )
+        speed_gain = (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
+        # Log-PPL penalty: bounded and proportional (avoids heavy-tailed PPL explosion)
+        log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
+        log_ppl_pruned = np.log(max(pruned_metrics['perplexity'], 1.01))
+        ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
+        relative_reward = alpha * speed_gain - beta * ppl_penalty
+        # Clamp reward to [-2, 2] to prevent extreme outliers from destabilizing training
+        relative_reward = float(np.clip(relative_reward, -2.0, 2.0))
 
         next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
         rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
@@ -1151,7 +1231,19 @@ def main(num_episodes: int = 50,
     # Organize training reports into folders
     organize_training_reports()
 
+    # Run oracle dataset zero-shot evaluation (MMLU & BoolQ) after training
+    _train_zs_results = {}
+    if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
+        try:
+            _train_zs_results = run_oracle_dataset_zeroshot(
+                model_engine, train_dataset, split_filter='test',
+                phase_label='Post-Training', max_seq_len=512,
+            )
+        except Exception as e:
+            print(f"[Oracle ZS] Post-training zero-shot eval failed: {e}")
+
     # Auto-run testing on held-out split if train-test split was used
+    _test_zs_results = {}
     if test_prompts_split:
         test_cap = min(len(test_prompts_split), test_samples)
         print(f"\n[System] Running evaluation on {test_cap} held-out test prompts (of {len(test_prompts_split)} available)...")
@@ -1159,6 +1251,23 @@ def main(num_episodes: int = 50,
                    num_test_episodes=test_cap,
                    max_new_tokens=max_new_tokens,
                    prompts=test_prompts_split[:test_cap])
+
+        # Run oracle dataset zero-shot after testing too
+        if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
+            try:
+                _test_zs_results = run_oracle_dataset_zeroshot(
+                    model_engine, train_dataset, split_filter='test',
+                    phase_label='Post-Testing', max_seq_len=512,
+                )
+            except Exception as e:
+                print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
+
+    # Generate combined comparison graph if both phases were evaluated
+    if _train_zs_results and _test_zs_results:
+        try:
+            generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
+        except Exception as e:
+            print(f"[Oracle ZS] Comparison graph generation failed: {e}")
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -1198,6 +1307,8 @@ def organize_test_reports(is_report_mode: bool = False):
         'boolq_zeroshoot_metrics.json',
         'hellaswag_zeroshoot_metrics.json',
         'mmlu_zeroshoot_metrics.json',
+        'zero_shot_baseline_accuracy.png',
+        'zero_shot_baseline_metrics.json',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -1236,7 +1347,7 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     if prompts is not None:
         test_prompts = prompts
     elif test_dataset and test_dataset.endswith('.csv'):
-        test_prompts = load_training_prompts(test_dataset, samples=max(num_test_episodes, 50))
+        test_prompts = load_training_prompts(test_dataset, samples=max(num_test_episodes, 50), split_type='test')
     else:
         # Ensure we always have >= num_test_episodes prompts by sampling with replacement
         test_prompts = [
@@ -1748,6 +1859,371 @@ def _plot_two_bar(out_file: str, title: str, base_val: float, pruned_val: float,
     plt.savefig(out_file, dpi=300)
     plt.close()
     print(f"[Report] Saved {out_file}")
+
+
+# =========================================================================
+# ORACLE DATASET ZERO-SHOT EVALUATION (from CSV, not streaming)
+# =========================================================================
+
+def _load_oracle_dataset_rows(dataset_path: str, source_filter: str, split_filter: str = 'test') -> List[dict]:
+    """Load rows from oracle_dataset.csv filtered by SourceDataset and Split."""
+    rows = []
+    if not os.path.exists(dataset_path):
+        return rows
+    try:
+        with open(dataset_path, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                src = (row.get('SourceDataset') or '').strip().lower()
+                sp = (row.get('Split') or '').strip().lower()
+                if source_filter.lower() in src and sp == split_filter.lower():
+                    rows.append(row)
+    except Exception as e:
+        print(f"[Oracle ZS] Failed to read {dataset_path}: {e}")
+    return rows
+
+
+def _eval_boolq_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_len: int = 512) -> dict:
+    """Evaluate BoolQ zero-shot accuracy from oracle dataset rows using mean log-prob."""
+    correct, total = 0, 0
+    for row in rows:
+        prompt_text = (row.get('Prompt') or '').strip()
+        if not prompt_text:
+            continue
+        answer_idx_str = (row.get('AnswerIndex') or '').strip()
+        if not answer_idx_str:
+            continue
+        try:
+            gold = int(answer_idx_str)
+        except Exception:
+            continue
+        # BoolQ: A. False, B. True → options [' A', ' B']
+        options = [' A', ' B']
+        prompt_for_scoring = prompt_text.rstrip() + '\nAnswer:'
+        scores = _score_options_mean_logprob(engine, prompt_for_scoring, options, max_seq_len=max_seq_len)
+        pred = int(np.argmax(scores)) if scores else 0
+        correct += (1 if pred == gold else 0)
+        total += 1
+    acc = float(correct) / float(total) if total > 0 else 0.0
+    return {'accuracy': acc, 'correct': correct, 'n': total}
+
+
+def _eval_mmlu_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_len: int = 512) -> dict:
+    """Evaluate MMLU zero-shot accuracy from oracle dataset rows using mean log-prob."""
+    correct, total = 0, 0
+    for row in rows:
+        prompt_text = (row.get('Prompt') or '').strip()
+        if not prompt_text:
+            continue
+        answer_idx_str = (row.get('AnswerIndex') or '').strip()
+        if not answer_idx_str:
+            continue
+        try:
+            gold = int(answer_idx_str)
+        except Exception:
+            continue
+        # MMLU: A/B/C/D options already in prompt
+        options = [' A', ' B', ' C', ' D']
+        prompt_for_scoring = prompt_text.rstrip() + '\nAnswer:'
+        scores = _score_options_mean_logprob(engine, prompt_for_scoring, options, max_seq_len=max_seq_len)
+        pred = int(np.argmax(scores)) if scores else 0
+        correct += (1 if pred == gold else 0)
+        total += 1
+    acc = float(correct) / float(total) if total > 0 else 0.0
+    return {'accuracy': acc, 'correct': correct, 'n': total}
+
+
+def run_oracle_dataset_zeroshot(
+    engine: RealModelEngine,
+    dataset_path: str,
+    split_filter: str = 'test',
+    force_action_str: Optional[str] = None,
+    phase_label: str = 'Post-Training',
+    max_seq_len: int = 512,
+) -> dict:
+    """Run zero-shot accuracy on MMLU & BoolQ from the oracle dataset CSV.
+    
+    Evaluates BOTH dense (before pruned) and pruned (after pruned) accuracy.
+    Returns dict with results for each task.
+    """
+    import json as _json
+
+    print(f"\n[Oracle ZS] === {phase_label}: Zero-Shot Evaluation from Oracle Dataset ===")
+    print(f"[Oracle ZS] Dataset: {dataset_path}, Split: {split_filter}")
+
+    # Load rows for each task
+    boolq_rows = _load_oracle_dataset_rows(dataset_path, 'boolq', split_filter)
+    mmlu_rows = _load_oracle_dataset_rows(dataset_path, 'mmlu', split_filter)
+    print(f"[Oracle ZS] BoolQ rows: {len(boolq_rows)}, MMLU rows: {len(mmlu_rows)}")
+
+    if not boolq_rows and not mmlu_rows:
+        print("[Oracle ZS] No evaluation rows found, skipping")
+        return {}
+
+    results = {}
+
+    # --- Dense (before pruned) evaluation ---
+    print(f"[Oracle ZS] Evaluating DENSE model (before pruning)...")
+    try:
+        engine.restore_model()
+    except Exception:
+        pass
+    engine.model.eval()
+
+    if boolq_rows:
+        dense_boolq = _eval_boolq_from_dataset(engine, boolq_rows, max_seq_len)
+        results['boolq_dense'] = dense_boolq
+        print(f"[Oracle ZS] BoolQ Dense: {dense_boolq['accuracy']*100:.2f}% ({dense_boolq['correct']}/{dense_boolq['n']})")
+
+    if mmlu_rows:
+        dense_mmlu = _eval_mmlu_from_dataset(engine, mmlu_rows, max_seq_len)
+        results['mmlu_dense'] = dense_mmlu
+        print(f"[Oracle ZS] MMLU Dense: {dense_mmlu['accuracy']*100:.2f}% ({dense_mmlu['correct']}/{dense_mmlu['n']})")
+
+    # --- Pruned (after pruned) evaluation ---
+    target_action = _parse_force_action(force_action_str) if force_action_str else None
+    if not target_action:
+        try:
+            target_action = PruningAction(3, 0.25, 'transformer_layers', 0)
+        except Exception:
+            target_action = None
+
+    if target_action:
+        print(f"[Oracle ZS] Evaluating PRUNED model ({target_action.target} @ {target_action.intensity})...")
+        try:
+            engine.restore_model()
+        except Exception:
+            pass
+        engine.apply_pruning(target_action)
+        engine.model.eval()
+
+        if boolq_rows:
+            pruned_boolq = _eval_boolq_from_dataset(engine, boolq_rows, max_seq_len)
+            results['boolq_pruned'] = pruned_boolq
+            print(f"[Oracle ZS] BoolQ Pruned: {pruned_boolq['accuracy']*100:.2f}% ({pruned_boolq['correct']}/{pruned_boolq['n']})")
+
+        if mmlu_rows:
+            pruned_mmlu = _eval_mmlu_from_dataset(engine, mmlu_rows, max_seq_len)
+            results['mmlu_pruned'] = pruned_mmlu
+            print(f"[Oracle ZS] MMLU Pruned: {pruned_mmlu['accuracy']*100:.2f}% ({pruned_mmlu['correct']}/{pruned_mmlu['n']})")
+
+        try:
+            engine.restore_model()
+        except Exception:
+            pass
+    else:
+        print("[Oracle ZS] No pruning action available, skipping pruned evaluation")
+
+    # Save results JSON
+    out_json = f'oracle_zeroshot_{phase_label.lower().replace(" ", "_")}.json'
+    with open(out_json, 'w') as f:
+        _json.dump({'phase': phase_label, 'split': split_filter, 'dataset': dataset_path, 'results': results}, f, indent=2)
+    print(f"[Oracle ZS] Saved {out_json}")
+
+    # Generate per-phase bar chart (dense vs pruned)
+    _plot_oracle_zeroshot_bars(results, phase_label)
+
+    return results
+
+
+def _plot_oracle_zeroshot_bars(results: dict, phase_label: str):
+    """Plot dense vs pruned accuracy for MMLU & BoolQ."""
+    tasks = []
+    dense_accs = []
+    pruned_accs = []
+
+    for task_name in ['mmlu', 'boolq']:
+        dk = f'{task_name}_dense'
+        pk = f'{task_name}_pruned'
+        if dk in results:
+            tasks.append(task_name.upper())
+            dense_accs.append(results[dk]['accuracy'] * 100)
+            pruned_accs.append(results.get(pk, {}).get('accuracy', 0.0) * 100)
+
+    if not tasks:
+        return
+
+    x = np.arange(len(tasks))
+    width = 0.35
+    fig, ax = plt.subplots(figsize=(8, 6))
+    bars1 = ax.bar(x - width/2, dense_accs, width, label='Dense (Before Pruned)', color='#2196F3', alpha=0.85)
+    bars2 = ax.bar(x + width/2, pruned_accs, width, label='Pruned (After Pruned)', color='#FF9800', alpha=0.85)
+
+    ax.set_ylabel('Accuracy (%)', fontsize=12)
+    ax.set_title(f'{phase_label}: Zero-Shot Accuracy — Dense vs Pruned', fontsize=13, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(tasks, fontsize=12)
+    ax.set_ylim(0, 100)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+
+    for bars in [bars1, bars2]:
+        for b in bars:
+            h = b.get_height()
+            ax.text(b.get_x() + b.get_width()/2., min(99, h + 1), f'{h:.1f}%', ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    fname = f'oracle_zeroshot_{phase_label.lower().replace(" ", "_")}.png'
+    plt.savefig(fname, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f'[Report] Saved {fname}')
+
+
+def generate_zeroshot_comparison_graph(train_results: dict, test_results: dict, output_path: str = 'oracle_zeroshot_comparison.png'):
+    """Generate 3-bar comparison: Dense vs Pruned(Train) vs Pruned(Test) for MMLU & BoolQ.
+    
+    Called after both training and testing phases to show progression.
+    """
+    tasks = []
+    dense_accs = []
+    pruned_train_accs = []
+    pruned_test_accs = []
+
+    for task_name in ['mmlu', 'boolq']:
+        # Use dense from either phase (should be same model)
+        dense_key = f'{task_name}_dense'
+        pruned_key = f'{task_name}_pruned'
+        
+        dense_acc = 0.0
+        if dense_key in train_results:
+            dense_acc = train_results[dense_key]['accuracy'] * 100
+        elif dense_key in test_results:
+            dense_acc = test_results[dense_key]['accuracy'] * 100
+
+        train_pruned_acc = train_results.get(pruned_key, {}).get('accuracy', 0.0) * 100
+        test_pruned_acc = test_results.get(pruned_key, {}).get('accuracy', 0.0) * 100
+
+        if dense_acc > 0 or train_pruned_acc > 0 or test_pruned_acc > 0:
+            tasks.append(task_name.upper())
+            dense_accs.append(dense_acc)
+            pruned_train_accs.append(train_pruned_acc)
+            pruned_test_accs.append(test_pruned_acc)
+
+    if not tasks:
+        print("[Report] No comparison data available for graph")
+        return
+
+    x = np.arange(len(tasks))
+    width = 0.25
+    fig, ax = plt.subplots(figsize=(10, 7))
+    bars1 = ax.bar(x - width, dense_accs, width, label='Before Pruned (Dense)', color='#2196F3', alpha=0.85)
+    bars2 = ax.bar(x, pruned_train_accs, width, label='After Pruned (Training)', color='#4CAF50', alpha=0.85)
+    bars3 = ax.bar(x + width, pruned_test_accs, width, label='After Pruned (Testing)', color='#FF9800', alpha=0.85)
+
+    ax.set_ylabel('Accuracy (%)', fontsize=12)
+    ax.set_title('Zero-Shot Accuracy Comparison: Before vs After Pruning', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(tasks, fontsize=12)
+    ax.set_ylim(0, 100)
+    ax.legend(fontsize=10, loc='upper right')
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+
+    for bars in [bars1, bars2, bars3]:
+        for b in bars:
+            h = b.get_height()
+            ax.text(b.get_x() + b.get_width()/2., min(99, h + 0.5), f'{h:.1f}%', ha='center', va='bottom', fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f'[Report] Saved {output_path}')
+
+
+def run_zero_shot_baseline_eval(engine: RealModelEngine, samples: int = 200, seed: int = 42, max_seq_len: int = 512, phase_label: str = 'Pre-Training'):
+    """Evaluate DENSE (unpruned) model zero-shot accuracy on BoolQ and MMLU. Produces a combined bar chart."""
+    import json as _json
+    try:
+        engine.restore_model()
+    except Exception:
+        pass
+    engine.model.eval()
+
+    tasks_config = [
+        ('boolq', 'boolq', None, 'validation'),
+        ('mmlu', 'cais/mmlu', 'all', 'test'),
+    ]
+
+    results = {}
+    for task_name, ds_name, ds_config, ds_split in tasks_config:
+        rows = _load_streaming_samples(ds_name, ds_config, split=ds_split, samples=samples, seed=seed)
+        if not rows and task_name == 'mmlu':
+            rows = _load_streaming_samples('mmlu', None, split='test', samples=samples, seed=seed)
+        if not rows:
+            print(f"[Zero-shot] {task_name}: no samples available, skipping")
+            continue
+
+        correct, total = 0, 0
+        for ex in rows:
+            if not isinstance(ex, dict):
+                continue
+            if task_name == 'boolq':
+                passage = str(ex.get('passage', '')).strip()
+                question = str(ex.get('question', '')).strip()
+                ans = ex.get('answer', None)
+                if not passage or not question or ans is None:
+                    continue
+                prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+                options = [' yes', ' no']
+                scores = _score_options_mean_logprob(engine, prompt, options, max_seq_len=max_seq_len)
+                pred = int(np.argmax(scores)) if scores else 0
+                gold = 0 if bool(ans) else 1
+                correct += (1 if pred == gold else 0)
+                total += 1
+            elif task_name == 'mmlu':
+                question = str(ex.get('question', '')).strip()
+                choices = ex.get('choices', None)
+                ans = ex.get('answer', None)
+                if not question or not choices or ans is None or len(choices) < 4:
+                    continue
+                gold = None
+                try:
+                    gold = int(ans)
+                except Exception:
+                    try:
+                        a = str(ans).strip().upper()
+                        if a in ['A', 'B', 'C', 'D']:
+                            gold = ['A', 'B', 'C', 'D'].index(a)
+                    except Exception:
+                        pass
+                if gold is None:
+                    continue
+                prompt = f"Question: {question}\nA. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:"
+                options = [' A', ' B', ' C', ' D']
+                scores = _score_options_mean_logprob(engine, prompt, options, max_seq_len=max_seq_len)
+                pred = int(np.argmax(scores)) if scores else 0
+                correct += (1 if pred == gold else 0)
+                total += 1
+
+        acc = float(correct) / float(total) if total > 0 else 0.0
+        results[task_name] = {'accuracy': acc, 'n': total, 'correct': correct}
+        print(f"[Zero-shot] {task_name}: {acc*100:.2f}% ({correct}/{total})")
+
+    if not results:
+        print("[Zero-shot] No results to plot")
+        return results
+
+    # Combined bar chart
+    task_names = list(results.keys())
+    accuracies = [results[t]['accuracy'] * 100 for t in task_names]
+    palette = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0']
+    plt.figure(figsize=(8, 6))
+    bars = plt.bar([t.upper() for t in task_names], accuracies, color=palette[:len(task_names)], alpha=0.85)
+    for bar in bars:
+        h = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width() / 2., min(99, h + 1), f'{h:.1f}%', ha='center', va='bottom', fontsize=11)
+    plt.title(f'{phase_label} Zero-Shot Accuracy (Dense Model)', fontsize=14, fontweight='bold')
+    plt.ylabel('Accuracy (%)', fontsize=12)
+    plt.ylim(0, 100)
+    plt.grid(axis='y', linestyle='--', alpha=0.4)
+    plt.tight_layout()
+    plt.savefig('zero_shot_baseline_accuracy.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print('[Report] Saved zero_shot_baseline_accuracy.png')
+
+    with open('zero_shot_baseline_metrics.json', 'w') as f:
+        _json.dump({'phase': phase_label, 'tasks': results}, f)
+    print('[Report] Saved zero_shot_baseline_metrics.json')
+    return results
 
 def run_zeroshoot_accuracy(engine: RealModelEngine, task: str, samples: int = 1000, seed: int = 42, max_seq_len: int = 512, force_action_str: Optional[str] = None):
     task_l = str(task).lower().strip()
@@ -2339,7 +2815,26 @@ if __name__ == "__main__":
         bench = RealBenchmark()
         specific_eval = bool(getattr(args, 'wikitext2', False) or getattr(args, 'boolq', False) or getattr(args, 'hellaswag', False) or getattr(args, 'mmlu', False))
         if not specific_eval:
+            # Pre-test zero-shot accuracy evaluation (dense model baseline)
+            print("\n[System] Running pre-test zero-shot accuracy evaluation...")
+            try:
+                run_zero_shot_baseline_eval(engine, samples=200, phase_label='Pre-Test')
+            except Exception as e:
+                print(f"[Zero-shot] Warning: pre-test eval skipped due to error: {e}")
             test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action)
+
+            # Run oracle dataset zero-shot after testing (MMLU & BoolQ)
+            _test_ds = args.test_dataset
+            if _test_ds and _test_ds.endswith('.csv') and os.path.exists(_test_ds):
+                try:
+                    run_oracle_dataset_zeroshot(
+                        engine, _test_ds, split_filter='test',
+                        force_action_str=args.force_action,
+                        phase_label='Post-Testing', max_seq_len=args.eval_max_seq_len,
+                    )
+                except Exception as e:
+                    print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
+
             if getattr(args, 'wikitext_samples', 0):
                 try:
                     engine.restore_model()

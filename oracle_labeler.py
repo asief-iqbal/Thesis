@@ -295,7 +295,7 @@ def main() -> None:
         "--max-length",
         type=int,
         default=128,
-        help="Max tokens used for oracle loss/PPL computation (recommend matching TinyBERT max_length)",
+        help="Max tokens used for oracle loss/PPL computation (recommend matching MiniBERT max_length)",
     )
 
     parser.add_argument(
@@ -361,7 +361,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--carry-columns",
-        default="Category,Subject,Context Dependency,SourceDataset,SourceSplit,SourceId",
+        default="Category,Subject,Context Dependency,SourceDataset,SourceSplit,SourceId,Choices,AnswerIndex,AnswerLetter,AnswerText,Gsm8kAnswer,MbppTests,Split",
         help="Comma-separated columns to carry from input -> output (if present).",
     )
     parser.add_argument(

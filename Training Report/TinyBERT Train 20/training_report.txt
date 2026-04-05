@@ -1,0 +1,35 @@
+TinyBERT LCR v2 — Multi-Output Training Report
+==================================================
+
+Data: oracle_lcr_10k_dual.csv
+Label columns: sensitivity_head
+Outputs: 1 (composite)
+Aux features: ON
+
+Train/Val/Test: 7000/897/1795
+By source:
+  - boolq: {'train': 1400, 'val': 200, 'test': 400, 'total': 2000}
+  - cais/mmlu:all: {'train': 1400, 'val': 200, 'test': 400, 'total': 2000}
+  - gsm8k: {'train': 1400, 'val': 200, 'test': 400, 'total': 2000}
+  - mbpp: {'train': 682, 'val': 97, 'test': 195, 'total': 974}
+  - wikitext: {'train': 1400, 'val': 200, 'test': 400, 'total': 2000}
+
+Best epoch: 17
+
+=== VALIDATION (best epoch) ===
+  Average: mse=0.038294 r2=0.4962 spearman=0.6962
+  composite: mse=0.038294 r2=0.4962 spearman=0.6962 bin3=0.6210
+
+=== TEST ===
+  Average: mse=0.039966 r2=0.4950 spearman=0.7009 bin3_acc=0.6513
+  composite: mse=0.039966 r2=0.4950 spearman=0.7009 [95%CI: 0.6722–0.7265] bin3_acc=0.6513
+    Per-source:
+      boolq: r2=0.3712 spearman=0.6239 bin3=0.6475
+      cais/mmlu:all: r2=0.3970 spearman=0.6194 bin3=0.6575
+      gsm8k: r2=0.1263 spearman=0.4229 bin3=0.5975
+      mbpp: r2=0.3326 spearman=0.5224 bin3=0.8051
+      wikitext: r2=0.4203 spearman=0.6492 bin3=0.6275
+
+Artifacts:
+  head: Training Report/TinyBERT Train 20\tinybert_lcr_head.pt
+  backbone: Training Report/TinyBERT Train 20\tinybert_lcr_backbone

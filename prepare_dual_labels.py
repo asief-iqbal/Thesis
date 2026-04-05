@@ -26,7 +26,7 @@ import math
 import os
 from typing import Dict, List, Sequence, Tuple
 
-from lcr_tinybert import compute_aux_features, AUX_FEATURE_NAMES
+from lcr_minibert import compute_aux_features, AUX_FEATURE_NAMES
 
 
 def _percentile(values: Sequence[float], p: float) -> float:

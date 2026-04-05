@@ -1185,400 +1185,400 @@ D. Spleen",Reasoning,anatomy,No,cais/mmlu:all,test,,"[""Gallbladder"", ""Kidney"
 "Passage: Ferguson Arthur ``Fergie'' Jenkins, Jr., CM (born December 13, 1942) is a Canadian former professional baseball player. He was a Major League Baseball (MLB) pitcher for the Philadelphia Phillies, Chicago Cubs, Texas Rangers, and Boston Red Sox, from 1965 through 1983. He also played basketball in the off-season for the Harlem Globetrotters from 1967 to 1969, and pitched two seasons in Canada for the minor league London Majors following his major league career. In 1991, Jenkins became the first Canadian to be inducted into the National Baseball Hall of Fame.
 Question: is ferguson jenkins in the hall of fame
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,1,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,1,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Parables of Jesus can be found in all the gospels, except for John, and in some of the non-canonical gospels, but are located mainly within the three Synoptic Gospels. They represent a main part of the teachings of Jesus, forming approximately one third of his recorded teachings. Christians place high emphasis on these parables; since they are the purported words of Jesus, they are believed to be what the Father has taught, indicated by John 8:28 and 14:10.
 Question: are there parables in the gospel of john
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,2,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,2,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Multiple citizenship, also called dual citizenship or multiple nationality or dual nationality, is a person's citizenship status, in which a person is concurrently regarded as a citizen of more than one state under the laws of those states. There is no international convention which determines the nationality or citizen status of a person, which is defined exclusively by national laws, which vary and can be inconsistent with each other. Multiple citizenship arises because different countries use different, and not necessarily mutually exclusive, criteria for citizenship. Colloquial speech refers to people ``holding'' multiple citizenship but technically each nation makes a claim that this person be considered its national.
 Question: can a us citizen hold more than one passport
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,3,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,3,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Anxiety disorders are a group of mental disorders characterized by significant feelings of anxiety and fear. Anxiety is a worry about future events and fear is a reaction to current events. These feelings may cause physical symptoms, such as a fast heart rate and shakiness. There are a number of anxiety disorders: including generalized anxiety disorder, specific phobia, social anxiety disorder, separation anxiety disorder, agoraphobia, panic disorder, and selective mutism. The disorder differs by what results in the symptoms. People often have more than one anxiety disorder.
 Question: is it possible to have two anxiety disorders
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,4,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,4,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Princess and the Frog is a 2009 American animated musical film produced by Walt Disney Animation Studios and released by Walt Disney Pictures. The 49th Disney animated feature film, the film is loosely based on the novel The Frog Princess by E.D. Baker, which is in turn based on the Brothers Grimm fairy tale ``The Frog Prince''. Written and directed by Ron Clements and John Musker, the film features an ensemble voice cast that stars Anika Noni Rose, Bruno Campos, Keith David, Michael-Leon Wooley, Jennifer Cody, and Jim Cummings, with Peter Bartlett, Jenifer Lewis, Oprah Winfrey, Terrence Howard, and John Goodman. Set in 1920s New Orleans, the film tells the story of a hardworking waitress named Tiana who dreams of owning her own restaurant. After kissing a prince who has been turned into a frog by an evil voodoo sorcerer, Tiana becomes a frog herself and must find a way to turn back into a human before it is too late.
 Question: is the princess and the frog a broadway musical
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,5,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,5,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The renewal for a third and final series was announced on 20 January 2017 entitled The Tunnel: Vengeance and consisting of six episodes. It began filming in March 2017 and premiered on Sky Atlantic on 14 December 2017, with all episodes released on the same day. Canal+ did not announce a corresponding date for France at the time of the UK release. Season 3 premiered on Canal+ on 4 June 2018.
 Question: will there be a fourth series of the tunnel
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,6,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,6,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: As of 8 August 2016, the FDA extended its regulatory power to include e-cigarettes. Under this ruling the FDA will evaluate certain issues, including ingredients, product features and health risks, as well their appeal to minors and non-users. The FDA rule also bans access to minors. A photo ID is required to buy e-cigarettes, and their sale in all-ages vending machines is not permitted. The FDA in September 2016 has sent warning letters for unlawful underage sales to online retailers and retailers of e-cigarettes.
 Question: is vaping illegal if you are under 18
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,7,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,7,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Among the national teams, Germany and Brazil have played the most World Cup matches (109), Germany appeared in the most finals (8), semi-finals (13), quarter-finals (16), while Brazil has appeared in the most World Cups (21), has the most wins (73) and has scored the most goals (229). The two teams have played each other twice in the World Cup, in the 2002 final and in the 2014 semi-final.
 Question: have any teams played each other twice in the world cup
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,8,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,8,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: It is currently the 4th largest shopping mall in the Philippines and the 12th in the world. When it opened in 2006 it was the largest shopping mall in the Philippines until SM City North EDSA was redeveloped in 2008, and was relegated to third place by the expansion of SM Megamall from 2011 until November 27, 2015 when SM Seaside City Cebu opened to the public.
 Question: is mall of asia the biggest mall in asia
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,9,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,9,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The story begins as a girl named Sally and her brother, who serves as the narrator of the book, sit alone in their house on a cold, rainy day, staring wistfully out the window. Then they hear a loud bump which is quickly followed by the arrival of the Cat in the Hat, a tall anthropomorphic cat in a red and white striped hat and a red bow tie. The Cat proposes to entertain the children with some tricks that he knows. The children's pet fish refuses, insisting that the Cat should leave. The Cat responds by balancing the fish on the tip of his umbrella. The game quickly becomes increasingly trickier, as the Cat balances himself on a ball and tries to balance lots of household items on his limbs until he falls on his head, dropping everything he was holding. The fish admonishes him again, but the Cat in the Hat just proposes another game.
 Question: does the cat in the hat have a name
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,10,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,10,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: In 2017, Wiseman revealed that a sixth film is also in development with Beckinsale reprising her role as Selene.
 Question: are they coming out with another underworld movie
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,11,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,11,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The signature bitter taste is produced by a combination of quinine and lemon pith used in manufacturing the drink. The principal difference between tonic water and bitter lemon is the addition of lemon juice, pith, and peel. Bitter lemon is drunk both by itself and as a mixer, and is sold across the world.
 Question: is lemon tonic the same as bitter lemon
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,12,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,12,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The fluid ounce is distinct from the ounce as a unit of weight or mass, although it is sometimes referred to simply as an ``ounce'' where context makes the meaning clear, such as ounces in a bottle.
 Question: does a fluid ounce of water weigh an ounce
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,13,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,13,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: President of FIFA Sepp Blatter endorsed the idea of having a World Cup in the Arab World, saying in April 2010: ``The Arabic world deserves a World Cup. They have 22 countries and have not had any opportunity to organize the tournament''. Blatter also praised Qatar's progress: ``When I was first in Qatar there were 400,000 people here and now there are 1.6 million. In terms of infrastructure, when you are able to organise the Asian Games (in 2006) with more than 30 events for men and women, then that is not in question''. On 2 December 2010, it was announced that Qatar will host the 2022 FIFA World Cup.
 Question: is qatar going to be the world cup host
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,14,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,14,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Following the release of Anthem in the United States, Rand explored opportunities for having it adapted to other media. She had discussions about potential film, opera, and ballet adaptations, but these projects were never realized. In 1950, a radio adaptation was done for The Freedom Story, a weekly radio program produced by Spiritual Mobilization, a Christian libertarian group.
 Question: is there a movie for anthem by ayn rand
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,15,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,15,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The Empire State Building stood as the world's tallest building for nearly 40 years until the completion of the World Trade Center's North Tower in Lower Manhattan in late 1970. Following the September 11 attacks in 2001, it was again the tallest building in New York until the new One World Trade Center was completed in April 2012.
 Question: was the empire state building the tallest in the world
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,16,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,16,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Season Three began filming in May 2010. the program was filmed over five months in regional Victoria (South Gippsland), Melbourne and in the ABC TV studios, Southbank. For the second time the number of episodes will increase, with Season 3 to have 12 episodes and will begin airing 4 December 2010.
 Question: will there be a third season of bed of roses
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,17,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,17,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The 2018 FIFA World Cup qualification UEFA Group D was one of the nine UEFA groups for 2018 FIFA World Cup qualification. The group consisted of six teams: Wales, Austria, Serbia, Republic of Ireland, Moldova, and Georgia.
 Question: did austria qualify for the world cup 2018
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,18,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,18,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The chickpea or chick pea (Cicer arietinum) is a legume of the family Fabaceae, subfamily Faboideae. Its different types are variously known as gram or Bengal gram, garbanzo or garbanzo bean, and Egyptian pea. Its seeds are high in protein. It is one of the earliest cultivated legumes: 7500-year-old remains have been found in the Middle East. In 2016, India produced 64% of the world's total chickpeas.
 Question: are garbanzo beans and chick peas the same
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,19,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,19,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: After five generations and 27 model year runs, the Town & Country nameplate was discontinued at the end of the 2016 model year run and was replaced by the 2017 model-year Chrysler Pacifica minivan.
 Question: does chrysler still make the town & country minivan
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,20,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,20,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: In the Canadian provinces and territories of Alberta, Newfoundland and Labrador, the Northwest Territories, Nova Scotia, Nunavut, Prince Edward Island, Quebec, Saskatchewan, and Yukon, licence plates are currently only required on the rear of the vehicle. The remaining provinces, British Columbia, Manitoba, New Brunswick, and Ontario, require the licence plates to be mounted on both the front and rear of the vehicle. Dealership plate frames or custom plate frames are allowed as long as the frame does not obstruct view of validation stickers or district.
 Question: do you have to have two license plates in ontario
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,21,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,21,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: ``Party All the Time'' is a 1985 single by comedian and actor Eddie Murphy, written and produced by Rick James and Kevin Johnston. It was the lead single from Murphy's debut album How Could It Be. The single was recorded at James' home studio in Buffalo, New York. It reached #2 on the Billboard Hot 100 for three weeks, behind ``Say You, Say Me'' by Lionel Richie. Rick James also provided vocals for the song.
 Question: does eddie murphy really sing party all the time
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,22,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,22,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Most theories containing gravitons suffer from severe problems. Attempts to extend the Standard Model or other quantum field theories by adding gravitons run into serious theoretical difficulties at energies close to or above the Planck scale. This is because of infinities arising due to quantum effects; technically, gravitation is not renormalizable. Since classical general relativity and quantum mechanics seem to be incompatible at such energies, from a theoretical point of view, this situation is not tenable. One possible solution is to replace particles with strings. String theories are quantum theories of gravity in the sense that they reduce to classical general relativity plus field theory at low energies, but are fully quantum mechanical, contain a graviton, and are thought to be mathematically consistent.
 Question: is the graviton part of the standard model
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,23,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,23,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The scientific usage of the term ``berry'' differs from common usage. In scientific terminology, a berry is a fruit produced from the ovary of a single flower in which the outer layer of the ovary wall develops into an edible fleshy portion (pericarp). The definition includes many fruits that are not commonly known as berries, such as grapes, tomatoes, cucumbers, eggplants, bananas, and chili peppers. Fruits excluded by the botanical definition include strawberries, raspberries, and blackberries, which are aggregate fruits; and mulberries, which are multiple fruits. A plant bearing berries is said to be bacciferous or baccate.
 Question: is a banana part of the berry family
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,24,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,24,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Catholic Church distinguishes between Churches whose celebration of the Eucharist, as well as holy orders, it recognizes as valid and those of other Christian communities. In the case that it is impossible to approach a Catholic minister, that it is a case of real need or spiritual benefit,and that the danger of error or indifferentism is avoided, the Catholic Church permits its faithful to receive Communion in Orthodox Churches, although Orthodox Churches do not honour this and only permit Orthodox Christians to receive Communion in Orthodox Churches. The Catholic Church does not ordinarily allow a Catholic to receive communion in a Protestant church, since it does not consider Protestant ministers to be priests ordained by bishops in a line of valid succession from the apostles, although Lutherans, Moravians, and Anglicans teach that they ordain their clergy in lines of apostolic succession. It applies this rule also to the Anglican Communion, pursuant to Apostolicae curae, a position that the Church of England disputed in Saepius officio.
 Question: can a catholic receive communion in an episcopal church
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,25,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,25,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Dine Brands Global Inc, formerly DineEquity Inc., and before that IHOP Corporation, is an American company that franchises and operates IHOP and Applebee's restaurants. The company is headquartered in Glendale, California.
 Question: is ihop and applebees owned by the same company
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,26,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,26,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Unlike oxidative phosphorylation, oxidation and phosphorylation are not coupled in the process of substrate-level phosphorylation, and reactive intermediates are most often gained in the course of oxidation processes in catabolism. Most ATP is generated by oxidative phosphorylation in aerobic or anaerobic respiration while substrate-level phosphorylation provides a quicker, less efficient source of ATP, independent of external electron acceptors. This is the case in human erythrocytes, which have no mitochondria, and in oxygen-depleted muscle.
 Question: can substrate level phosphorylation occur in the absence of oxygen
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,27,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,27,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The executive power is exercised collectively by the Council of Ministers, which is led by the Prime Minister, officially referred to as President of the Council (Presidente del Consiglio). Legislative power is vested in the two houses of the Italian Parliament primarily, and secondarily on the Council of Ministers, which can introduce bills and holds the majority in both houses. The judiciary of Italy is independent of the executive and the legislative branches. It is headed by the High Council of the Judiciary, a body presided over by the President of Italy, who is the head of state though his position is separate from all branches. The current Italian President is Sergio Mattarella and the current Prime Minister of Italy is Paolo Gentiloni.
 Question: why does italy have both a prime minister and president
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,28,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,28,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The use of toxic chemicals as weapons dates back thousands of years, but the first large scale use of chemical weapons was during World War I. They were primarily used to demoralize, injure, and kill entrenched defenders, against whom the indiscriminate and generally very slow-moving or static nature of gas clouds would be most effective. The types of weapons employed ranged from disabling chemicals, such as tear gas, to lethal agents like phosgene, chlorine, and mustard gas. This chemical warfare was a major component of the first global war and first total war of the 20th century. The killing capacity of gas was limited, with about ninety thousand fatalities from a total of 1.3 million casualties caused by gas attacks. Gas was unlike most other weapons of the period because it was possible to develop countermeasures, such as gas masks. In the later stages of the war, as the use of gas increased, its overall effectiveness diminished. The widespread use of these agents of chemical warfare, and wartime advances in the composition of high explosives, gave rise to an occasionally expressed view of World War I as ``the chemist's war'' and also the era where weapons of mass destruction were created.
 Question: was nerve gas used in world war 1
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,29,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,29,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Fifty Shades Freed is the third and final installment of the erotic romance Fifty Shades Trilogy by British author E.L. James. After accepting entrepreneur CEO Christian Grey's proposal in Fifty Shades Darker, Anastasia Steele must adjust not only to married life but to her new husband's wealthy lifestyle and controlling nature. The paperback edition was first published in April 2012.
 Question: is there a 50 shades of grey 3
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,30,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,30,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Capital punishment in the United Kingdom was used from ancient times until the second half of the 20th century. The last executions in the United Kingdom were by hanging, and took place in 1964, prior to capital punishment being abolished for murder (in 1965 in Great Britain and in 1973 in Northern Ireland). Although unused, the death penalty remained a legally defined punishment for certain offences such as treason until it was completely abolished in 1998. In 2004 the 13th Protocol to the European Convention on Human Rights became binding on the United Kingdom, prohibiting the restoration of the death penalty for as long as the UK is a party to the Convention.
 Question: can you be sentenced to death in the uk
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,31,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,31,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: A sphere (from Greek σφαῖρα -- sphaira, ``globe, ball'') is a perfectly round geometrical object in three-dimensional space that is the surface of a completely round ball (viz., analogous to the circular objects in two dimensions, where a ``circle'' circumscribes its ``disk'').
 Question: is a circle the same as a sphere
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,32,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,32,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The Solanaceae, or nightshades, are an economically important family of flowering plants. The family ranges from annual and perennial herbs to vines, lianas, epiphytes, shrubs, and trees, and includes a number of important agricultural crops, medicinal plants, spices, weeds, and ornamentals. Many members of the family contain potent alkaloids, and some are highly toxic, but many, including tomatoes, potatoes, eggplant, bell/chili peppers, and tobacco are widely used. The family belongs to the order Solanales, in the asterid group and class Magnoliopsida (dicotyledons). The Solanaceae consists of about 98 genera and some 2,700 species, with a great diversity of habitats, morphology and ecology.
 Question: are tomatoes a member of the nightshade family
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,33,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,33,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Last Star is a young adult science fiction novel written by American author Rick Yancey. It was published on May 24, 2016, by G.P. Putnam's Sons. The novel is the third and final in The 5th Wave trilogy, preceded by The Infinite Sea.
 Question: is there a sequel to the 5th wave
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,34,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,34,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Designed by Populous and Foster and Partners, the stadium is crowned by a 134-metre-high (440 ft) Wembley Arch which serves aesthetically as a landmark across London and structurally with the arch supporting over 75% of the entire roof load. The stadium was built by Australian firm Multiplex at a cost of £798 million (£1.09 billion today). Contrary to popular belief, Wembley Stadium does not have a retractable roof which covers the playing surface. Two partially retractable roof structures over the east and west end of the stadium can be opened to allow sunlight and aid pitch growth.
 Question: can they close the roof at wembley stadium
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,35,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,35,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Waiter Rule refers to a common belief that one's true character can be gleaned from how one treats staff or service workers, such as a ``waiter''. The rule was one of William H Swanson's 33 Unwritten Rules of Management, copied from Dave Barry's version ``If someone is nice to you but rude to the waiter, they are not a nice person.''
 Question: you can tell a lot about a person by how they treat their waiter
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,36,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,36,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Current evidence suggests that wild, domestic and feral pigeons mate for life, although their long-term bonds are not unbreakable. They are socially monogamous, but extra-pair matings do occur, often initiated by males. Due to their ability to produce crop milk, pigeons can breed at any time of year.
 Question: do pigeons have the same mate for life
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,37,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,37,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Blue Ridge Mountains are a physiographic province of the larger Appalachian Mountains range. This province consists of northern and southern physiographic regions, which divide near the Roanoke River gap. The mountain range is located in the eastern United States, starting at its southernmost portion in Georgia, then ending northward in Pennsylvania. To the west of the Blue Ridge, between it and the bulk of the Appalachians, lies the Great Appalachian Valley, bordered on the west by the Ridge and Valley province of the Appalachian range.
 Question: is the blue ridge mountains part of the appalachians
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,38,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,38,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The production Cruze had standard front-wheel drive, with all-wheel drive optional. Chevrolet pursued a marketing strategy that positioned the high-riding Cruze as a light-duty sport utility vehicle (SUV). This contrasted with Suzuki's approach with the Ignis marketed as a conventional passenger model. From 2003, Suzuki of Europe began manufacturing the Cruze as the Suzuki Ignis--representing a facelift of the original Ignis, but only for European markets.
 Question: is the 2017 chevy cruze front wheel drive
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,39,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,39,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Muppets are a group of puppet characters created by Jim Henson, many for the purpose of appearing on the children's television program Sesame Street. Henson's involvement in Sesame Street began when he and Joan Ganz Cooney, one of the creators of the show, met in the summer of 1968, at one of the show's five three-day curriculum planning seminars in Boston. Author Christopher Finch reported that director Jon Stone, who had worked with Henson previously, felt that if they could not bring him on board, they should ``make do without puppets''.
 Question: are the muppets the same as sesame street
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,40,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,40,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The Vampire Diaries, an American supernatural drama, was renewed for an eighth season by The CW on March 11, 2016. On July 23, 2016, the CW announced that the upcoming season would be the series' last and would consist of 16 episodes. The season premiered on October 21, 2016 and concluded on March 10, 2017.
 Question: was season 8 of vampire diaries the last
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,41,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,41,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: This is a list of all penalty shoot-outs that have occurred in the Finals tournament of the FIFA World Cup. Penalty shoot-outs were introduced as tie-breakers in the 1978 World Cup but did not occur before 1982. The first time a World Cup title was won by penalty shoot-out was in 1994. The only other time was in 2006. By the end of the 2018 edition, 30 shoot-outs have taken place in the World Cup. Of these, only two reached the sudden death stage after still being tied at the end of ``best of five kicks''.
 Question: can a world cup final go to penalties
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,42,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,42,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Saline, also known as saline solution, is a mixture of sodium chloride in water and has a number of uses in medicine. Applied to the affected area it is used to clean wounds, help remove contact lenses, and help with dry eyes. By injection into a vein it is used to treat dehydration such as from gastroenteritis and diabetic ketoacidosis. It is also used to dilute other medications to be given by injection.
 Question: is sodium chloride the same as saline water
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,43,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,43,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Webster's Third New International Dictionary, published in 1961, went against then-standard practice when it included the following usage note in its entry on ain't: ``though disapproved by many and more common in less educated speech, used orally in most parts of the U.S. by many cultivated speakers esp. in the phrase ain't I.'' Many commentators disapproved of the dictionary's relatively permissive attitude toward the word, which was inspired, in part, by the belief of its editor, Philip Gove, that ``distinctions of usage were elitist and artificial.''
 Question: is ain't a word in the webster dictionary
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,44,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,44,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The second season of the American web television series Iron Fist, which is based on the Marvel Comics character of the same name, follows Danny Rand / Iron Fist, a martial arts expert with the ability to call upon the power of the Iron Fist. It is set in the Marvel Cinematic Universe (MCU), sharing continuity with the films and other television series of the franchise. The season is produced by Marvel Television in association with ABC Studios, with Raven Metzner serving as showrunner.
 Question: will there be a season 2 of marvel's iron fist
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,45,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,45,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: An anime adaptation of the light novel was announced during the Dengeki Bunko Fall Festival on October 6, 2013. It is directed by Manabu Ono and animated by Madhouse. It premiered on Tokyo MX, Gunma TV, and Tochigi TV on April 6, 2014; nine other networks and three streaming services broadcast the series afterwards. The final episode premiered on September 28. The individual episodes were later encapsulated into ten DVD and Blu-ray volumes released between July 2014 and April 2015.
 Question: will there be another season of the irregular at magic high school
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,46,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,46,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Superheated water is liquid water under pressure at temperatures between the usual boiling point, 100 °C (212 °F) and the critical temperature, 374 °C (705 °F). It is also known as ``subcritical water'' or ``pressurized hot water.'' Superheated water is stable because of overpressure that raises the boiling point, or by heating it in a sealed vessel with a headspace, where the liquid water is in equilibrium with vapour at the saturated vapor pressure. This is distinct from the use of the term superheating to refer to water at atmospheric pressure above its normal boiling point, which has not boiled due to a lack of nucleation sites (sometimes experienced by heating liquids in a microwave).
 Question: is it possible to heat water above its boiling point
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,47,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,47,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Fighting in ice hockey is an established tradition of the sport in North America, with a long history that involves many levels of amateur and professional play and includes some notable individual fights. Fighting is usually performed by enforcers, or ``goons''--players whose role is to fight and intimidate--on a given team, and is governed by a complex system of unwritten rules that players, coaches, officials, and the media refer to as ``the code''. Some fights are spontaneous, while others are premeditated by the participants. While officials tolerate fighting during hockey games, they impose a variety of penalties on players who engage in fights.
 Question: is it legal to fight in ice hockey
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,48,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,48,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Play proceeds through a succession of ``hands'', each hand consisting of a ``deal'', ``the play'' and ``the show''. At any time during any of these stages, if a player reaches the target score (usually 121), play ends immediately with that player being the winner of the game. This can even happen during the deal, since the dealer scores if a Jack is cut as the starter.
 Question: can you go out on a jack in cribbage
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,49,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,49,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: A unique local address (ULA) is an Internet Protocol version 6 (IPv6) address in the address range fc00::/7. Its purpose in IPv6 is analogous to IPv4 addressing in private networks. Unique local addresses may be used freely, without centralized registration, inside a single site or organization or spanning a limited number of sites or organizations. They are routable only within the scope of such private networks, but not in the global IPv6 Internet.
 Question: are ipv6 unique local unicast addresses routable within and outside an organization
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,50,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,50,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: ``Sectionals'' is the thirteenth episode of the American television series Glee. It premiered on the Fox network on December 9, 2009. The episode was written and directed by series co-creator Brad Falchuk, and serves as the mid-season finale for the show's first season. ``Sectionals'' sees the glee club win the sectionals round of competition, advancing on to regionals. Glee club member Finn (Cory Monteith) discovers he is not the father of his girlfriend Quinn's (Dianna Agron) baby. Football coach Ken Tanaka (Patrick Gallagher) plans his wedding with Emma (Jayma Mays) on the same day as the sectionals competition. Will Schuester (Matthew Morrison) is unable to take the students to sectionals and Emma offers to take them. The episode sees the return of Eve and Michael Hitchcock as rival glee club directors Grace Hitchens and Dalton Rumba.
 Question: in glee season 1 do they win sectionals
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,51,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,51,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Taylor Hayes is a fictional character from the American CBS soap opera The Bold and the Beautiful, portrayed by Hunter Tylo. The character was created by William J. Bell and debuted during the episode dated June 6, 1990. Tylo appeared as a regular continuously until 1994 when she took a hiatus for a few months before being written back into the series. In 1996, she left the serial after being cast on Melrose Place, where she was soon fired on the grounds of being pregnant, and returned shortly after. In 2002, Tylo and the show's executive producer Bradley Bell had mutually agreed that the character was ``played out'', and Taylor was subsequently killed off, last appearing on October 30, 2002. Tylo returned in 2004, reprising Taylor as a ghost. She returned on a permanent basis in April 2005, with the character revealed to be alive. Tylo exited The Bold and the Beautiful again in July 2013, but returned for multiple guest appearances in 2014. She returned again in April 2018.
 Question: is taylor still on the bold and beautiful
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,52,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,52,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Section 1. No person shall be elected to the office of the President more than twice, and no person who has held the office of President, or acted as President, for more than two years of a term to which some other person was elected President shall be elected to the office of the President more than once. But this Article shall not apply to any person holding the office of President when this Article was proposed by the Congress, and shall not prevent any person who may be holding the office of President, or acting as President, during the term within which this article becomes operative from holding the office of President or acting as President during the remainder of such term.
 Question: can the president serve more than two terms
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,53,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,53,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: A driver's permit, learner's permit, learner's license or provisional license, is a restricted license that is given to a person who is learning to drive, but has not yet satisfied the requirement to obtain a driver's license. Having a driver's permit for a certain length of time is usually one of the requirements (along with driver's education and a road test) for applying for a full driver's license. To get a learner's permit, one must typically pass a written permit test, traffic, and rules of the road.
 Question: is a provisional license the same as a permit
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,54,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,54,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Peter Gardner Ostrum (/ˈoʊstrəm/; born November 1, 1957) is an American veterinarian and former child actor whose only film role was as Charlie Bucket in the 1971 motion picture Willy Wonka & the Chocolate Factory.
 Question: is charlie from charlie and the chocolate factory still alive
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,55,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,55,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Justices are nominated by the president and then confirmed by the U.S. Senate. A nomination to the Court is considered to be official when the Senate receives a signed nomination letter from the president naming the nominee, which is then entered in the Senate's record. There have been 37 unsuccessful nominations to the Supreme Court of the United States. Of these, 11 nominees were rejected in Senate roll-call votes, 11 were withdrawn by the president, and 15 lapsed at the end of a session of Congress. Six of these unsuccessful nominees were subsequently nominated and confirmed to other seats on the Court. Additionally, although confirmed, seven nominees either declined office or (in one instance) died before assuming office.
 Question: has any supreme court nominee not been confirmed
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,56,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,56,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: A distinction is drawn in the US between professional doctorates and ``doctor's degree - research/scholarship'', with the latter being ``(a) Ph.D. or other doctor's degree that requires advanced work beyond the master's level, including the preparation and defense of a dissertation based on original research, or the planning and execution of an original project demonstrating substantial artistic or scholarly achievement.'' Internationally, US professional doctorates (which, unlike research doctorates, are not defined as requiring work beyond the master's level) are not generally considered to be doctoral level qualifications. The classification of ``Doctor's degree - other'' also exists for doctorates that do not meet the definition of either professional doctorates or research doctorates.
 Question: is a professional degree higher than a phd
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,57,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,57,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Goalkeepers are normally allowed to handle the ball within their own penalty area, and once they have control of the ball in their hands opposition players may not challenge them for it. However the back-pass rule prohibits goalkeepers from handling the ball after it has been deliberately kicked to them by a team-mate, or after receiving it directly from a throw-in taken by a team-mate. Back-passes with parts of the body other than the foot, such as headers, are not prohibited. Despite the popular name ``back-pass rule'', there is no requirement in the laws that the kick or throw-in must be backwards; handling by the goalkeeper is forbidden regardless of the direction the ball travels.
 Question: can goalie pick up ball from throw in
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,58,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,58,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Curd size is the size of the chunks in the cottage cheese. The two major types of cottage cheese are small-curd, high-acid cheese made without rennet, and large-curd, low-acid cheese made with rennet. Rennet is a natural complex of enzymes that speeds curdling and keeps the curd that forms from breaking up. Adding rennet shortens the cheese-making process, resulting in a lower acid and larger curd cheese, and reduces the amount of curd poured off with leftover liquid (whey). Sometimes large-curd cottage cheese is called ``chunk style.''
 Question: is cottage cheese the same as cheese curds
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,59,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,59,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: State level laws vary significantly in their form, content, and level of restriction. Forty-four states have a provision in their state constitutions similar to the Second Amendment to the U.S. Constitution, which protects the right to keep and bear arms. The exceptions are California, Iowa, Maryland, Minnesota, New Jersey, and New York. In New York, however, the statutory civil rights laws contain a provision virtually identical to the Second Amendment. Additionally, the U.S. Supreme Court held in McDonald v. Chicago that the protections of the Second Amendment to keep and bear arms for self-defense in one's home apply against state governments and their political subdivisions.
 Question: is it illegal to have a gun in your home
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,60,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,60,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: In response to persistent demands for dual citizenship, particularly from the diaspora in North America and other developed countries, the Overseas Citizenship of India (OCI) scheme was introduced by amending The Citizenship Act, 1955 in August 2005. The scheme was launched during the Pravasi Bharatiya Divas convention in Hyderabad in 2006. Indian authorities have interpreted the law to mean a person cannot have a second country's passport simultaneously with an Indian one -- even in the case of a child who is claimed by another country as a citizen of that country, and who may be required by the laws of the other country to use one of its passports for foreign travel (such as a child born in the United States or in Australia to Indian parents), and the Indian courts have given the executive branch wide discretion over this matter. Therefore, Overseas Citizenship of India is not an actual citizenship of India and thus, does not amount to dual citizenship or dual nationality or anyone no longer to use Indian IDs after OCI. Moreover, the OCI card is not a substitute for an Indian visa and therefore, the passport which displays the lifetime visa must be carried by OCI holders while travelling to India. OCI Cards are now being printed without the lifelong ``U'' Visa Sticker (which is normally pasted on the applicant's passport). The proof of lifelong visa will be just the OCI Card which will have ``Life Time Visa'' printed on it. The OCI Card will be valid with any Valid Passport. However, countries may consider the OCI as dual citizenship: for example, the UK government considers that, for purposes of the British Nationality Act 1981, ``OCI is considered to be citizenship of another State''.
 Question: can we get indian citizenship for us born child
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,61,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,61,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: A thermoelectric generator (TEG), also called a Seebeck generator, is a solid state device that converts heat flux (temperature differences) directly into electrical energy through a phenomenon called the Seebeck effect (a form of thermoelectric effect). Thermoelectric generators function like heat engines, but are less bulky and have no moving parts. However, TEGs are typically more expensive and less efficient.
 Question: can heat energy be converted to electrical energy
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,62,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,62,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Tomato purée is a thick liquid made by cooking and straining tomatoes. The difference between tomato paste, tomato purée, and tomato sauce is consistency; tomato puree has a thicker consistency and a deeper flavour than sauce.
 Question: is tomato puree the same as tomato sauce
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,63,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,63,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Absolute bills of sale, which do not represent any form of security whatsoever, are simply documents evidencing assignments, transfers and other assurances of personal chattels, which are substantially no more than mere contracts of sale of goods covered by the common law of contract and the sale of goods law.
 Question: the bill of sale is absolute proof of ownership
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,64,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,64,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Jaws is a theme park attraction at Universal Studios Japan. Based upon the films of the same name. The attraction places guests aboard tour boats for what should be a leisurely tour of Amity Harbor, but instead becomes a harrowing chase between the craft and a very determined great white shark. Jaws is an expanded version of a famous miniature attraction on the long-running and world famous Studio Tour at Universal Studios Hollywood, also inspired by the film, and can be found at Universal Studios Japan near Osaka, and formerly, at Universal Studios Florida in Orlando.
 Question: is there a jaws ride at universal studios hollywood
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,65,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,65,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Common aqueous acids include hydrochloric acid (a solution of hydrogen chloride which is found in gastric acid in the stomach and activates digestive enzymes), acetic acid (vinegar is a dilute aqueous solution of this liquid), sulfuric acid (used in car batteries), and citric acid (found in citrus fruits). As these examples show, acids (in the colloquial sense) can be solutions or pure substances, and can be derived from acids (in the strict sense) that are solids, liquids, or gases. Strong acids and some concentrated weak acids are corrosive, but there are exceptions such as carboranes and boric acid.
 Question: the main component of stomach acid is sulfuric acid
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,66,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,66,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Injustice 2 continues the storyline established in Injustice: Gods Among Us. Unlike the previous game, which centered on a multi-universe conflict, the plot for Injustice 2 takes place entirely within the alternate, dystopian universe. According to Injustice: Gods Among Us Cinematic Director Dominic Cianciolo, the story from the first installment provided a solid foundation for adapting the canonical histories of the game's newer cast, allowing the writers to fit their stories within the Injustice universe. The biggest challenge presented to the writers was extending the series' narrative without repeating the core Batman versus Superman conflict. This led to the inclusion of Brainiac as the game's central antagonist, as there were few characters in the DC Universe that could top ``Dictator Superman'' as a foe for Batman.
 Question: does injustice 2 take place in the alternate universe
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,67,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,67,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Soon after the Cavern club closed in 1973, a new Cavern club re-opened at 7 Mathew Street, later re-named the Revolution Club. In 1984, this club was taken over by Liverpool F.C. player Tommy Smith and rebuilt with bricks from the original Cavern club. The new design was to resemble the original as closely as possible. This was a period of massive economic and political change in and around Liverpool and the club only survived until 1989, when it came under financial pressures and closed for 18 months. In 1991, two friends--schoolteacher Bill Heckle and taxi driver Dave Jones--reopened it. They still run the club today and are now the longest-running owners in its history. The club continues to function primarily as a live music venue. The music policy varies from 1960s, 1970s, 1980s and 1990s classic pop music to indie, rock and modern chart music.
 Question: is the cavern club in liverpool the original
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,68,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,68,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: When worn as part of the national dress of Scotland, the sgian-dubh is legal in Scotland, England and Wales. In Scotland under the Criminal Law (Consolidation) (Scotland) Act 1995 Sec. 49, Sub-sec. 5(c); in England and Wales, under the Criminal Justice Act 1988 (section 139) and the Offensive Weapons Act 1996 (section 4).
 Question: is it legal to carry a sgian dubh
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,69,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,69,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Hell's Kitchen: Rookies vs Veterans is the eighteenth season of the American competitive reality television series Hell's Kitchen and premiered on September 28, 2018, on Fox. Gordon Ramsay returns as host and head chef, and Season 10 winner Christina Wilson and British MasterChef judge James ``Jocky'' Petrie return as the red and blue sous chefs, respectively, alongside maitre'd Marino Monferrato. Season 18 features eight new contestants battling eight returning veterans. For the first time, the winner of Season 18 will receive a position as an executive chef at Gordon Ramsay Hell's Kitchen Restaurant at Caesars Palace in Las Vegas, Nevada.
 Question: is there going to be a new season of hell's kitchen
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,70,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,70,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: On April 27, 2017, it was announced that the series would move to BET for its future seasons. In October 2017, BET announced that Cain, Elise, Freeman, Bailess, O'Keefe, and Antonello would be returning to the series, and series creator James LaRosa confirmed that Paige and Senn would not be returning for season four. Teyana Taylor was cast in an undisclosed role in October, and four new regular cast members were announced in November 2017: Tiffany Hines as ``mystery woman'' Eve, Cort King as rookie player Pax, Kyndall as new dancer Jamie, and Kristian Kordula as reporter Noah. Production began in November 2017, and the series' eight-episode fourth season will premiere on July 10, 2018.
 Question: does hit the floor have a new cast
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,71,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,71,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: A shoot-out is usually considered for statistical purposes to be separate from the match which preceded it. In the case of a two-legged fixture, the two matches are still considered either as two draws or as one win and one loss; in the case of a single match, it is still considered as a draw. This contrasts with a fixture won in extra time, where the score at the end of normal time is superseded. Converted shoot-out penalties are not considered as goals scored by a player for the purposes of their individual records, or for ``golden boot'' competitions.
 Question: does penalty shoot out goals count for golden boot
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,72,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,72,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Symbiotic bacteria are bacteria living in symbiosis with another organism or each other. For example, Zoamastogopera, found in the stomach of termites, enable them to digest cellulose.
 Question: can microbes have symbiotic relationships with other microbes
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,73,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,73,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Soul Surfer is a 2011 American biographical drama film directed by Sean McNamara, based on the 2004 autobiography Soul Surfer: A True Story of Faith, Family, and Fighting to Get Back on the Board by Bethany Hamilton about her life as a surfer after a horrific shark attack and her recovery. The film stars AnnaSophia Robb, Helen Hunt, Dennis Quaid, and Lorraine Nicholson with Carrie Underwood, Kevin Sorbo, Sonya Balmores, Branscombe Richmond, and Craig T. Nelson.
 Question: is carrie underwood in the movie soul surfer
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,74,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,74,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The interval period between a new or full moon and the next same phase, a synodic month, averages about 29.53 days. Therefore, in those lunar calendars in which each month begins on the day of the new moon, the full moon falls on either the 14th or 15th day of the lunar month. Because a calendar month consists of a whole number of days, a lunar month may be either 29 or 30 days long.
 Question: is a full moon the same as a new moon
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,75,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,75,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Universal life insurance (often shortened to UL) is a type of cash value life insurance, sold primarily in the United States of America. Under the terms of the policy, the excess of premium payments above the current cost of insurance is credited to the cash value of the policy. The cash value is credited each month with interest, and the policy is debited each month by a cost of insurance (COI) charge, as well as any other policy charges and fees drawn from the cash value, even if no premium payment is made that month. Interest credited to the account is determined by the insurer, but has a contractual minimum rate (often 2%). When an earnings rate is pegged to a financial index such as a stock, bond or other interest rate index, the policy is an ``Indexed Universal Life'' contract. These types of policies offer the advantage of guaranteed level premiums throughout the insured's lifetime at substantially lower premium cost than an equivalent whole life policy at first; the cost of insurance is always increasing as found on the cost index table (usually p. 3 of a contract). This not only allows for easy comparison of costs between carriers, but also works well in irrevocable life insurance trusts (ILIT's) since cash is of no consequence.
 Question: do universal life policies have a cash value
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,76,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,76,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The company trades under the Hastings Direct, Hastings Premier, Hastings Essential, SmartMiles, People's Choice and InsurePink brands. In 2012, the company launched a usage-based insurance product under the Hastings Direct SmartMiles brand. The SmartMiles product requires a telematics device to be fitted to the insured vehicle.
 Question: are hastings direct and hastings premier the same company
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,77,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,77,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Any contestant who overbids is disqualified regardless of their opponent's result. A double overbid results in neither contestant winning a showcase. Since 1974, any contestant who comes within a specified amount from the actual retail price of their own showcase without going over wins both showcases. Until 1998, the amount was less than $100. In 1998, it became the current $250 or less.
 Question: can you still win both showcases on price is right
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,78,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,78,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Duty-free shops (or stores) are retail outlets that are exempt from the payment of certain local or national taxes and duties, on the requirement that the goods sold will be sold to travelers who will take them out of the country. Which products can be sold duty-free vary by jurisdiction, as well as how they can be sold, and the process of calculating the duty or refunding the duty component.
 Question: is duty free and tax free the same thing
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,79,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,79,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: In March 2018, is was announced that Sky Atlantic had renewed the show for a second season.
 Question: is there going to be another season of britannia
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,80,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,80,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The 2005 biographical film Cinderella Man tells Braddock's story. Directed by Ron Howard, it stars Russell Crowe as Braddock and Renée Zellweger as his wife, Mae. The film had an estimated budget of $88 million and grossed $108.5 million worldwide. Crowe's performance earned him a Golden Globe nomination for Best Actor. Paul Giamatti, playing Braddock's manager Joe Gould, was nominated for the Academy Award for Best Supporting Actor. The role of neighbor Sara Wilson was played by Rosemarie DeWitt, who is Braddock's real-life granddaughter (daughter of Braddock's daughter Rosemarie Braddock and husband Kenny DeWitt). The film received mostly positive reviews.
 Question: is cinderella man based on a true story
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,81,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,81,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Beginning November 1, 2011, it is legal to load a handgun, or to transport a loaded handgun cased or uncased, in a vehicle without a license. NOTE: This does NOT apply to long guns; they still must be unloaded, but now may be uncased. There is still some confusion as to whether or not an encased gun is concealed, so if it is cased, best practice is to keep the long gun out of reach. Long guns must be ``discernable to ordinary observation'', since a conceal carry license does not apply. Previously all firearms had to be unloaded & encased (per the transport statute), & out of reach (derived from the concealed carry statute). Those with a concealed carry license may conceal a pistol in a vehicle.
 Question: can i carry my gun in my car in wisconsin
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,82,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,82,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: DC's Legends of Tomorrow, or simply Legends of Tomorrow, is an American superhero television series developed by Greg Berlanti, Marc Guggenheim, Andrew Kreisberg, and Phil Klemmer, who are also executive producers along with Sarah Schechter and Chris Fedak; Klemmer and Fedak serve as showrunners. The series, based on the characters of DC Comics, airs on The CW and is a spin-off featuring characters introduced in Arrow and The Flash along with new characters, set in the Arrowverse, the same fictional universe. The series premiered in January 2016. Legends of Tomorrow was renewed for a fourth season in April 2018, which is set to premiere on October 22, 2018.
 Question: is dc legends of tomorrow based on a comic
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,83,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,83,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: In the history of aviation, there have been a small number of ``sole survivors'' of airline crashes. Lone survivors are often left with physical and psychological injuries. The youngest sole survivor is Chanayuth Nim-anong who on 3 September 1997, survived a crash when he was just 14 months old. He was the sole survivor of Vietnam Airlines Flight 815, which had 65 deaths in total. The oldest sole survivor is Alexander Sizov, who survived a crash at 52 years old. He was the sole survivor (and a crew member) of the Lokomotiv Yaroslavl plane crash, which crashed on 7 September 2011, with 44 fatalities.
 Question: has anyone ever survived a commercial plane crash
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,84,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,84,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Restriction enzymes are endonucleases from eubacteria and archaea that recognize a specific DNA sequence. The nucleotide sequence recognized for cleavage by a restriction enzyme is called the restriction site. Typically, a restriction site will be a palindromic sequence about four to six nucleotides long. Most restriction endonucleases cleave the DNA strand unevenly, leaving complementary single-stranded ends. These ends can reconnect through hybridization and are termed ``sticky ends''. Once paired, the phosphodiester bonds of the fragments can be joined by DNA ligase. There are hundreds of restriction endonucleases known, each attacking a different restriction site. The DNA fragments cleaved by the same endonuclease can be joined together regardless of the origin of the DNA. Such DNA is called recombinant DNA; DNA formed by the joining of genes into new combinations. Restriction endonucleases (restriction enzymes) are divided into three categories, Type I, Type II, and Type III, according to their mechanism of action. These enzymes are often used in genetic engineering to make recombinant DNA for introduction into bacterial, plant, or animal cells, as well as in synthetic biology.
 Question: is a section of dna recognized by a restriction endonuclease
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,85,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,85,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Scallops are characterized by offering two flavors and textures in one shell: the meat, called ``scallop'', which is firm and white, and the roe, called ``coral'', which is soft and often brightly coloured reddish-orange. Sometimes, markets sell scallops already prepared in the shell, with only the meat remaining. Outside the U.S., the scallop is often sold whole. In the UK and Australia, they are available both with and without coral.
 Question: is the orange part of a scallop edible
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,86,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,86,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: New York state law does not require a license to own or possess long guns, but does require a permit to legally possess or own a pistol. However, all firearms must comply with the NY SAFE Act, which bans guns considered ``assault weapons'' from ownership by private citizens, unless they were owned prior to the ban.
 Question: is it legal to carry a gun in nyc
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,87,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,87,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: An aftershock is a smaller earthquake that follows larger earthquake, in the same area of the main shock, caused as the displaced crust adjusts to the effects of the main shock. Large earthquakes can have hundreds to thousands of instrumentally detectable aftershocks, which steadily decrease in magnitude and frequency according to known laws. In some earthquakes the main rupture happens in two or more steps, resulting in multiple main shocks. These are known as doublet earthquakes, and in general can be distinguished from aftershocks in having similar magnitudes and nearly identical seismic waveforms.
 Question: can an aftershock be stronger than an earthquake
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,88,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,88,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Stop sign placement can pose an additional challenge to users. There is a tradeoff between the salient visual cues provided by increased limit line setback, and the crucial time that is lost in approaching the intersection from behind that line; being closer can provide a few additional seconds requisite for safe transit. However, common creeping into the intersection past the limit line causes drivers to lose the invaluable perspective of the visual acuity of lateral motion, crippling them to the more dangerous SAVT. This makes it very difficult to estimate the movement of oncoming traffic. As intersections are not engineered to be used this way, the traffic flow ideals have broken down when drivers consistently choose this method as the safer alternative. Stop signs are accompanied with a limit line, which has a mandatory setback distance which is often not less than 15 feet. While it may be negligence per se to prematurely pass the stop limit line, drivers may be unfairly denied sufficient time gap or opportunity to enter otherwise because of the through-traffic flow and speed; the inherent problem with this traffic control device. While stop signs are a relatively inexpensive method of traffic management, they can be expensive from perspective of the damage they cause users. Pricey but safer traffic signals, roundabouts, and traffic circles are alternatively used where traffic flow dictates it is inappropriate to use a stop sign. It is just as crucial for law enforcement to regulate traffic through-speed that is above the assured clear distance ahead ahead as it is to cite stop sign runners for this device to be a viable option.
 Question: is a stop sign considered a traffic control device
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,89,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,89,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Damon Salvatore is a fictional character in The Vampire Diaries novel series. He is portrayed by Ian Somerhalder in the television series. Initially, Damon is the main antagonist in the beginning of the show and later became a protagonist. After the first few episodes, Damon begins working alongside his younger brother, Stefan Salvatore, to resist greater threats and gradually Elena begins to consider him a friend. His transition was completed after his younger brother Stefan, who is also a vampire, convinces him to drink blood. Damon thus vows to make his brother's life sorrowful -- thus further causing a century-long rift between the two brothers, centering around Katherine and eventually a love triangle with Elena Gilbert. After on-again/off-agains with both brothers, Elena chooses to be with Damon in the finale episode.
 Question: the vampire diaries does damon and elena get together
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,90,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,90,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The alligator snapping turtle (Macrochelys temminckii) is a species of turtle in the family Chelydridae, native to freshwater habitats in the United States. M. temminckii is one of the heaviest freshwater turtles in the world. It is often associated with, but not closely related to, the common snapping turtle, which is in the genus Chelydra. The specific epithet temminckii is in honor of Dutch zoologist Coenraad Jacob Temminck.
 Question: is there such thing as an alligator snapping turtle
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,91,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,91,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Croatia national football team have appeared in the FIFA World Cup on five occasions (in 1998, 2002, 2006, 2014 and 2018) since gaining independence in 1991. Before that, from 1930 to 1990 Croatia was part of Yugoslavia. For World Cup records and appearances in that period, see Yugoslavia national football team and Serbia at the FIFA World Cup. Their best result thus far was silver position at the 2018 final, where they lost 4-2 to France.
 Question: has croatia ever made it to world cup final
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,92,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,92,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: An extensive White House set, of both the East and West Wings, was built on the Castle Rock Entertainment lot in Culver City. The set's Oval Office was later reused for the films Nixon and Independence Day.
 Question: was the american president filmed in the white house
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,93,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,93,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Conceptually, inflation refers to the general trend of prices, not changes in any specific price. For example, if people choose to buy more cucumbers than tomatoes, cucumbers consequently become more expensive and tomatoes cheaper. These changes are not related to inflation, they reflect a shift in tastes. Inflation is related to the value of currency itself. When currency was linked with gold, if new gold deposits were found, the price of gold and the value of currency would fall, and consequently prices of all other goods would become higher.
 Question: inflation means specific prices are rising and relative prices are falling
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,94,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,94,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Open market operations allow the Federal Reserve to increase or decrease the amount of money in the banking system as necessary to balance the Federal Reserve's dual mandates. Open market operations are done through the sale and purchase of United States Treasury security, sometimes called ``Treasury bills'' or more informally ``T-bills'' or ``Treasuries''. The Federal Reserve buys Treasury bills from its primary dealers. The purchase of these securities affects the federal funds rate, because primary dealers have accounts at depository institutions.
 Question: he federal reserve board controls the amount of money available in the economy
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,95,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,95,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: In addition to Tinker Bell and the Legend of the NeverBeast, Disney also had plans for a seventh film. In 2014, The Hollywood Reporter stated that the seventh film was canceled due to story problems.
 Question: are they coming out with a new tinkerbell movie
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,96,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,96,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: The FIFA World Cup is an international association football competition contested by the men's national teams of the members of Fédération Internationale de Football Association (FIFA), the sport's global governing body. The championship has been contested every four years since the first tournament in 1930, except in 1942 and 1946, due to World War II. The Wales national football team has entered every World Cup since the 1950 tournament, but to date has only qualified for one World Cup, in 1958. On that occasion, they reached the quarter-finals before being eliminated by eventual winners Brazil.
 Question: did wales ever qualify for the world cup
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,97,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,97,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: Shoeing, when performed correctly, causes no pain to the animal. Farriers trim the insensitive part of the hoof, which is the same area into which they drive the nails. This is analogous to a manicure on a human fingernail, only on a much larger scale.
 Question: does putting a shoe on a horse hurt
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,98,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,98,"[""False"", ""True""]",0,A,FALSE,,
 "Passage: Entry into Canada is solely determined by Canada Border Services Agency (CBSA) officials in accordance with Canadian law. Visitors are required to have the necessary travel documentation and be in good health. If asked, they must satisfy an immigration officer of ties to their country of origin, such as a job, home, and family. They must also satisfy the officer that they will leave Canada at the end of their visit. Additionally, they must have sufficient money for their stay, and all items belonging to an individual, including the vehicle the individual may be traveling in, are subject to search by the CBSA.
 Question: does it cost money to get into canada
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,99,"[""False"", ""True""]",1,B,True,,
+B. True",QA,BoolQ,Yes,boolq,train,99,"[""False"", ""True""]",1,B,TRUE,,
 "Passage: The Supreme Court of the United States Police is a small U.S. federal law enforcement agency headquartered in the District of Columbia, whose mission is to ensure the integrity of the constitutional mission of the U.S. Supreme Court by protecting the Supreme Court building, the Justices, employees, guests, and visitors. In accordance with 28 U.S.C. § 672, the Supreme Court Police falls under the jurisdiction of the Marshal of the United States Supreme Court who is appointed by the Supreme Court. The Marshal and the Supreme Court Police are authorized by 40 U.S.C. § 6121 to police the Supreme Court Building and protect the Justices, employees of the Court, and visitors to the Court.
 Question: do supreme court judges get secret service protection
 A. False
-B. True",QA,BoolQ,Yes,boolq,train,100,"[""False"", ""True""]",0,A,False,,
+B. True",QA,BoolQ,Yes,boolq,train,100,"[""False"", ""True""]",0,A,FALSE,,

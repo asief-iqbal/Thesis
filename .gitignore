@@ -19,22 +19,15 @@ nosetests.xml
 coverage.xml
 *.cover
 *.log
-.git
 .mypy_cache/
 .pytest_cache/
 .hypothesis/
 export/
+
 # Project specific
-checkpoints/
 hf_cache/
 .hf_cache/
+*.pdf
 nltk_data/
 spacy_data/
 .env
-*.pt
-*.png
-Training Report/
-Test Report/
-*.safetensors
-*.bin
-*.msgpack

@@ -1,0 +1,29 @@
+Training Report
+============================================================
+Episodes: 1400
+Overall Avg Total Time (LCR+RL+Model): 1233.38ms
+  Avg LCR Inference: 16.06ms
+  Avg RL Agent: 0.59ms
+  Avg Model Inference (pruned): 1216.73ms
+  Avg Baseline Inference (unpruned): 1248.34ms
+Overall Avg PPL (pruned): 46.76
+Overall Avg PPL (baseline): 2.31
+
+Overall Avg Reward: -0.0983
+
+Averages by Prune Type and Intensity:
+  none 0.0: Avg Time 1269.37ms, Avg PPL 2.34, Avg Reward -0.0026 (362 samples)
+  attention_heads 0.05: Avg Time 1250.40ms, Avg PPL 2.76, Avg Reward -0.1126 (58 samples)
+  attention_heads 0.1: Avg Time 1251.75ms, Avg PPL 3.03, Avg Reward -0.1357 (51 samples)
+  attention_heads 0.15: Avg Time 1255.94ms, Avg PPL 3.27, Avg Reward -0.2185 (38 samples)
+  attention_heads 0.2: Avg Time 1232.92ms, Avg PPL 3.64, Avg Reward -0.2709 (33 samples)
+  attention_heads 0.25: Avg Time 1245.72ms, Avg PPL 3.67, Avg Reward -0.2563 (20 samples)
+  attention_heads 0.3: Avg Time 1244.89ms, Avg PPL 3.95, Avg Reward -0.2165 (39 samples)
+  attention_heads 0.5: Avg Time 1226.44ms, Avg PPL 8.17, Avg Reward -0.7866 (30 samples)
+  transformer_layers 0.05: Avg Time 1264.25ms, Avg PPL 2.34, Avg Reward -0.0023 (526 samples)
+  transformer_layers 0.1: Avg Time 1209.13ms, Avg PPL 152.85, Avg Reward -0.0664 (69 samples)
+  transformer_layers 0.15: Avg Time 1219.36ms, Avg PPL 17.18, Avg Reward -0.1946 (26 samples)
+  transformer_layers 0.2: Avg Time 1152.33ms, Avg PPL 344.51, Avg Reward -0.4681 (31 samples)
+  transformer_layers 0.25: Avg Time 1098.83ms, Avg PPL 893.00, Avg Reward -0.2743 (32 samples)
+  transformer_layers 0.3: Avg Time 1026.70ms, Avg PPL 50.06, Avg Reward -0.3202 (49 samples)
+  transformer_layers 0.5: Avg Time 857.48ms, Avg PPL 268.03, Avg Reward -0.5290 (36 samples)

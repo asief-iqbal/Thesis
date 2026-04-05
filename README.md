@@ -231,7 +231,7 @@ The controller is a **Double Deep Q-Network** (DDQN). Compared with standard DQN
 
 This state design is central to the methodology. The controller observes hardware pressure, prompt sensitivity, and early representation behavior jointly, allowing the policy to condition on all three.
 
-**Action space (16 discrete actions):**
+**Action space (15 discrete actions):**
 
 | Actions                           | Intensities                                          |
 | --------------------------------- | ---------------------------------------------------- |
@@ -239,7 +239,7 @@ This state design is central to the methodology. The controller observes hardwar
 | `transformer_layers` (11 actions) | 6%, 10%, 12%, 15%, 18%, 20%, 25%, 30%, 35%, 40%, 50% |
 | `attention_heads` (3 actions)     | 10%, 20%, 30%                                        |
 
-The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). Structural FFN slicing exists in the engine but is excluded from the RL action space to limit instability.
+The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). FFN slicing was evaluated during development but consistently produced negative rewards due to high structural overhead and poor quality-speed tradeoffs, so it was removed from the system entirely.
 
 ```mermaid
 flowchart TD
@@ -249,7 +249,7 @@ flowchart TD
     B --> E["10-dimensional state vector"]
     C --> E
     D --> E
-    E --> F["Policy network: 10 → 128 → 128 → 16"]
+    E --> F["Policy network: 10 → 128 → 128 → 15"]
     F --> G{ε-greedy}
     G -->|explore| H[Random action]
     G -->|exploit| I[argmax Q action]
@@ -266,7 +266,7 @@ flowchart TD
 
 | Parameter                | Value                                                  |
 | ------------------------ | ------------------------------------------------------ |
-| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 16$    |
+| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 15$    |
 | Replay buffer            | 10,000 transitions                                     |
 | Batch size               | 32                                                     |
 | Optimizer                | AdamW                                                  |
@@ -300,19 +300,25 @@ Llama-3.2-1B uses grouped-query attention (32 query heads, 8 KV heads, group siz
 3. Updates `num_heads`, `num_key_value_heads`, and `head_dim` attributes on every attention layer.
 4. Saves and restores original weights on demand.
 
-#### Structural FFN slicing
+#### Importance scoring (zero-cost, weight-magnitude)
 
-The engine can also shrink MLP intermediate dimensions (`pruners/structured_ffn_slicer.py`), keeping sizes aligned to multiples of 128 for hardware efficiency. This is implemented but not exposed in the current RL action space.
+Previous versions used a hook-based calibration pass requiring ~64 forward passes through the backbone to collect activation statistics. This added latency and complexity.
 
-#### Importance calibration
+The current implementation computes importance scores **entirely from weight magnitudes at model load time** — zero extra inference, zero hooks, zero calibration prompts. This is both faster and more reproducible.
 
-Before training begins, the engine runs an importance-calibration pass on a small prompt subset. Forward hooks collect activation-based importance scores for:
+**Head importance** (per Q-head, per layer):
 
-- Attention heads (at `o_proj` input)
-- FFN channels (at `down_proj` input)
-- Transformer layers (via output activations)
+- $I_h = \|W_Q^{(h)}\|_F + \|W_O^{(:,h)}\|_F + \frac{1}{g}\|W_K^{(\lfloor h/g \rfloor)}\|_F + \frac{1}{g}\|W_V^{(\lfloor h/g \rfloor)}\|_F$
+- where $g$ = heads per KV group (4 for Llama-3.2-1B GQA)
+- KV norms are divided by the group size to avoid inflating shared KV heads
 
-These scores determine which components are removed first during pruning, so the policy operates over an **importance-aware pruning substrate** rather than random removal.
+**Layer importance** (per transformer layer):
+
+- $I_\ell = \sum_{p \in \text{params}(\ell)} \|p\|_F$
+- Total Frobenius norm of all parameters in the layer
+- Lower norm → less important → safe to skip
+
+This approach is well-established in the magnitude pruning literature and provides a deterministic, hardware-independent ranking that does not depend on the calibration prompt distribution.
 
 ### Benchmarking and Reward
 
@@ -577,9 +583,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | --------------------------- | ---------------------------------------------------------------------- |
 | `layer_skipper.py`          | Physical layer removal with DynamicCache-safe `layer_idx` reassignment |
 | `structured_head_slicer.py` | GQA-safe structural head pruning (rebuilds projection matrices)        |
-| `structured_ffn_slicer.py`  | Structural FFN intermediate-dimension slicing                          |
 | `head_pruner.py`            | Activation-mask-based head pruning (legacy, used for calibration)      |
-| `ffn_pruner.py`             | Activation-mask-based FFN pruning (legacy, used for calibration)       |
 
 ### Data files
 
@@ -731,11 +735,10 @@ Controller overhead is included in total pruned latency reporting, ensuring hone
 ## Limitations and Future Work
 
 1. **Single LCR score in state** — the repository supports multi-method label preparation, but the controller currently uses a single composite sensitivity score. A multi-output router feeding separate scores per pruning type is a natural extension.
-2. **FFN slicing not in action space** — structural FFN slicing is implemented but excluded from the current RL experiments to limit instability. It can be activated for future ablations.
-3. **Head pruning latency impact** — autoregressive generation is memory-bandwidth-bound, so structural head pruning produces smaller latency gains than layer removal. The action space reflects this asymmetry.
-4. **Policy stability** — the RL controller achieves speedups but reward shaping and policy regularization remain active research directions. Longer training runs and curriculum learning may improve stability.
-5. **Consumer hardware only** — all experiments use a single RTX 4060 (8 GB). Behavior on different hardware configurations has not been characterized.
-6. **Additional engine scaffolds** — 2:4 semi-structured sparsity, KV-cache compression, and torch.compile integration are present in the codebase but are not central to the reported results.
+2. **Head pruning latency impact** — autoregressive generation is memory-bandwidth-bound, so structural head pruning produces smaller latency gains than layer removal. The action space reflects this asymmetry.
+3. **Policy stability** — the RL controller achieves speedups but reward shaping and policy regularization remain active research directions. Longer training runs and curriculum learning may improve stability.
+4. **Consumer hardware only** — all experiments use a single RTX 4060 (8 GB). Behavior on different hardware configurations has not been characterized.
+5. **Additional engine scaffolds** — 2:4 semi-structured sparsity, KV-cache compression, and torch.compile integration are present in the codebase but are not central to the reported results.
 
 ---
 

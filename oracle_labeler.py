@@ -337,7 +337,7 @@ def main() -> None:
     # --- Legacy single-method config (backward compatible) ---
     parser.add_argument(
         "--sparse-target",
-        choices=["attention_heads", "transformer_layers", "ffn_neurons"],
+        choices=["attention_heads", "transformer_layers"],
         default="attention_heads",
         help="Fixed pruning target for single-method sparse pass (legacy)",
     )

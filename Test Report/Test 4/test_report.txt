@@ -1,0 +1,17 @@
+Test Report
+============================================================
+Episodes: 100
+Overall Avg Total Time (LCR+RL+Model): 1297.59ms
+  Avg LCR Inference: 16.57ms
+  Avg RL Agent: 0.79ms
+  Avg Model Inference (pruned): 1280.23ms
+  Avg Baseline Inference (unpruned): 1392.93ms
+Overall Avg PPL (pruned, arithmetic): 1.96
+Overall PPL (pruned, token-weighted): 1.82
+Overall Avg PPL (baseline, arithmetic): 2.42
+Overall PPL (baseline, token-weighted): 2.22
+
+Overall Avg Reward: 0.0000
+
+Averages by Prune Type and Intensity:
+  transformer_layers 0.1: Avg Time 1297.59ms, Avg PPL 1.96, TW-PPL 1.82, Avg Reward 0.0000 (100 samples)

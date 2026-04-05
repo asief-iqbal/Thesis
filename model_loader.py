@@ -11,8 +11,6 @@ os.makedirs(os.environ["HF_HOME"], exist_ok=True)
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 from pruners.head_pruner import HeadPruner
-from pruners.ffn_pruner import FFNPruner
-from pruners.structured_ffn_slicer import StructuredFFNSlicer
 from pruners.structured_head_slicer import StructuredHeadSlicer
 from pruners.layer_skipper import LayerSkipper
 
@@ -126,25 +124,22 @@ class RealModelEngine:
 
         # Phase 2 scaffold: reversible head/ffn/layer masking via hooks
         self.head_pruner = HeadPruner(self.model)
-        self.ffn_pruner = FFNPruner(self.model)
         import pruners.layer_skipper
         self.layer_skipper = pruners.layer_skipper.LayerSkipper(self.model)
-        # Phase 3 (structural): FFN & Head slicers that rebuild layers for real speedups
-        self.structured_ffn = StructuredFFNSlicer(self.model)
         self.structured_head = StructuredHeadSlicer(self.model)
 
-        # Calibration caches (activation-aware importances)
+        # Weight-magnitude importance caches (zero-cost, no inference needed)
         self.head_importance = {}   # layer_idx -> tensor[num_heads]
-        self.ffn_importance = {}    # layer_idx -> tensor[inter_size]
-        self.layer_importance = []  # per-layer importance (avg |activation| over tokens)
+        self.layer_importance = []  # per-layer importance score
+
+        # Compute importance scores from weight magnitudes at load time
+        self._compute_weight_importances()
 
     def _rebuild_pruners(self) -> None:
         # Rebuild pruners for the current self.model (used after switching profiles)
         self.head_pruner = HeadPruner(self.model)
-        self.ffn_pruner = FFNPruner(self.model)
         import pruners.layer_skipper
         self.layer_skipper = pruners.layer_skipper.LayerSkipper(self.model)
-        self.structured_ffn = StructuredFFNSlicer(self.model)
         self.structured_head = StructuredHeadSlicer(self.model)
 
     def _profile_key(self, action) -> str:
@@ -193,7 +188,6 @@ class RealModelEngine:
 
         # Local slicers for the fresh model
         local_head = StructuredHeadSlicer(new_model)
-        local_ffn = StructuredFFNSlicer(new_model)
 
         layers = getattr(new_model.model, 'layers', [])
 
@@ -225,31 +219,6 @@ class RealModelEngine:
                 per_layer_removed_q[i] = sorted(q_heads_to_remove)
                 per_layer_removed_kv[i] = sorted(kv_heads_to_remove)
             local_head.prune(per_layer_removed_q, per_layer_removed_kv)
-        elif target == 'ffn_neurons':
-            if not layers:
-                return new_model
-            inter_size = getattr(layers[0].mlp.down_proj, 'weight', None).shape[1]
-            # Compute removal to produce a hardware-friendly new intermediate size
-            multiple = 128
-            target_size = int(round(inter_size * (1.0 - intensity)))
-            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
-            new_inter = min(inter_size - 1, new_inter)
-            k = max(1, inter_size - new_inter)
-            per_layer_removed = {}
-            for i, _layer in enumerate(layers):
-                if i in self.ffn_importance:
-                    scores = self.ffn_importance[i]
-                    removed = torch.topk(scores, k, largest=False).indices.tolist()
-                else:
-                    mlp = _layer.mlp
-                    with torch.no_grad():
-                        g_scores = torch.linalg.vector_norm(mlp.gate_proj.weight, ord=2, dim=1)
-                        u_scores = torch.linalg.vector_norm(mlp.up_proj.weight, ord=2, dim=1)
-                        d_scores = torch.linalg.vector_norm(mlp.down_proj.weight, ord=2, dim=0)
-                        scores = g_scores + u_scores + d_scores
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                per_layer_removed[i] = removed
-            local_ffn.prune(per_layer_removed)
         else:
             return new_model
 
@@ -382,40 +351,6 @@ class RealModelEngine:
                 print(f"[Engine] Applying {attn_type} STRUCTURAL head pruning: removing {groups_to_remove_count}/{num_kv_heads} KV groups per layer.")
             self.structured_head.prune(per_layer_removed_q, per_layer_removed_kv)
 
-        elif target == "ffn_neurons" and intensity > 0.0:
-            layers = getattr(self.model.model, "layers", [])
-            if not layers:
-                print("[Engine] No layers found; cannot apply FFN pruning.")
-                return
-            mlp0 = getattr(layers[0], "mlp", None)
-            if mlp0 is None or not hasattr(mlp0, "down_proj"):
-                print("[Engine] MLP structure not recognized; skipping FFN pruning.")
-                return
-            inter_size = mlp0.down_proj.weight.shape[1]
-            # Compute hardware-friendly target intermediate size (aligned to 128)
-            multiple = 128
-            target_size = int(round(inter_size * (1.0 - intensity)))
-            new_inter = max(multiple, int(round(target_size / multiple) * multiple))
-            new_inter = min(inter_size - 1, new_inter)
-            k = max(1, inter_size - new_inter)
-            per_layer_removed = {}
-            for i, layer in enumerate(layers):
-                if i in self.ffn_importance and self.ffn_importance[i].shape[0] == inter_size:
-                    scores = self.ffn_importance[i]
-                    removed = torch.topk(scores, k, largest=False).indices.tolist()
-                else:
-                    # Wanda-style fallback: weight magnitude
-                    mlp = layer.mlp
-                    with torch.no_grad():
-                        g_scores = torch.linalg.vector_norm(mlp.gate_proj.weight, ord=2, dim=1)
-                        u_scores = torch.linalg.vector_norm(mlp.up_proj.weight, ord=2, dim=1)
-                        d_scores = torch.linalg.vector_norm(mlp.down_proj.weight, ord=2, dim=0)
-                        scores = g_scores + u_scores + d_scores
-                        removed = torch.topk(scores, k, largest=False).indices.tolist()
-                per_layer_removed[i] = removed
-            print(f"[Engine] Applying STRUCTURAL FFN pruning: {inter_size} -> {new_inter} neurons ({intensity*100:.0f}% reduction)")
-            self.structured_ffn.prune(per_layer_removed)
-
         elif target == "transformer_layers" and intensity > 0.0:
             layers = getattr(self.model.model, "layers", [])
             L = len(layers)
@@ -530,163 +465,87 @@ class RealModelEngine:
     def restore_model(self) -> None:
         # Restore functional masks
         self.head_pruner.restore()
-        self.ffn_pruner.restore()
         self.layer_skipper.restore()
         # Restore structural slicing (if any)
-        self.structured_ffn.restore()
         self.structured_head.restore()
 
-    def calibrate_importances(self, prompts, max_samples: int = 64, max_seq_len: int = 128) -> None:
-        """Calibrate structural importance scores using established academic methods:
-        - Heads: Activation-based Head Sensitivity (Michel et al., 2019)
-        - FFN: Weight-Activation Product inspired by Wanda (Sun et al., 2023)
-        - Layers: Block Influence (BI) from ShortGPT (Men et al., 2024) —
-          BI(i) = 1 - cosine_similarity(layer_input, layer_output).
-          Low BI → layer barely transforms hidden state → safe to remove.
+    def _compute_weight_importances(self) -> None:
+        """Compute importance scores from weight magnitudes alone — zero extra inference.
+
+        For heads: L2 norm of Q/K/V/O projection weight slices per head.
+        For layers: Frobenius norm of all parameters in the layer.
+        Lower score = less important = safe to prune/skip.
+
+        This replaces the earlier hook-based calibration pass, saving ~64 forward
+        passes and making the importance computation truly inference-free.
         """
         layers = getattr(self.model.model, "layers", [])
         if not layers:
-            print("[Calib] No layers found; skipping calibration.")
+            print("[Importance] No layers found; skipping weight-based importance.")
             return
-        # Prepare accumulators
-        head_acc = {}
-        ffn_acc = {}
-        hooks = []
-        total_tokens = 0
-        # Block Influence accumulators for layers
-        bi_cos_sum = {}   # layer_idx -> cumulative cosine similarity
-        bi_count = {}     # layer_idx -> token count
 
-        # Infer num_heads and inter_size
-        try:
-            attn0 = layers[0].self_attn
-            num_heads = getattr(attn0, 'num_heads', None)
-            head_dim = getattr(attn0, 'head_dim', None)
-            if num_heads is None and hasattr(attn0.o_proj, 'in_features'):
-                cfg = getattr(self.model, 'config', None)
-                nh = getattr(cfg, 'num_attention_heads', None) if cfg is not None else None
-                if nh is not None:
-                    num_heads = nh
-                if head_dim is None and num_heads is not None:
+        cfg = getattr(self.model, "config", None)
+        num_heads = getattr(cfg, "num_attention_heads", None)
+        num_kv_heads = getattr(cfg, "num_key_value_heads", None)
+        head_dim = None
+        if num_heads is not None:
+            try:
+                attn0 = layers[0].self_attn
+                head_dim = getattr(attn0, "head_dim", None)
+                if head_dim is None and hasattr(attn0, "o_proj"):
                     if attn0.o_proj.in_features % num_heads == 0:
                         head_dim = attn0.o_proj.in_features // num_heads
-        except Exception:
-            num_heads = None
-            head_dim = None
-        try:
-            inter_size = layers[0].mlp.down_proj.weight.shape[1]
-        except Exception:
-            inter_size = None
-
-        if num_heads is not None and head_dim is not None:
-            for i, layer in enumerate(layers):
-                head_acc[i] = torch.zeros(num_heads, device=self.model.device)
-                attn = layer.self_attn
-                def make_head_hook(idx):
-                    def pre_hook(module, inputs):
-                        nonlocal total_tokens
-                        if not inputs or inputs[0] is None:
-                            return inputs
-                        x = inputs[0]
-                        B, T, D = x.shape if x.dim() == 3 else (1, x.shape[0], x.shape[-1])
-                        total_tokens += (B*T)
-                        try:
-                            x_ = x.view(B*T, num_heads, head_dim)
-                        except Exception:
-                            return inputs
-                        vals = x_.abs().sum(dim=2).sum(dim=0)
-                        head_acc[idx][:] += vals.to(head_acc[idx].device)
-                        return inputs
-                    return pre_hook
-                hooks.append(attn.o_proj.register_forward_pre_hook(make_head_hook(i)))
-
-        if inter_size is not None:
-            for i, layer in enumerate(layers):
-                ffn_acc[i] = torch.zeros(inter_size, device=self.model.device)
-                mlp = layer.mlp
-                def make_ffn_hook(idx):
-                    def pre_hook(module, inputs):
-                        nonlocal total_tokens
-                        if not inputs or inputs[0] is None:
-                            return inputs
-                        x = inputs[0]
-                        if x.dim() == 3:
-                            B, T, C = x.shape
-                            total_tokens += (B * T)
-                            vals = x.abs().sum(dim=(0, 1))
-                        else:
-                            total_tokens += x.shape[0] if x.dim() > 0 else 1
-                            vals = x.abs().sum(dim=0)
-                        ffn_acc[idx][:] += vals.to(ffn_acc[idx].device)
-                        return inputs
-                    return pre_hook
-                hooks.append(mlp.down_proj.register_forward_pre_hook(make_ffn_hook(i)))
-
-        # Block Influence hooks: capture layer input and output for cosine similarity
-        for i, layer in enumerate(layers):
-            bi_cos_sum[i] = 0.0
-            bi_count[i] = 0
-            def make_bi_hook(idx):
-                def fwd_hook(module, inputs, output):
-                    try:
-                        inp = inputs[0] if isinstance(inputs, (tuple, list)) else inputs
-                        out = output[0] if isinstance(output, (tuple, list)) else output
-                        if inp is None or out is None:
-                            return
-                        # Flatten to (num_tokens, hidden_dim) for cosine similarity
-                        inp_flat = inp.detach().reshape(-1, inp.shape[-1]).float()
-                        out_flat = out.detach().reshape(-1, out.shape[-1]).float()
-                        # Per-token cosine similarity, then average
-                        cos = torch.nn.functional.cosine_similarity(inp_flat, out_flat, dim=-1)
-                        bi_cos_sum[idx] += float(cos.sum().item())
-                        bi_count[idx] += cos.shape[0]
-                    except Exception:
-                        pass
-                return fwd_hook
-            hooks.append(layer.register_forward_hook(make_bi_hook(i)))
-
-        # Run calibration forward passes
-        used = 0
-        self.model.eval()
-        with torch.no_grad():
-            for p in prompts[:max_samples]:
-                tok = self.tokenizer(p, return_tensors='pt', truncation=True, max_length=max_seq_len).to(self.model.device)
-                try:
-                    _ = self.model(**tok)
-                    used += 1
-                except Exception:
-                    continue
-
-        # Remove hooks
-        for h in hooks:
-            try:
-                h.remove()
             except Exception:
                 pass
+        if num_kv_heads is None:
+            num_kv_heads = num_heads
 
-        # Normalize and store importances
-        if used > 0 and num_heads is not None:
-            self.head_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in head_acc.items()}
-        if used > 0 and inter_size is not None:
-            self.ffn_importance = {i: (acc / max(1, total_tokens)).detach().cpu() for i, acc in ffn_acc.items()}
-        # Block Influence layer importance: BI = 1 - mean_cosine_similarity
-        # Low BI → layer is redundant → low importance → safe to skip
-        if used > 0 and layers:
-            L = len(layers)
+        # --- Head importance: weight-magnitude per Q-head ---
+        if num_heads is not None and head_dim is not None:
+            heads_per_group = max(1, num_heads // num_kv_heads) if num_kv_heads else 1
+            with torch.no_grad():
+                for i, layer in enumerate(layers):
+                    attn = getattr(layer, "self_attn", None)
+                    if attn is None:
+                        continue
+                    q_w = attn.q_proj.weight  # (num_heads*head_dim, hidden)
+                    k_w = attn.k_proj.weight  # (num_kv_heads*head_dim, hidden)
+                    v_w = attn.v_proj.weight  # (num_kv_heads*head_dim, hidden)
+                    o_w = attn.o_proj.weight  # (hidden, num_heads*head_dim)
+
+                    scores = torch.zeros(num_heads)
+                    for h in range(num_heads):
+                        # Q rows for this head
+                        q_slice = q_w[h * head_dim:(h + 1) * head_dim, :]
+                        q_norm = float(q_slice.float().norm().item())
+                        # O columns for this head
+                        o_slice = o_w[:, h * head_dim:(h + 1) * head_dim]
+                        o_norm = float(o_slice.float().norm().item())
+                        # K/V rows for the corresponding KV group (shared across heads_per_group Q heads)
+                        kv_h = h // heads_per_group
+                        k_slice = k_w[kv_h * head_dim:(kv_h + 1) * head_dim, :]
+                        v_slice = v_w[kv_h * head_dim:(kv_h + 1) * head_dim, :]
+                        k_norm = float(k_slice.float().norm().item()) / heads_per_group
+                        v_norm = float(v_slice.float().norm().item()) / heads_per_group
+                        scores[h] = q_norm + k_norm + v_norm + o_norm
+                    self.head_importance[i] = scores
+            print(f"[Importance] Head importance computed for {len(self.head_importance)} layers (weight-magnitude, zero inference).")
+
+        # --- Layer importance: total Frobenius norm of all parameters ---
+        with torch.no_grad():
             self.layer_importance = []
-            for i in range(L):
-                cos_avg = bi_cos_sum.get(i, 0.0) / max(1.0, float(bi_count.get(i, 1)))
-                bi_score = 1.0 - cos_avg  # Block Influence
-                self.layer_importance.append(bi_score)
-            # Log BI scores for transparency
-            bi_str = ", ".join(f"L{i}:{bi:.4f}" for i, bi in enumerate(self.layer_importance))
-            print(f"[Calib] Block Influence scores: {bi_str}")
-        # Retain a copy of prompts for later reconstruction passes (Phase C)
-        try:
-            self._calib_prompts_recent = list(prompts[:max_samples]) if prompts else []
-        except Exception:
-            self._calib_prompts_recent = []
-        print(f"[Calib] Completed on {used} samples. Head importances: {len(self.head_importance)} layers, FFN importances: {len(self.ffn_importance)} layers, Layer importances: {len(self.layer_importance)}.")
+            for i, layer in enumerate(layers):
+                total_norm = 0.0
+                for p in layer.parameters():
+                    total_norm += float(p.float().norm().item())
+                self.layer_importance.append(total_norm)
+            # Log for transparency
+            li_str = ", ".join(f"L{i}:{s:.2f}" for i, s in enumerate(self.layer_importance))
+            print(f"[Importance] Layer importance (Frobenius norm): {li_str}")
+
+    def calibrate_importances(self, prompts=None, max_samples: int = 64, max_seq_len: int = 128) -> None:
+        """Backward-compatible entry point — importance is already computed from weights at init."""
+        print("[Calib] Using pre-computed weight-magnitude importances (zero extra inference).")
 
     def _collect_layer_output_sums(self, model: AutoModelForCausalLM, prompts, max_samples: int = 32, max_seq_len: int = 128) -> dict:
         """Collect per-layer output |activation| sums over a small prompt set for gain estimation."""

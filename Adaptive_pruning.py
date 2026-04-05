@@ -163,15 +163,9 @@ class ActionSpace:
             PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=12),
             PruningAction(level=2, intensity=0.20, target="attention_heads", action_index=13),
             PruningAction(level=2, intensity=0.30, target="attention_heads", action_index=14),
-            # Structural FFN intermediate-dimension pruning (Wanda-style importance)
-            PruningAction(level=2, intensity=0.10, target="ffn_neurons", action_index=15),
-            PruningAction(level=2, intensity=0.20, target="ffn_neurons", action_index=16),
-            PruningAction(level=2, intensity=0.30, target="ffn_neurons", action_index=17),
-            PruningAction(level=2, intensity=0.40, target="ffn_neurons", action_index=18),
-            PruningAction(level=2, intensity=0.50, target="ffn_neurons", action_index=19),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions "
-              f"(1 none + 11 layer-skip + 3 head + 5 FFN).")
+              f"(1 none + 11 layer-skip + 3 head).")
 
     def get_action(self, index: int) -> PruningAction:
         return self.actions[index]
@@ -678,7 +672,7 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
             print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
 
         plt.figure(figsize=(10, 6))
-        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'ffn_neurons': 'orange', 'none': 'gray'}
+        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
         for label in set(al_f):
             idx = [j for j, a in enumerate(al_f) if a == label]
             plt.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
@@ -2812,7 +2806,7 @@ if __name__ == "__main__":
     parser.add_argument('--kv-keep-ratio', type=float, default=1.0, help='KV tokens keep ratio [0,1] (Phase D)')
     parser.add_argument('--split-ratio', type=float, default=1.0, help='Train-test split ratio (e.g. 0.7 for 70%% train, 30%% test). Default: 1.0 (no split)')
     parser.add_argument('--test-samples', type=int, default=100, help='Max test episodes for auto-test after training (default: 100)')
-    parser.add_argument('--force-action', type=str, default=None, help='Force a specific action for test mode (format: target:intensity, e.g., ffn_neurons:0.2)')
+    parser.add_argument('--force-action', type=str, default=None, help='Force a specific action for test mode (format: target:intensity, e.g., transformer_layers:0.25)')
     parser.add_argument('--lm-eval', action='store_true', help='Enable lm-eval harness benchmarks (BoolQ, MMLU, HellaSwag)')
     parser.add_argument('--eval-limit', type=int, default=None, help='Limit number of samples per lm-eval task (e.g., 100)')
     parser.add_argument('--eval-batch-size', type=int, default=1, help='Batch size for lm-eval')

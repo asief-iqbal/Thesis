@@ -143,29 +143,41 @@ class PruningAction:
     action_index: int
 
 class ActionSpace:
-    """Defines all possible pruning actions: none, layers, heads, and FFN neurons."""
+    """Defines all possible pruning actions: none, layers, heads, and FFN neurons.
+
+    Every intensity maps to a **mechanically distinct** outcome for
+    Llama-3.2-1B (16 layers, 8 KV heads), eliminating duplicate actions
+    that previously confused the RL policy.
+    """
     def __init__(self):
         self.actions = [
-            PruningAction(level=0, intensity=0.0, target="none", action_index=0),
-            # Transformer layer skipping — fine-grained in the 6–50% range
-            PruningAction(level=3, intensity=0.06, target="transformer_layers", action_index=1),
-            PruningAction(level=3, intensity=0.10, target="transformer_layers", action_index=2),
-            PruningAction(level=3, intensity=0.12, target="transformer_layers", action_index=3),
-            PruningAction(level=3, intensity=0.15, target="transformer_layers", action_index=4),
-            PruningAction(level=3, intensity=0.18, target="transformer_layers", action_index=5),
-            PruningAction(level=3, intensity=0.20, target="transformer_layers", action_index=6),
-            PruningAction(level=3, intensity=0.25, target="transformer_layers", action_index=7),
-            PruningAction(level=3, intensity=0.30, target="transformer_layers", action_index=8),
-            PruningAction(level=3, intensity=0.35, target="transformer_layers", action_index=9),
-            PruningAction(level=3, intensity=0.40, target="transformer_layers", action_index=10),
-            PruningAction(level=3, intensity=0.50, target="transformer_layers", action_index=11),
-            # Structural attention-head pruning (MHA/GQA-safe)
-            PruningAction(level=2, intensity=0.10, target="attention_heads", action_index=12),
-            PruningAction(level=2, intensity=0.20, target="attention_heads", action_index=13),
-            PruningAction(level=2, intensity=0.30, target="attention_heads", action_index=14),
+            PruningAction(level=0, intensity=0.0,   target="none",               action_index=0),
+            # Transformer layer skipping — each intensity removes a distinct
+            # number of layers from the 16-layer backbone:
+            #   0.06→1L  0.12→2L  0.19→3L  0.25→4L  0.31→5L
+            #   0.38→6L  0.44→7L  0.50→8L  0.56→9L  0.62→10L
+            PruningAction(level=3, intensity=0.06,  target="transformer_layers", action_index=1),
+            PruningAction(level=3, intensity=0.12,  target="transformer_layers", action_index=2),
+            PruningAction(level=3, intensity=0.19,  target="transformer_layers", action_index=3),
+            PruningAction(level=3, intensity=0.25,  target="transformer_layers", action_index=4),
+            PruningAction(level=3, intensity=0.31,  target="transformer_layers", action_index=5),
+            PruningAction(level=3, intensity=0.38,  target="transformer_layers", action_index=6),
+            PruningAction(level=3, intensity=0.44,  target="transformer_layers", action_index=7),
+            PruningAction(level=3, intensity=0.50,  target="transformer_layers", action_index=8),
+            PruningAction(level=3, intensity=0.56,  target="transformer_layers", action_index=9),
+            PruningAction(level=3, intensity=0.62,  target="transformer_layers", action_index=10),
+            # Structural attention-head pruning (GQA-safe) — each intensity
+            # removes a distinct number of KV groups from the 8 KV heads:
+            #   0.125→1KV  0.25→2KV  0.375→3KV  0.50→4KV  0.625→5KV  0.75→6KV
+            PruningAction(level=2, intensity=0.125, target="attention_heads",    action_index=11),
+            PruningAction(level=2, intensity=0.25,  target="attention_heads",    action_index=12),
+            PruningAction(level=2, intensity=0.375, target="attention_heads",    action_index=13),
+            PruningAction(level=2, intensity=0.50,  target="attention_heads",    action_index=14),
+            PruningAction(level=2, intensity=0.625, target="attention_heads",    action_index=15),
+            PruningAction(level=2, intensity=0.75,  target="attention_heads",    action_index=16),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions "
-              f"(1 none + 11 layer-skip + 3 head).")
+              f"(1 none + 10 layer-skip + 6 head).")
 
     def get_action(self, index: int) -> PruningAction:
         return self.actions[index]
@@ -222,8 +234,13 @@ class RLControllerAgent:
         self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=1e-4)
         self.loss_fn = nn.MSELoss()
         
-        # Full exploration by default; slight decay after warm-up for convergence
-        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 0.999, 0.1, 0.95
+        # Full exploration by default; higher epsilon_min to prevent premature convergence
+        self.epsilon, self.epsilon_decay, self.epsilon_min, self.gamma = 1.0, 0.999, 0.20, 0.95
+
+        # UCB exploration bonus: encourages under-visited actions
+        self.action_counts = np.zeros(self.action_dim, dtype=np.float64)
+        self.total_action_count = 0
+        self.ucb_c = 1.0  # UCB exploration coefficient
 
         # Replay buffer and training params
         self.replay_buffer = deque(maxlen=10000)
@@ -240,6 +257,8 @@ class RLControllerAgent:
             'epsilon': self.epsilon,
             'state_dim': self.state_dim,
             'action_dim': self.action_dim,
+            'action_counts': self.action_counts.tolist(),
+            'total_action_count': self.total_action_count,
         }, path)
         print(f"[RL Agent] Checkpoint saved to {path}")
 
@@ -251,6 +270,10 @@ class RLControllerAgent:
             print(f"[RL Agent] WARNING: Checkpoint state_dim={saved_dim} != current state_dim={self.state_dim}. "
                   f"Skipping load — start fresh training with the new state vector.")
             return
+        saved_action_dim = ckpt.get('action_dim', None)
+        if saved_action_dim is not None and saved_action_dim != self.action_dim:
+            print(f"[RL Agent] WARNING: Checkpoint action_dim={saved_action_dim} != current action_dim={self.action_dim}. "
+                  f"Loading with strict=False — retrain recommended for new action space.")
         # Load policy net with tolerance for action_dim changes (strict=False)
         try:
             self.policy_net.load_state_dict(ckpt['policy_state'], strict=False)
@@ -274,6 +297,15 @@ class RLControllerAgent:
         if 'optimizer_state' in ckpt:
             try:
                 self.optimizer.load_state_dict(ckpt['optimizer_state'])
+            except Exception:
+                pass
+        # Restore UCB exploration counts if available
+        if 'action_counts' in ckpt:
+            try:
+                saved_counts = np.array(ckpt['action_counts'], dtype=np.float64)
+                if len(saved_counts) == self.action_dim:
+                    self.action_counts = saved_counts
+                    self.total_action_count = int(ckpt.get('total_action_count', int(saved_counts.sum())))
             except Exception:
                 pass
         self.epsilon = 0.0  # exploitation by default when loading
@@ -344,15 +376,25 @@ class RLControllerAgent:
         return math_matches, code_matches
 
     def get_action(self, prompt: str, prompt_ppl: Optional[float] = None, token_len: Optional[int] = None, state_tensor: Optional[torch.Tensor] = None) -> PruningAction:
-        # RL-driven action selection: epsilon-greedy
+        # RL-driven action selection: epsilon-greedy + UCB exploration bonus
         if random.random() < self.epsilon:
             action_index = random.randint(0, self.action_dim - 1)
         else:
             state = state_tensor if state_tensor is not None else self._get_state_vector(prompt, prompt_ppl, token_len)
             with torch.no_grad():
-                q_values = self.policy_net(state)
+                q_values = self.policy_net(state).squeeze(0)  # [action_dim]
+                # UCB1 exploration bonus: c * sqrt(ln(N) / N_a)
+                if self.total_action_count > 0:
+                    log_total = np.log(self.total_action_count + 1)
+                    counts_safe = np.maximum(self.action_counts, 1.0)
+                    ucb_bonus = self.ucb_c * np.sqrt(log_total / counts_safe)
+                    q_values = q_values + torch.tensor(ucb_bonus, dtype=torch.float32)
                 action_index = q_values.argmax().item()
         
+        # Track visit counts for UCB
+        self.action_counts[action_index] += 1
+        self.total_action_count += 1
+
         action = self.action_space.get_action(action_index)
         print(f"[RL Agent] Epsilon: {self.epsilon:.3f}, Action: {action.target} ({action.intensity})")
         return action
@@ -1139,6 +1181,10 @@ def main(num_episodes: int = 50,
         print(f"[Zero-shot] Warning: pre-training eval skipped due to error: {e}")
     
     print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
+
+    # GPU warmup: flush cold-start overhead before timing anything
+    benchmark._warmup_once(model_engine)
+
     metrics_list = []  # Collect metrics for report
     
     for i, prompt in enumerate(prompt_pool):
@@ -1357,6 +1403,9 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
+    # GPU warmup: flush cold-start overhead before timing
+    benchmark._warmup_once(model_engine)
+
     # Set epsilon to 0 for pure exploitation
     original_epsilon = rl_agent.epsilon
     rl_agent.epsilon = 0.0

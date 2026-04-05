@@ -82,13 +82,14 @@ flowchart LR
         J[Hardware telemetry] --> K["10-D DDQN state"]
         H --> K
         I --> K
-        K --> L["DDQN action selection<br/>(16 actions)"]
+        K --> L["DDQN action selection<br/>(17 actions)"]
         L --> M[Pruning engine]
         M --> N["Physical layer removal<br/>or GQA-safe head pruning"]
         N --> O[Pruned inference]
         G --> P["Reward: log-PPL bounded<br/>α=0.9 speed · β=0.1 quality"]
         O --> P
         P --> Q[Replay update + model restoration]
+        L -.->|UCB| R[Action visit counts]
     end
 
     E --> Runtime
@@ -231,15 +232,17 @@ The controller is a **Double Deep Q-Network** (DDQN). Compared with standard DQN
 
 This state design is central to the methodology. The controller observes hardware pressure, prompt sensitivity, and early representation behavior jointly, allowing the policy to condition on all three.
 
-**Action space (15 discrete actions):**
+**Action space (17 discrete actions):**
 
-| Actions                           | Intensities                                          |
-| --------------------------------- | ---------------------------------------------------- |
-| `none`                            | —                                                    |
-| `transformer_layers` (11 actions) | 6%, 10%, 12%, 15%, 18%, 20%, 25%, 30%, 35%, 40%, 50% |
-| `attention_heads` (3 actions)     | 10%, 20%, 30%                                        |
+Every intensity maps to a **mechanically distinct** outcome for Llama-3.2-1B (16 layers, 8 KV heads), eliminating duplicate actions that would waste exploratory capacity and confuse the RL policy.
 
-The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). FFN slicing was evaluated during development but consistently produced negative rewards due to high structural overhead and poor quality-speed tradeoffs, so it was removed from the system entirely.
+| Actions                           | Intensities                                              | Physical effect           |
+| --------------------------------- | -------------------------------------------------------- | ------------------------- |
+| `none`                            | —                                                        | No pruning                |
+| `transformer_layers` (10 actions) | 6%, 12%, 19%, 25%, 31%, 38%, 44%, 50%, 56%, 62%          | Remove 1–10 of 16 layers  |
+| `attention_heads` (6 actions)     | 12.5%, 25%, 37.5%, 50%, 62.5%, 75%                       | Remove 1–6 of 8 KV groups |
+
+The action space is deliberately **layer-skip-heavy** because physical layer removal yields the largest inference speedups for autoregressive generation (which is memory-bandwidth bound, so head pruning has smaller latency impact). The head-pruning granularity covers the full safe range from removing 1 KV group (12.5%) to 6 KV groups (75%, keeping 2/8 minimum). FFN slicing was evaluated during development but consistently produced negative rewards due to high structural overhead and poor quality-speed tradeoffs, so it was removed from the system entirely.
 
 ```mermaid
 flowchart TD
@@ -249,10 +252,10 @@ flowchart TD
     B --> E["10-dimensional state vector"]
     C --> E
     D --> E
-    E --> F["Policy network: 10 → 128 → 128 → 15"]
-    F --> G{ε-greedy}
+    E --> F["Policy network: 10 → 128 → 128 → 17"]
+    F --> G{"ε-greedy + UCB bonus"}
     G -->|explore| H[Random action]
-    G -->|exploit| I[argmax Q action]
+    G -->|exploit| I["argmax(Q + UCB) action"]
     H --> J[Apply pruning action]
     I --> J
     J --> K[Benchmark pruned run]
@@ -266,14 +269,15 @@ flowchart TD
 
 | Parameter                | Value                                                  |
 | ------------------------ | ------------------------------------------------------ |
-| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 15$    |
+| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 17$    |
 | Replay buffer            | 10,000 transitions                                     |
 | Batch size               | 32                                                     |
 | Optimizer                | AdamW                                                  |
 | Learning rate            | $1 \times 10^{-4}$                                     |
 | Discount factor $\gamma$ | 0.95                                                   |
 | Target network update    | Every 200 steps                                        |
-| Epsilon schedule         | Decays toward 0.1 during training; 0 during evaluation |
+| Epsilon schedule         | Decays toward 0.20 during training; 0 during evaluation|
+| Exploration bonus        | UCB1: $c \sqrt{\ln N / N_a}$ with $c = 1.0$            |
 
 ### Dynamic Pruning Engine
 
@@ -374,12 +378,13 @@ flowchart LR
         J["4. Hardware telemetry<br/>CPU · RAM · GPU · VRAM"] --> K["5. Build 10-D state"]
         H --> K
         I --> K
-        K --> L["6. DDQN action selection<br/>(~1ms overhead)"]
+        K --> L["6. DDQN action selection + UCB<br/>(~1ms overhead)"]
         L --> M["7. Apply physical pruning"]
         M --> N["8. Pruned inference"]
         G --> P["9. Compute log-PPL reward"]
         N --> P
         P --> Q["10. Replay update + restore model"]
+        L -.->|UCB bonus| F2["Track action visit counts"]
     end
 
     E --> Runtime

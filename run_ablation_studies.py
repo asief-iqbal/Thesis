@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CASRAP Ablation Studies — Automated Runner
+Architecture Ablation Studies — Automated Runner
 ============================================
 
-Runs five ablation experiments to validate CASRAP design choices:
+Runs five ablation experiments to validate Architecture design choices:
 
     Study 1  — Reward Function Sweep
                Grid over alpha in {0.5,0.6,0.7,0.8,0.9} x beta in {0.1,0.2,0.3,0.4,0.5}
@@ -53,7 +53,7 @@ from matplotlib.patches import FancyBboxPatch
 
 warnings.filterwarnings("ignore")
 
-# ── Import from CASRAP codebase (triggers module-level init) ────────────────
+# ── Import from Architecture codebase (triggers module-level init) ────────────────
 from model_loader import RealModelEngine
 from Adaptive_pruning import (
     RealBenchmark,
@@ -140,6 +140,9 @@ class AblationAgent:
         self.random_policy = random_policy
         self.action_space = shared_action_space or ActionSpace()
 
+        # Private RNG — ensures reproducibility even under interleaved execution
+        self._rng = random.Random(SEED)
+
         # DDQN
         self.policy_net = AblationDQN(state_dim, self.n_actions)
         self.target_net = AblationDQN(state_dim, self.n_actions)
@@ -167,8 +170,8 @@ class AblationAgent:
 
     def select_action(self, state_tensor: torch.Tensor) -> Tuple[PruningAction, int]:
         """Select action; returns (PruningAction, internal_index)."""
-        if self.random_policy or random.random() < self.epsilon:
-            internal_idx = random.randint(0, self.n_actions - 1)
+        if self.random_policy or self._rng.random() < self.epsilon:
+            internal_idx = self._rng.randint(0, self.n_actions - 1)
         else:
             with torch.no_grad():
                 q = self.policy_net(state_tensor).squeeze(0)
@@ -196,7 +199,7 @@ class AblationAgent:
                 self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
             return
 
-        batch = random.sample(self.replay_buffer, self.batch_size)
+        batch = self._rng.sample(list(self.replay_buffer), self.batch_size)
         states, actions, rewards, next_states = zip(*batch)
         s_t  = torch.tensor(np.array(states), dtype=torch.float32)
         a_t  = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
@@ -698,40 +701,97 @@ def _generate_study1_report(grid_results, outdir):
 
 def run_framework_ablation(engine, benchmark, prompt_data, max_new_tokens,
                            outdir, shared_as, study_configs):
-    """Run a set of framework ablation variants.
+    """Run framework ablation variants with **interleaved** execution.
+
+    Previous sequential execution (Control → 2A → 2B → …) caused a
+    systematic timing bias: later variants ran on a warmer OS/GPU cache,
+    inflating their measured tok/s and thus reward/speedup.
+
+    Interleaved design: for each prompt (episode), ALL variants execute in
+    a randomly-shuffled order.  A pre-loop warmup further stabilises the
+    inference pipeline.  Each agent keeps a private RNG so that exploration
+    decisions remain reproducible and independent of execution order.
 
     study_configs: list of dicts, each with:
         label, state_indices, action_indices, random_policy, alpha, beta, subdir
     Returns dict[label -> (metrics, summary)].
     """
+    n = len(prompt_data)
+
+    # ── 1. Initialise all agents (identical torch seed per agent) ───────
+    agents: Dict[str, AblationAgent] = {}
+    for cfg in study_configs:
+        label = cfg["label"]
+        torch.manual_seed(SEED)
+        np.random.seed(SEED)
+        random.seed(SEED)
+
+        agents[label] = AblationAgent(
+            state_dim=len(cfg["state_indices"]),
+            action_indices=cfg["action_indices"],
+            random_policy=cfg["random_policy"],
+            n_episodes=n,
+            shared_action_space=shared_as,
+        )
+
+        print(f"  Initialised agent: {label}  "
+              f"(state_dim={len(cfg['state_indices'])}, "
+              f"actions={len(cfg['action_indices'])}, "
+              f"random={'Yes' if cfg['random_policy'] else 'No'})")
+
+    # ── 2. System warmup ────────────────────────────────────────────────
+    n_warmup = min(20, n)
+    print(f"\n[Warmup] Running {n_warmup} dummy inferences to stabilise timing...")
+    for i in range(n_warmup):
+        engine.restore_model()
+        benchmark.benchmark_and_get_reward(
+            engine, prompt_data[i]["prompt"],
+            max_new_tokens=max_new_tokens, return_metrics=True)
+        engine.restore_model()
+    print("[Warmup] Done.")
+
+    # ── 3. Interleaved episode loop ─────────────────────────────────────
+    all_metrics: Dict[str, List[dict]] = {cfg["label"]: [] for cfg in study_configs}
+    shuffle_rng = random.Random(SEED + 999)   # deterministic per-episode shuffle
+
+    print(f"\n{'='*60}")
+    print(f"  Interleaved training: {len(study_configs)} variants × {n} episodes")
+    print(f"{'='*60}")
+
+    for i, pd in enumerate(prompt_data):
+        # Shuffle variant order each episode so no variant systematically
+        # runs first/last within a prompt (eliminates within-episode bias).
+        variant_order = list(study_configs)
+        shuffle_rng.shuffle(variant_order)
+
+        for cfg in variant_order:
+            label = cfg["label"]
+            m = run_episode(engine, benchmark, agents[label], pd,
+                            cfg["state_indices"], cfg["alpha"], cfg["beta"],
+                            max_new_tokens)
+            m["episode"] = i + 1
+            all_metrics[label].append(m)
+
+        if (i + 1) % 25 == 0 or (i + 1) == n:
+            parts = []
+            for cfg in study_configs:
+                lb = cfg["label"]
+                short = lb.split(":")[0].replace("Study ", "S").replace("Control", "Ctrl")
+                avg_r = np.mean([x["reward"] for x in all_metrics[lb]])
+                parts.append(f"{short}={avg_r:.3f}")
+            print(f"  [Interleaved] Ep {i+1}/{n} | " + " | ".join(parts))
+
+    # ── 4. Save per-variant results ─────────────────────────────────────
     results = {}
     for cfg in study_configs:
         label = cfg["label"]
         subdir = os.path.join(outdir, cfg["subdir"])
         os.makedirs(subdir, exist_ok=True)
 
-        print(f"\n{'='*60}")
-        print(f"  {label}")
-        print(f"  state_dim={len(cfg['state_indices'])}, "
-              f"actions={len(cfg['action_indices'])}, "
-              f"random={'Yes' if cfg['random_policy'] else 'No'}, "
-              f"alpha={cfg['alpha']}, beta={cfg['beta']}")
-        print(f"{'='*60}")
-
-        metrics = run_ablation(
-            engine, benchmark, prompt_data,
-            state_indices=cfg["state_indices"],
-            action_indices=cfg["action_indices"],
-            alpha=cfg["alpha"], beta=cfg["beta"],
-            max_new_tokens=max_new_tokens,
-            random_policy=cfg["random_policy"],
-            label=label,
-            shared_action_space=shared_as,
-        )
+        metrics = all_metrics[label]
         summary = summarize_metrics(metrics)
         results[label] = {"metrics": metrics, "summary": summary, "config": cfg}
 
-        # Save per-variant
         with open(os.path.join(subdir, "metrics.json"), "w") as f:
             json.dump(metrics, f, indent=2)
         with open(os.path.join(subdir, "summary.json"), "w") as f:
@@ -757,9 +817,8 @@ def run_framework_ablation(engine, benchmark, prompt_data, max_new_tokens,
         plt.savefig(os.path.join(subdir, "convergence.png"), dpi=300)
         plt.close()
 
-        # Per-variant report
         _write_variant_report(subdir, label, summary, cfg)
-        print(f"  [{label}] Done.  avg_R={summary['avg_reward']:.4f}  "
+        print(f"  [{label}] avg_R={summary['avg_reward']:.4f}  "
               f"avg_PPL={summary['avg_ppl']:.2f}  avg_speed={summary['avg_speedup_pct']:.2f}%")
 
     return results
@@ -878,7 +937,7 @@ def generate_comparison_charts(results: dict, outdir: str):
 def generate_ablation_summary(study1_results, framework_results, outdir):
     """Write a comprehensive text summary of all ablation studies."""
     lines = []
-    lines.append("CASRAP Ablation Studies — Summary Report")
+    lines.append("Architecture Ablation Studies — Summary Report")
     lines.append("=" * 70)
     lines.append("")
 
@@ -977,7 +1036,7 @@ def generate_ablation_summary(study1_results, framework_results, outdir):
 # =========================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="CASRAP Ablation Studies")
+    parser = argparse.ArgumentParser(description="Architecture Ablation Studies")
     parser.add_argument("--samples", type=int, default=100,
                         help="Number of episodes per ablation (default: 100)")
     parser.add_argument("--max-new-tokens", type=int, default=50)
@@ -995,7 +1054,7 @@ def main():
 
     # ── Step 1: Load model ───────────────────────────────────────────────
     print("\n" + "=" * 70)
-    print("  CASRAP ABLATION STUDIES")
+    print("  Architecture ABLATION STUDIES")
     print("=" * 70)
     print(f"\nStep 1/6: Loading model...")
     t0 = time.time()
@@ -1051,8 +1110,8 @@ def main():
     run_2x = any(s in studies_to_run for s in ["2a", "2b", "2c", "2d"])
     if run_2x:
         framework_configs.append({
-            "label": "Control: Full CASRAP",
-            "subdir": "Control_Full_CASRAP",
+            "label": "Control: Full Architecture",
+            "subdir": "Control_Full_Architecture",
             "state_indices": FULL_INDICES,
             "action_indices": ALL_ACTIONS,
             "random_policy": False,

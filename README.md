@@ -736,6 +736,8 @@ Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correl
 
 Five ablation experiments validate the key design choices. All experiments are automated via `run_ablation_studies.py` and output to `Ablation Report/`.
 
+**Interleaved execution design.** Studies 2A–2D use interleaved episode execution: for each prompt, all variants run in a randomly-shuffled order, and a 20-inference warmup precedes the loop. This eliminates the systematic timing bias that would arise from sequential variant execution (later variants benefit from warmer OS/GPU caches, inflating their measured tok/s). Each agent uses an independent private RNG seeded identically, so exploration decisions remain reproducible.
+
 #### Study 1 — Reward Function Sweep
 
 Grid search over $\alpha \in \{0.5, 0.6, 0.7, 0.8, 0.9\}$ and $\beta \in \{0.1, 0.2, 0.3, 0.4, 0.5\}$ (25 combinations). For each $(\alpha, \beta)$, a fresh DDQN is trained for 100 episodes. Metrics: average reward, mean pruned PPL, mean speedup. Produces heatmaps and a radar chart showing the optimal ridge and why $\alpha=0.9, \beta=0.1$ was chosen.

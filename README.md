@@ -607,7 +607,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | Argument           | Default                    | Description                                                                      |
 | ------------------ | -------------------------- | -------------------------------------------------------------------------------- |
 | `--mode`           | `test`                     | `train`, `test`, or `report`                                                     |
-| `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                                    |
+| `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                                     |
 | `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                                 |
 | `--episodes`       | `50`                       | Number of train or test episodes; also sets the train-mode epsilon-decay horizon |
 | `--max-new-tokens` | `50`                       | Maximum generated continuation length                                            |
@@ -674,13 +674,13 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Reports
 
-| Directory                           | Content                                                    |
-| ----------------------------------- | ---------------------------------------------------------- |
-| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)         |
-| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)     |
-| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)    |
-| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)    |
-| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations) |
+| Directory                           | Content                                                                           |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots, per-source benchmark charts)   |
+| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)                            |
+| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots, per-source benchmark charts) |
+| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)                           |
+| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations)                        |
 
 ---
 

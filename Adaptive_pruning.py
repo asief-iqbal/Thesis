@@ -885,6 +885,154 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         plt.close(fig)
         print("[Report] VRAM usage plot saved to vram_usage.png")
 
+
+def generate_per_source_charts(metrics: List[Dict[str, Any]]):
+    """Generate per-dataset-source bar charts for Perplexity, Inference Time, Speedup, and Token Throughput.
+
+    Each chart groups results by the five benchmark sources (WikiText-2, MMLU, MBPP, BoolQ, GSM8K)
+    and shows baseline (dense) vs pruned values side by side.
+    """
+    # Gather metrics by source
+    source_metrics: Dict[str, List[Dict[str, Any]]] = {}
+    for m in metrics:
+        src = m.get('source')
+        if not src:
+            continue
+        source_metrics.setdefault(src, []).append(m)
+
+    if not source_metrics:
+        print("[Report] No per-source data available — skipping per-source charts.")
+        return
+
+    # Canonical ordering
+    _ORDER = ['WikiText-2', 'MMLU', 'MBPP', 'BoolQ', 'GSM8K']
+    sources_sorted = [s for s in _ORDER if s in source_metrics]
+    # Append any unexpected sources
+    for s in sorted(source_metrics.keys()):
+        if s not in sources_sorted:
+            sources_sorted.append(s)
+
+    # Aggregate per-source averages
+    avg_baseline_ppl = []
+    avg_pruned_ppl = []
+    avg_baseline_time = []
+    avg_pruned_time = []
+    avg_baseline_tok_s = []
+    avg_pruned_tok_s = []
+    avg_speedup = []
+    labels = []
+
+    for src in sources_sorted:
+        mlist = source_metrics[src]
+        n = len(mlist)
+        if n == 0:
+            continue
+        labels.append(src)
+        avg_baseline_ppl.append(np.mean([m['baseline_ppl'] for m in mlist]))
+        avg_pruned_ppl.append(np.mean([m['ppl'] for m in mlist]))
+        avg_baseline_time.append(np.mean([m['baseline_time_ms'] for m in mlist]))
+        avg_pruned_time.append(np.mean([m['model_time_ms'] for m in mlist]))
+        avg_baseline_tok_s.append(np.mean([m['baseline_tok_s'] for m in mlist]))
+        avg_pruned_tok_s.append(np.mean([m['tok_s'] for m in mlist]))
+        # Speedup = dense_time / pruned_model_time (per episode, then averaged)
+        speedups = []
+        for m in mlist:
+            mt = m.get('model_time_ms', 0)
+            bt = m.get('baseline_time_ms', 0)
+            if mt > 0:
+                speedups.append(bt / mt)
+            else:
+                speedups.append(1.0)
+        avg_speedup.append(np.mean(speedups))
+
+    if not labels:
+        return
+
+    x = np.arange(len(labels))
+    w = 0.35
+    palette_base = '#2196F3'
+    palette_pruned = '#FF9800'
+
+    # --- Chart 1: Perplexity ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars1 = ax.bar(x - w/2, avg_baseline_ppl, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
+    bars2 = ax.bar(x + w/2, avg_pruned_ppl, w, label='Pruned', color=palette_pruned, alpha=0.85)
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=8)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=8)
+    ax.set_xlabel('Dataset Source', fontsize=12)
+    ax.set_ylabel('Average Perplexity', fontsize=12)
+    ax.set_title('Per-Source Perplexity: Dense vs Pruned', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+    fig.tight_layout()
+    fig.savefig('per_source_perplexity.png', dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print("[Report] Saved per_source_perplexity.png")
+
+    # --- Chart 2: Average Inference Time ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars1 = ax.bar(x - w/2, avg_baseline_time, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
+    bars2 = ax.bar(x + w/2, avg_pruned_time, w, label='Pruned', color=palette_pruned, alpha=0.85)
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
+    ax.set_xlabel('Dataset Source', fontsize=12)
+    ax.set_ylabel('Avg Inference Time (ms)', fontsize=12)
+    ax.set_title('Per-Source Inference Time: Dense vs Pruned', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+    fig.tight_layout()
+    fig.savefig('per_source_inference_time.png', dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print("[Report] Saved per_source_inference_time.png")
+
+    # --- Chart 3: Speedup ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors_speedup = ['#4CAF50' if s >= 1.0 else '#F44336' for s in avg_speedup]
+    bars = ax.bar(x, avg_speedup, w * 1.5, color=colors_speedup, alpha=0.85)
+    for bar in bars:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01, f'{bar.get_height():.2f}x', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    ax.axhline(y=1.0, color='gray', linestyle='--', linewidth=1, label='No speedup (1.0x)')
+    ax.set_xlabel('Dataset Source', fontsize=12)
+    ax.set_ylabel('Speedup (Dense Time / Pruned Time)', fontsize=12)
+    ax.set_title('Per-Source Inference Speedup', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+    fig.tight_layout()
+    fig.savefig('per_source_speedup.png', dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print("[Report] Saved per_source_speedup.png")
+
+    # --- Chart 4: Token Throughput ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars1 = ax.bar(x - w/2, avg_baseline_tok_s, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
+    bars2 = ax.bar(x + w/2, avg_pruned_tok_s, w, label='Pruned', color=palette_pruned, alpha=0.85)
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
+    ax.set_xlabel('Dataset Source', fontsize=12)
+    ax.set_ylabel('Token Throughput (tok/s)', fontsize=12)
+    ax.set_title('Per-Source Token Throughput: Dense vs Pruned', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.legend(fontsize=10)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
+    fig.tight_layout()
+    fig.savefig('per_source_token_throughput.png', dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print("[Report] Saved per_source_token_throughput.png")
+
+
 def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = 'training_report.txt', header: str = 'Training Report'):
     """Generate post-training report with averages by prune type/intensity and plots."""
     if not metrics_list:
@@ -1120,6 +1268,10 @@ def organize_training_reports(is_report_mode: bool = False):
         'zero_shot_baseline_metrics.json',
         'oracle_zeroshot_post-training.json',
         'oracle_zeroshot_post-training.png',
+        'per_source_perplexity.png',
+        'per_source_inference_time.png',
+        'per_source_speedup.png',
+        'per_source_token_throughput.png',
         'training_report.txt'
     ]
     if not is_report_mode:
@@ -1147,6 +1299,42 @@ def _csv_has_split_column(dataset_path: str) -> bool:
             return 'Split' in (reader.fieldnames or [])
     except Exception:
         return False
+
+# Canonical display names for SourceDataset values
+_SOURCE_DISPLAY = {
+    'wikitext': 'WikiText-2',
+    'cais/mmlu:all': 'MMLU',
+    'mmlu': 'MMLU',
+    'boolq': 'BoolQ',
+    'gsm8k': 'GSM8K',
+    'mbpp': 'MBPP',
+}
+
+def _load_prompt_source_map(dataset_path: str) -> Dict[str, str]:
+    """Build a mapping from prompt text → canonical source name from a CSV with a SourceDataset column."""
+    mapping: Dict[str, str] = {}
+    if not dataset_path or not dataset_path.strip().endswith('.csv'):
+        return mapping
+    path = dataset_path.strip()
+    if not os.path.exists(path):
+        return mapping
+    try:
+        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            if 'SourceDataset' not in (reader.fieldnames or []):
+                return mapping
+            for row in reader:
+                prompt = (
+                    row.get('Prompt') or row.get('prompt') or row.get('text')
+                    or row.get('instruction') or row.get('content')
+                )
+                source = (row.get('SourceDataset') or '').strip()
+                if prompt and source:
+                    key = str(prompt).strip()
+                    mapping[key] = _SOURCE_DISPLAY.get(source, source)
+    except Exception:
+        pass
+    return mapping
 
 def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
     """Load a proper prompt dataset to train/test the RL controller.
@@ -1293,6 +1481,9 @@ def main(num_episodes: int = 50,
     metrics_list = []
     # Load a proper training prompt pool from the specified dataset
     all_prompts = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
+
+    # Build prompt→source mapping for per-source charts
+    _prompt_source_map = _load_prompt_source_map(train_dataset)
 
     # Determine test prompts — prefer CSV Split column over manual split_ratio
     test_prompts_split = []
@@ -1451,6 +1642,7 @@ def main(num_episodes: int = 50,
             'vram_model_gb': _vram_model_gb,
             'vram_pruning_inference_gb': vram_pruning_inference_gb,
             'vram_free_gb': vram_free_gb,
+            'source': _prompt_source_map.get(prompt, ''),
         })
         
         model_engine.restore_model()
@@ -1464,6 +1656,7 @@ def main(num_episodes: int = 50,
     # Generate reports and comparative plots
     generate_report(metrics_list)
     generate_comparative_plots(metrics_list)
+    generate_per_source_charts(metrics_list)
 
     # Save metrics for later report generation and analysis
     import json
@@ -1493,7 +1686,8 @@ def main(num_episodes: int = 50,
                    num_test_episodes=test_cap,
                    max_new_tokens=max_new_tokens,
                    prompts=test_prompts_split[:test_cap],
-                   skip_organize=True)
+                   skip_organize=True,
+                   prompt_source_map=_prompt_source_map)
 
         # Run oracle dataset zero-shot after testing too
         if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
@@ -1558,6 +1752,10 @@ def organize_test_reports(is_report_mode: bool = False):
         'oracle_zeroshot_post-testing.json',
         'oracle_zeroshot_post-testing.png',
         'oracle_zeroshot_comparison.png',
+        'per_source_perplexity.png',
+        'per_source_inference_time.png',
+        'per_source_speedup.png',
+        'per_source_token_throughput.png',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -1585,12 +1783,17 @@ def organize_test_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Test reports organized into {test_path}")
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None, skip_organize: bool = False):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None, skip_organize: bool = False, prompt_source_map: Dict[str, str] = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
     # GPU warmup: flush cold-start overhead before timing
     benchmark._warmup_once(model_engine)
+
+    # Build prompt→source mapping for per-source charts
+    _psm = prompt_source_map
+    if _psm is None and test_dataset:
+        _psm = _load_prompt_source_map(test_dataset)
 
     # Set epsilon to 0 for pure exploitation
     original_epsilon = rl_agent.epsilon
@@ -1721,11 +1924,13 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'vram_model_gb': _vram_model_gb,
             'vram_pruning_inference_gb': vram_pruning_inference_gb,
             'vram_free_gb': vram_free_gb,
+            'source': _psm.get(prompt, '') if _psm else '',
         })
     
     # Generate test reports
     generate_report(metrics_list, report_filename='test_report.txt', header='Test Report')
     generate_comparative_plots(metrics_list)
+    generate_per_source_charts(metrics_list)
     import json
     with open('test_metrics.json', 'w') as f:
         json.dump(metrics_list, f)

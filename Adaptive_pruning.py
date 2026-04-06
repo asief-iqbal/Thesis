@@ -854,21 +854,26 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         plt.close(fig)
         print("[Report] Cumulative reward plot saved to cumulative_reward.png")
 
-    # 10) VRAM usage per episode: incremental VRAM consumed by pruning + inference only
-    vram_used = [m.get('vram_used_gb', 0) for m in metrics]
+    # 10) VRAM breakdown per episode: total capacity, LLM model, pruning+inference, and real free
     vram_total = [m.get('vram_total_gb', 0) for m in metrics]
+    vram_model = [m.get('vram_model_gb', 0) for m in metrics]
+    vram_pi = [m.get('vram_pruning_inference_gb', m.get('vram_used_gb', 0)) for m in metrics]
+    vram_free = [m.get('vram_free_gb', 0) for m in metrics]
     if any(v > 0 for v in vram_total):
         episodes_v = [m['episode'] for m in metrics]
-        vram_available = [t - u for t, u in zip(vram_total, vram_used)]
         fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        # Total VRAM capacity (flat ceiling line)
-        ax.plot(episodes_v, vram_total, color='gray', linestyle='--', linewidth=1.5, label='Total GPU VRAM (GB)')
-        # Incremental VRAM used by pruning + inference (delta from pre-operation baseline)
-        ax.fill_between(episodes_v, vram_used, alpha=0.35, color='red')
-        ax.plot(episodes_v, vram_used, color='red', linewidth=2, label='VRAM Used by Pruning+Inference (GB)')
-        # Remaining VRAM after operation
-        ax.plot(episodes_v, vram_available, color='green', linewidth=2, alpha=0.8, label='VRAM Available After Operation (GB)')
-        ax.set_title('VRAM Usage per Episode (Pruning + Inference Only)', fontsize=16, fontweight='bold')
+        # 1. Total GPU VRAM capacity (flat ceiling)
+        ax.plot(episodes_v, vram_total, color='gray', linestyle='--', linewidth=2, label='Total GPU VRAM')
+        # 2. LLM model weight footprint (standing allocation before pruning)
+        ax.fill_between(episodes_v, vram_model, alpha=0.30, color='blue')
+        ax.plot(episodes_v, vram_model, color='blue', linewidth=2, label='LLM Model Footprint')
+        # 3. Incremental VRAM for pruning + inference (stacked on top of model)
+        vram_model_plus_pi = [m + p for m, p in zip(vram_model, vram_pi)]
+        ax.fill_between(episodes_v, vram_model, vram_model_plus_pi, alpha=0.40, color='red')
+        ax.plot(episodes_v, vram_model_plus_pi, color='red', linewidth=2, label='+ Pruning & Inference')
+        # 4. Real free VRAM on the entire PC (from NVML)
+        ax.plot(episodes_v, vram_free, color='green', linewidth=2, label='Free VRAM (entire GPU)')
+        ax.set_title('VRAM Breakdown per Episode', fontsize=16, fontweight='bold')
         ax.set_xlabel('Episode', fontsize=12)
         ax.set_ylabel('VRAM (GB)', fontsize=12)
         ax.set_ylim(bottom=0)
@@ -1051,10 +1056,12 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
         f.write(f"  Avg RL Agent: {avg_rl:.2f}ms\n")
         f.write(f"  Avg Model Inference (pruned): {avg_model:.2f}ms\n")
         f.write(f"  Avg Baseline Inference (unpruned): {avg_baseline:.2f}ms\n")
-        avg_vram_used = sum(m.get('vram_used_gb', 0) for m in metrics_list) / n
+        avg_vram_model = sum(m.get('vram_model_gb', 0) for m in metrics_list) / n
+        avg_vram_pi = sum(m.get('vram_pruning_inference_gb', m.get('vram_used_gb', 0)) for m in metrics_list) / n
+        avg_vram_free = sum(m.get('vram_free_gb', 0) for m in metrics_list) / n
         avg_vram_total = max((m.get('vram_total_gb', 0) for m in metrics_list), default=0)
         if avg_vram_total > 0:
-            f.write(f"  Avg VRAM delta (pruning+inference only): {avg_vram_used:.3f} GB (of {avg_vram_total:.2f} GB total)\n")
+            f.write(f"  VRAM total: {avg_vram_total:.2f} GB | Avg model: {avg_vram_model:.2f} GB | Avg pruning+inference: {avg_vram_pi:.3f} GB | Avg free: {avg_vram_free:.2f} GB\n")
         f.write(f"Overall Avg PPL (pruned, arithmetic): {total_ppl/n:.2f}\n")
         f.write(f"Overall PPL (pruned, token-weighted): {tw_ppl_pruned:.2f}\n")
         avg_baseline_ppl = sum(m.get('baseline_ppl', 0) for m in metrics_list) / n
@@ -1351,7 +1358,7 @@ def main(num_episodes: int = 50,
         # Snapshot VRAM baseline before pruning + inference to isolate incremental usage
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-            _vram_before = torch.cuda.memory_allocated() / (1024 ** 3)
+            _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)  # LLM weight footprint
             torch.cuda.reset_peak_memory_stats()
         model_engine.apply_pruning(pruning_action)
         pruned_metrics = benchmark.benchmark_and_get_reward(
@@ -1360,13 +1367,21 @@ def main(num_episodes: int = 50,
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             _vram_peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            vram_used_gb = _vram_peak - _vram_before  # incremental: pruning + generation only
+            vram_pruning_inference_gb = _vram_peak - _vram_model_gb  # incremental: pruning + generation only
             vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            # Real free VRAM on the entire GPU (not just PyTorch's view)
+            try:
+                _nvml_info = nvml.nvmlDeviceGetMemoryInfo(nvml.nvmlDeviceGetHandleByIndex(0))
+                vram_free_gb = _nvml_info.free / (1024 ** 3)
+            except Exception:
+                vram_free_gb = vram_total_gb - (torch.cuda.memory_reserved() / (1024 ** 3))
         else:
-            vram_used_gb = 0.0
+            _vram_model_gb = 0.0
+            vram_pruning_inference_gb = 0.0
             vram_total_gb = 0.0
+            vram_free_gb = 0.0
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
-        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM delta: {vram_used_gb:.3f} GB")
+        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
 
         # Reward: balanced speed/quality with log-PPL to prevent catastrophic penalty
         alpha, beta = 0.9, 0.1
@@ -1406,8 +1421,10 @@ def main(num_episodes: int = 50,
             'intensity': pruning_action.intensity,
             'reward': relative_reward,
             'epsilon': rl_agent.epsilon,
-            'vram_used_gb': vram_used_gb,
-            'vram_total_gb': vram_total_gb
+            'vram_total_gb': vram_total_gb,
+            'vram_model_gb': _vram_model_gb,
+            'vram_pruning_inference_gb': vram_pruning_inference_gb,
+            'vram_free_gb': vram_free_gb,
         })
         
         model_engine.restore_model()
@@ -1625,20 +1642,28 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         # Snapshot VRAM baseline before pruning + inference to isolate incremental usage
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-            _vram_before = torch.cuda.memory_allocated() / (1024 ** 3)
+            _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)  # LLM weight footprint
             torch.cuda.reset_peak_memory_stats()
         model_engine.apply_pruning(action)
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             _vram_peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            vram_used_gb = _vram_peak - _vram_before  # incremental: pruning + generation only
+            vram_pruning_inference_gb = _vram_peak - _vram_model_gb  # incremental: pruning + generation only
             vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            # Real free VRAM on the entire GPU (not just PyTorch's view)
+            try:
+                _nvml_info = nvml.nvmlDeviceGetMemoryInfo(nvml.nvmlDeviceGetHandleByIndex(0))
+                vram_free_gb = _nvml_info.free / (1024 ** 3)
+            except Exception:
+                vram_free_gb = vram_total_gb - (torch.cuda.memory_reserved() / (1024 ** 3))
         else:
-            vram_used_gb = 0.0
+            _vram_model_gb = 0.0
+            vram_pruning_inference_gb = 0.0
             vram_total_gb = 0.0
+            vram_free_gb = 0.0
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + metrics['time_ms']
-        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | VRAM delta: {vram_used_gb:.3f} GB")
+        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
         
         model_engine.restore_model()
         
@@ -1659,8 +1684,10 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'action_index': action.action_index,
             'target': action.target,
             'intensity': action.intensity,
-            'vram_used_gb': vram_used_gb,
             'vram_total_gb': vram_total_gb,
+            'vram_model_gb': _vram_model_gb,
+            'vram_pruning_inference_gb': vram_pruning_inference_gb,
+            'vram_free_gb': vram_free_gb,
         })
     
     # Generate test reports

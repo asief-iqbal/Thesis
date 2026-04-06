@@ -26,6 +26,7 @@ import re
 import itertools
 import warnings
 import csv
+from contextlib import contextmanager
 
 try:
     from lcr_minibert import MiniBertLcrConfig, MiniBertLcrScorer
@@ -72,6 +73,57 @@ torch.cuda.manual_seed_all(SEED)
 
 DEFAULT_EPSILON_START = 1.0
 DEFAULT_EPSILON_END = 0.10
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_repo_path(path: Optional[str]) -> Optional[str]:
+    if path is None:
+        return None
+    raw = str(path).strip()
+    if not raw:
+        return raw
+    if os.path.isabs(raw):
+        return raw
+    candidate = os.path.join(REPO_ROOT, raw)
+    if os.path.exists(candidate):
+        return candidate
+    lower = raw.lower()
+    if lower.endswith((".csv", ".json", ".pt", ".png", ".txt", ".jpg", ".jpeg", ".pdf")):
+        return candidate
+    return raw
+
+
+def _next_numbered_report_dir(report_root: str, prefix: str) -> str:
+    os.makedirs(report_root, exist_ok=True)
+    pattern = re.compile(rf"^{re.escape(prefix)} (\d+)$")
+    max_idx = 0
+    for name in os.listdir(report_root):
+        match = pattern.match(name)
+        if not match:
+            continue
+        max_idx = max(max_idx, int(match.group(1)))
+    run_dir = os.path.join(report_root, f"{prefix} {max_idx + 1}")
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir
+
+
+def _create_training_run_dir() -> str:
+    return _next_numbered_report_dir(os.path.join(REPO_ROOT, 'Training Report'), 'Train')
+
+
+def _create_test_run_dir() -> str:
+    return _next_numbered_report_dir(os.path.join(REPO_ROOT, 'Test Report'), 'Test')
+
+
+@contextmanager
+def _pushd(path: str):
+    previous = os.getcwd()
+    os.makedirs(path, exist_ok=True)
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 def compute_epsilon_decay(
@@ -885,152 +937,148 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         plt.close(fig)
         print("[Report] VRAM usage plot saved to vram_usage.png")
 
+# =========================================================================
+# PER-SOURCE-DATASET BAR CHARTS (BASELINE VS PRUNED)
+# =========================================================================
 
-def generate_per_source_charts(metrics: List[Dict[str, Any]]):
-    """Generate per-dataset-source bar charts for Perplexity, Inference Time, Speedup, and Token Throughput.
+# Canonical ordering and display names for the five benchmark sources
+_SOURCE_DISPLAY_MAP = {
+    'wikitext': 'wikitext2',
+    'gsm8k': 'gsm8k',
+    'boolq': 'boolq',
+    'cais/mmlu:all': 'mmlu',
+    'mbpp': 'mbpp',
+}
 
-    Each chart groups results by the five benchmark sources (WikiText-2, MMLU, MBPP, BoolQ, GSM8K)
-    and shows baseline (dense) vs pruned values side by side.
+def _normalize_source(raw: str) -> str:
+    """Map raw SourceDataset values to canonical short names."""
+    raw_l = raw.strip().lower()
+    for key, display in _SOURCE_DISPLAY_MAP.items():
+        if raw_l == key.lower() or raw_l == display.lower():
+            return display
+    # Fuzzy fallback
+    if 'wiki' in raw_l:
+        return 'wikitext2'
+    if 'mmlu' in raw_l:
+        return 'mmlu'
+    return raw.strip()
+
+_SOURCE_ORDER = ['wikitext2', 'gsm8k', 'boolq', 'mmlu', 'mbpp']
+
+def generate_per_source_charts(metrics_list: List[Dict[str, Any]]):
+    """Generate per-dataset-source bar charts: PPL, inference time, speedup, throughput.
+
+    Each chart shows baseline vs pruned side-by-side bars for every dataset source.
+    Charts are saved as separate PNG files.
     """
-    # Gather metrics by source
-    source_metrics: Dict[str, List[Dict[str, Any]]] = {}
-    for m in metrics:
-        src = m.get('source')
-        if not src:
-            continue
-        source_metrics.setdefault(src, []).append(m)
-
-    if not source_metrics:
-        print("[Report] No per-source data available — skipping per-source charts.")
+    if not metrics_list:
         return
 
-    # Canonical ordering
-    _ORDER = ['WikiText-2', 'MMLU', 'MBPP', 'BoolQ', 'GSM8K']
-    sources_sorted = [s for s in _ORDER if s in source_metrics]
-    # Append any unexpected sources
-    for s in sorted(source_metrics.keys()):
-        if s not in sources_sorted:
-            sources_sorted.append(s)
+    # Group metrics by normalized source
+    from collections import defaultdict
+    by_source = defaultdict(list)
+    for m in metrics_list:
+        src = _normalize_source(m.get('source_dataset', 'unknown'))
+        by_source[src].append(m)
 
-    # Aggregate per-source averages
+    # Only plot sources that are in our canonical set and have data
+    sources = [s for s in _SOURCE_ORDER if s in by_source]
+    if not sources:
+        print("[Per-Source] No recognized dataset sources found in metrics, skipping per-source charts.")
+        return
+
+    # Compute per-source averages
     avg_baseline_ppl = []
     avg_pruned_ppl = []
-    avg_baseline_time = []
-    avg_pruned_time = []
+    avg_baseline_time_s = []
+    avg_pruned_time_s = []
     avg_baseline_tok_s = []
     avg_pruned_tok_s = []
-    avg_speedup = []
-    labels = []
+    for src in sources:
+        eps = by_source[src]
+        n = len(eps)
+        avg_baseline_ppl.append(sum(m['baseline_ppl'] for m in eps) / n)
+        avg_pruned_ppl.append(sum(m['ppl'] for m in eps) / n)
+        avg_baseline_time_s.append(sum(m['baseline_time_ms'] for m in eps) / n / 1000.0)
+        avg_pruned_time_s.append(sum(m['model_time_ms'] for m in eps) / n / 1000.0)
+        avg_baseline_tok_s.append(sum(m['baseline_tok_s'] for m in eps) / n)
+        avg_pruned_tok_s.append(sum(m['tok_s'] for m in eps) / n)
 
-    for src in sources_sorted:
-        mlist = source_metrics[src]
-        n = len(mlist)
-        if n == 0:
-            continue
-        labels.append(src)
-        avg_baseline_ppl.append(np.mean([m['baseline_ppl'] for m in mlist]))
-        avg_pruned_ppl.append(np.mean([m['ppl'] for m in mlist]))
-        avg_baseline_time.append(np.mean([m['baseline_time_ms'] for m in mlist]))
-        avg_pruned_time.append(np.mean([m['model_time_ms'] for m in mlist]))
-        avg_baseline_tok_s.append(np.mean([m['baseline_tok_s'] for m in mlist]))
-        avg_pruned_tok_s.append(np.mean([m['tok_s'] for m in mlist]))
-        # Speedup = dense_time / pruned_model_time (per episode, then averaged)
-        speedups = []
-        for m in mlist:
-            mt = m.get('model_time_ms', 0)
-            bt = m.get('baseline_time_ms', 0)
-            if mt > 0:
-                speedups.append(bt / mt)
-            else:
-                speedups.append(1.0)
-        avg_speedup.append(np.mean(speedups))
+    # Speedup = dense_time / model_time (higher is better)
+    speedup_baseline = [1.0] * len(sources)
+    speedup_pruned = [
+        (avg_baseline_time_s[i] / avg_pruned_time_s[i]) if avg_pruned_time_s[i] > 0 else 0.0
+        for i in range(len(sources))
+    ]
 
-    if not labels:
-        return
-
-    x = np.arange(len(labels))
-    w = 0.35
     palette_base = '#2196F3'
     palette_pruned = '#FF9800'
+    bar_width = 0.35
 
-    # --- Chart 1: Perplexity ---
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bars1 = ax.bar(x - w/2, avg_baseline_ppl, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
-    bars2 = ax.bar(x + w/2, avg_pruned_ppl, w, label='Pruned', color=palette_pruned, alpha=0.85)
-    for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=8)
-    for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=8)
-    ax.set_xlabel('Dataset Source', fontsize=12)
-    ax.set_ylabel('Average Perplexity', fontsize=12)
-    ax.set_title('Per-Source Perplexity: Dense vs Pruned', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=10)
-    ax.legend(fontsize=10)
-    ax.grid(axis='y', linestyle='--', alpha=0.4)
-    fig.tight_layout()
-    fig.savefig('per_source_perplexity.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print("[Report] Saved per_source_perplexity.png")
+    def _bar_chart(labels, base_vals, pruned_vals, title, ylabel, filename, log_scale=False, fmt='.2f', suffix=''):
+        x = np.arange(len(labels))
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars1 = ax.bar(x - bar_width/2, base_vals, bar_width, label='baseline', color=palette_base, alpha=0.85)
+        bars2 = ax.bar(x + bar_width/2, pruned_vals, bar_width, label='pruned', color=palette_pruned, alpha=0.85)
+        # Value labels on bars
+        for bar in bars1:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., h, f'{h:{fmt}}{suffix}',
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+        for bar in bars2:
+            h = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., h, f'{h:{fmt}}{suffix}',
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=11)
+        ax.set_title(title, fontsize=14, fontweight='bold', style='italic')
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.legend(fontsize=11)
+        if log_scale:
+            ax.set_yscale('log')
+        ax.grid(axis='y', linestyle='--', alpha=0.4)
+        fig.tight_layout()
+        fig.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"[Per-Source] Saved {filename}")
 
-    # --- Chart 2: Average Inference Time ---
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bars1 = ax.bar(x - w/2, avg_baseline_time, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
-    bars2 = ax.bar(x + w/2, avg_pruned_time, w, label='Pruned', color=palette_pruned, alpha=0.85)
-    for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
-    for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
-    ax.set_xlabel('Dataset Source', fontsize=12)
-    ax.set_ylabel('Avg Inference Time (ms)', fontsize=12)
-    ax.set_title('Per-Source Inference Time: Dense vs Pruned', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=10)
-    ax.legend(fontsize=10)
-    ax.grid(axis='y', linestyle='--', alpha=0.4)
-    fig.tight_layout()
-    fig.savefig('per_source_inference_time.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print("[Report] Saved per_source_inference_time.png")
+    # 1. Perplexity (log scale, like Comparison)
+    _bar_chart(sources, avg_baseline_ppl, avg_pruned_ppl,
+               'Perplexity (lower is better)', 'PPL',
+               'per_source_perplexity.png', log_scale=True)
 
-    # --- Chart 3: Speedup ---
-    fig, ax = plt.subplots(figsize=(10, 6))
-    colors_speedup = ['#4CAF50' if s >= 1.0 else '#F44336' for s in avg_speedup]
-    bars = ax.bar(x, avg_speedup, w * 1.5, color=colors_speedup, alpha=0.85)
-    for bar in bars:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01, f'{bar.get_height():.2f}x', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    ax.axhline(y=1.0, color='gray', linestyle='--', linewidth=1, label='No speedup (1.0x)')
-    ax.set_xlabel('Dataset Source', fontsize=12)
-    ax.set_ylabel('Speedup (Dense Time / Pruned Time)', fontsize=12)
-    ax.set_title('Per-Source Inference Speedup', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=10)
-    ax.legend(fontsize=10)
-    ax.grid(axis='y', linestyle='--', alpha=0.4)
-    fig.tight_layout()
-    fig.savefig('per_source_speedup.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print("[Report] Saved per_source_speedup.png")
+    # 2. Inference time per prompt
+    _bar_chart(sources, avg_baseline_time_s, avg_pruned_time_s,
+               'Inference time per prompt (lower is better)', 'Seconds',
+               'per_source_inference_time.png', fmt='.3f')
 
-    # --- Chart 4: Token Throughput ---
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bars1 = ax.bar(x - w/2, avg_baseline_tok_s, w, label='Dense (Baseline)', color=palette_base, alpha=0.85)
-    bars2 = ax.bar(x + w/2, avg_pruned_tok_s, w, label='Pruned', color=palette_pruned, alpha=0.85)
-    for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
-    for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
-    ax.set_xlabel('Dataset Source', fontsize=12)
-    ax.set_ylabel('Token Throughput (tok/s)', fontsize=12)
-    ax.set_title('Per-Source Token Throughput: Dense vs Pruned', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=10)
-    ax.legend(fontsize=10)
-    ax.grid(axis='y', linestyle='--', alpha=0.4)
-    fig.tight_layout()
-    fig.savefig('per_source_token_throughput.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print("[Report] Saved per_source_token_throughput.png")
+    # 3. Speedup (dense_time / model_time; higher is better)
+    _bar_chart(sources, speedup_baseline, speedup_pruned,
+               'Speedup (dense_time / model_time; higher is better)', 'Speedup',
+               'per_source_speedup.png')
+
+    # 4. Token throughput (higher is better)
+    _bar_chart(sources, avg_baseline_tok_s, avg_pruned_tok_s,
+               'Token throughput (higher is better)', 'New tokens / second',
+               'per_source_token_throughput.png')
+
+    # Also save per-source metrics JSON for reference
+    import json as _json
+    per_source_data = {}
+    for i, src in enumerate(sources):
+        per_source_data[src] = {
+            'n_episodes': len(by_source[src]),
+            'baseline_ppl': avg_baseline_ppl[i],
+            'pruned_ppl': avg_pruned_ppl[i],
+            'baseline_time_s': avg_baseline_time_s[i],
+            'pruned_time_s': avg_pruned_time_s[i],
+            'speedup': speedup_pruned[i],
+            'baseline_tok_s': avg_baseline_tok_s[i],
+            'pruned_tok_s': avg_pruned_tok_s[i],
+        }
+    with open('per_source_metrics.json', 'w') as f:
+        _json.dump(per_source_data, f, indent=2)
+    print("[Per-Source] Saved per_source_metrics.json")
 
 
 def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = 'training_report.txt', header: str = 'Training Report'):
@@ -1272,6 +1320,7 @@ def organize_training_reports(is_report_mode: bool = False):
         'per_source_inference_time.png',
         'per_source_speedup.png',
         'per_source_token_throughput.png',
+        'per_source_metrics.json',
         'training_report.txt'
     ]
     if not is_report_mode:
@@ -1300,42 +1349,6 @@ def _csv_has_split_column(dataset_path: str) -> bool:
     except Exception:
         return False
 
-# Canonical display names for SourceDataset values
-_SOURCE_DISPLAY = {
-    'wikitext': 'WikiText-2',
-    'cais/mmlu:all': 'MMLU',
-    'mmlu': 'MMLU',
-    'boolq': 'BoolQ',
-    'gsm8k': 'GSM8K',
-    'mbpp': 'MBPP',
-}
-
-def _load_prompt_source_map(dataset_path: str) -> Dict[str, str]:
-    """Build a mapping from prompt text → canonical source name from a CSV with a SourceDataset column."""
-    mapping: Dict[str, str] = {}
-    if not dataset_path or not dataset_path.strip().endswith('.csv'):
-        return mapping
-    path = dataset_path.strip()
-    if not os.path.exists(path):
-        return mapping
-    try:
-        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
-            reader = csv.DictReader(f)
-            if 'SourceDataset' not in (reader.fieldnames or []):
-                return mapping
-            for row in reader:
-                prompt = (
-                    row.get('Prompt') or row.get('prompt') or row.get('text')
-                    or row.get('instruction') or row.get('content')
-                )
-                source = (row.get('SourceDataset') or '').strip()
-                if prompt and source:
-                    key = str(prompt).strip()
-                    mapping[key] = _SOURCE_DISPLAY.get(source, source)
-    except Exception:
-        pass
-    return mapping
-
 def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
     """Load a proper prompt dataset to train/test the RL controller.
     Default: 'togethercomputer/RedPajama-Data-1T-Sample'
@@ -1344,6 +1357,12 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     When the CSV contains a 'Split' column, only rows matching `split_type`
     (train/test) are returned — ensuring the same 80-20 split as LCR training.
     """
+    items = load_training_prompts_with_source(dataset_name, split=split, samples=samples, split_type=split_type)
+    return [it['prompt'] for it in items]
+
+
+def load_training_prompts_with_source(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[Dict[str, str]]:
+    """Load prompts with source dataset info. Returns list of dicts with 'prompt' and 'source_dataset' keys."""
     name = dataset_name.strip()
 
     # Local CSV training should not depend on Hugging Face datasets.
@@ -1353,7 +1372,8 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
                 reader = csv.DictReader(handle)
                 fieldnames = list(reader.fieldnames or [])
                 has_split_col = 'Split' in fieldnames
-                prompts = []
+                has_source_col = 'SourceDataset' in fieldnames
+                items = []
                 for row in reader:
                     # Filter by Split column when available
                     if has_split_col and split_type:
@@ -1368,10 +1388,11 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
                         or row.get('content')
                     )
                     if prompt and str(prompt).strip():
-                        prompts.append(str(prompt).strip())
-            random.shuffle(prompts)
-            if prompts:
-                selected = prompts[:samples]
+                        source = (row.get('SourceDataset') or 'unknown').strip() if has_source_col else 'unknown'
+                        items.append({'prompt': str(prompt).strip(), 'source_dataset': source})
+            random.shuffle(items)
+            if items:
+                selected = items[:samples]
                 split_msg = f" (Split={split_type})" if has_split_col else ""
                 print(f"[Train] Loaded {len(selected)} prompts from local CSV {name}{split_msg}.")
                 return selected
@@ -1384,10 +1405,10 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
     except Exception as e:
         print(f"[Train] Hugging Face datasets unavailable ({e}). Falling back to hardcoded prompts.")
         return [
-            "What is the capital of France?",
-            "Explain the concept of machine learning in simple terms.",
-            "Why is the sky blue during the day?",
-            "Write a python function to calculate the factorial of a number.",
+            {'prompt': "What is the capital of France?", 'source_dataset': 'unknown'},
+            {'prompt': "Explain the concept of machine learning in simple terms.", 'source_dataset': 'unknown'},
+            {'prompt': "Why is the sky blue during the day?", 'source_dataset': 'unknown'},
+            {'prompt': "Write a python function to calculate the factorial of a number.", 'source_dataset': 'unknown'},
         ]
 
     # Use RedPajama by default if the user hasn't specified a custom CSV
@@ -1406,45 +1427,47 @@ def load_training_prompts(dataset_name: str, split: str = 'train', samples: int 
                 print(f"[Train] CSV file {name} not found. Falling back to RedPajama.")
                 name = 'togethercomputer/RedPajama-Data-1T-Sample'
                 ds = load_dataset(name, split=split, trust_remote_code=True)
-                # RedPajama has 'text' field
                 prompts = [r['text'][:1024] for r in ds if r.get('text') and len(r['text']) > 50]
         elif 'RedPajama' in name:
             ds = load_dataset(name, split=split, trust_remote_code=True)
-            # Filter for reasonable length and English-like text
             prompts = []
             for r in ds:
                 text = r.get('text', '')
                 if text and 100 < len(text) < 2000:
                     prompts.append(text)
-                if len(prompts) >= samples * 2: # Optimize loading speed
+                if len(prompts) >= samples * 2:
                      break
         else:
-            # Fallback for other HF datasets
             ds = load_dataset(name, split=split)
             prompts = []
             for r in ds:
-                # Try common fields
                 t = r.get('text') or r.get('instruction') or r.get('content')
                 if t and str(t).strip():
                     prompts.append(str(t))
 
-        random.shuffle(prompts)
-        if not prompts:
+        items = [{'prompt': p, 'source_dataset': 'unknown'} for p in prompts]
+        random.shuffle(items)
+        if not items:
             print("[Train] No valid prompts found. Using fallback.")
-            prompts = ["Explain quantum computing in simple terms."]
+            items = [{'prompt': "Explain quantum computing in simple terms.", 'source_dataset': 'unknown'}]
         
-        print(f"[Train] Loaded {len(prompts)} prompts from {name}.")
-        return prompts[:samples]
+        print(f"[Train] Loaded {len(items)} prompts from {name}.")
+        return items[:samples]
 
     except Exception as e:
         print(f"[Train] Failed to load {name}: {e}. Falling back to WikiText-2.")
         try:
             ds = load_dataset('wikitext', 'wikitext-2-raw-v1', split=split)
             prompts = [r['text'] for r in ds if r['text'] and len(r['text']) > 50]
-            random.shuffle(prompts)
-            return prompts[:samples]
+            items = [{'prompt': p, 'source_dataset': 'wikitext'} for p in prompts]
+            random.shuffle(items)
+            return items[:samples]
         except Exception:
-            return ["Describe the water cycle.", "Who wrote 'Hamlet'?", "Define photosynthesis."]
+            return [
+                {'prompt': "Describe the water cycle.", 'source_dataset': 'unknown'},
+                {'prompt': "Who wrote 'Hamlet'?", 'source_dataset': 'unknown'},
+                {'prompt': "Define photosynthesis.", 'source_dataset': 'unknown'},
+            ]
 # =========================================================================
 # MAIN TRAINING LOOP AND UTILITIES
 # =========================================================================
@@ -1465,6 +1488,11 @@ def main(num_episodes: int = 50,
          split_ratio: float = 1.0,
          test_samples: int = 100,
          model_name: Optional[str] = None):
+    train_run_dir = _create_training_run_dir()
+    checkpoint_path = _resolve_repo_path(checkpoint_path)
+    train_dataset = _resolve_repo_path(train_dataset)
+    print(f"[System] Training run directory reserved: {train_run_dir}")
+
     model_engine = RealModelEngine(
         device=device,
         enable_static_profiles=static_profiles,
@@ -1476,36 +1504,37 @@ def main(num_episodes: int = 50,
     )
     rl_agent = RLControllerAgent(model_engine.tokenizer)
     benchmark = RealBenchmark()
-    
-    validation_text = "The field of artificial intelligence has seen rapid advancements in recent years, with breakthroughs in machine learning, natural language processing, and computer vision. These technologies are transforming industries such as healthcare, finance, and transportation. However, ethical considerations and responsible AI development remain critical to ensure these innovations benefit society as a whole. The integration of AI into everyday life raises important questions about privacy, bias, and the future of work."
-    metrics_list = []
-    # Load a proper training prompt pool from the specified dataset
-    all_prompts = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
 
-    # Build prompt→source mapping for per-source charts
-    _prompt_source_map = _load_prompt_source_map(train_dataset)
+    # Load a proper training prompt pool from the specified dataset (with source info)
+    all_items = load_training_prompts_with_source(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
 
     # Determine test prompts — prefer CSV Split column over manual split_ratio
-    test_prompts_split = []
+    test_items_split = []
     _csv_has_split = _csv_has_split_column(train_dataset)
     if _csv_has_split:
         # Dataset already has train/test labels — load test split directly (no split_ratio)
-        test_prompts_split = load_training_prompts(train_dataset, split=train_split, samples=test_samples, split_type='test')
-        prompt_pool = all_prompts
-        print(f"[System] CSV Split column detected: {len(prompt_pool)} train / {len(test_prompts_split)} test prompts loaded directly.")
+        test_items_split = load_training_prompts_with_source(train_dataset, split=train_split, samples=test_samples, split_type='test')
+        item_pool = all_items
+        print(f"[System] CSV Split column detected: {len(item_pool)} train / {len(test_items_split)} test prompts loaded directly.")
     elif 0.0 < split_ratio < 1.0:
         # Manual split_ratio: split the loaded prompts
-        split_idx = int(len(all_prompts) * split_ratio)
-        prompt_pool = all_prompts[:split_idx]
-        test_prompts_split = all_prompts[split_idx:]
-        print(f"[System] Dataset split: {len(prompt_pool)} train ({split_ratio*100:.0f}%) / {len(test_prompts_split)} test ({(1-split_ratio)*100:.0f}%)")
+        split_idx = int(len(all_items) * split_ratio)
+        item_pool = all_items[:split_idx]
+        test_items_split = all_items[split_idx:]
+        print(f"[System] Dataset split: {len(item_pool)} train ({split_ratio*100:.0f}%) / {len(test_items_split)} test ({(1-split_ratio)*100:.0f}%)")
     else:
-        prompt_pool = all_prompts
+        item_pool = all_items
 
     # Honor CLI episodes: cap to requested number
-    limit = min(num_episodes, len(prompt_pool))
-    prompt_pool = prompt_pool[:limit]
+    limit = min(num_episodes, len(item_pool))
+    item_pool = item_pool[:limit]
+    prompt_pool = [it['prompt'] for it in item_pool]
+    source_pool = [it['source_dataset'] for it in item_pool]
     num_episodes = limit
+
+    # Build test prompt lists for downstream usage
+    test_prompts_split = [it['prompt'] for it in test_items_split]
+    test_sources_split = [it['source_dataset'] for it in test_items_split]
 
     # Adaptive epsilon decay: reach epsilon_min by the last actual training episode.
     rl_agent.configure_epsilon_schedule(num_episodes)
@@ -1517,197 +1546,177 @@ def main(num_episodes: int = 50,
     except Exception as e:
         print(f"[Calib] Warning: calibration skipped due to error: {e}")
 
-    # Pre-training zero-shot accuracy evaluation (dense model baseline)
-    print("\n[System] Running pre-training zero-shot accuracy evaluation...")
-    try:
-        run_zero_shot_baseline_eval(model_engine, samples=200, phase_label='Pre-Training')
-    except Exception as e:
-        print(f"[Zero-shot] Warning: pre-training eval skipped due to error: {e}")
-    
-    print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
-
-    # GPU warmup: flush cold-start overhead before timing anything
-    benchmark._warmup_once(model_engine)
-
-    metrics_list = []  # Collect metrics for report
-    
-    for i, prompt in enumerate(prompt_pool):
-        print("\n" + "#"*80 + f"\n# EPISODE {i+1}/{num_episodes}\n" + "#"*80)
-        print(f"[System] Using prompt: '{prompt[:80]}...'")
-        
-        # Phase 1.1: Token length and prompt perplexity (no pruning)
-        token_len = len(rl_agent.tokenizer.encode(prompt))
-        prompt_ppl = benchmark._calculate_perplexity(model_engine, prompt)
-        print(f"[Episode {i+1}] Token length: {token_len}, Prompt PPL: {prompt_ppl:.2f}")
-
-        # Ensure clean (no-prune) state and measure baseline metrics
-        model_engine.restore_model()
-        base_metrics = benchmark.benchmark_and_get_reward(
-            model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
-        )
-        print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
-
-        # Phase 1.3: Compute LCR score + early-Llama features (timed together as LCR overhead)
-        start_lcr = time.time()
-        if getattr(rl_agent, 'lcr_scorer', None) is not None:
-            complexity_score = float(rl_agent.lcr_scorer.score(prompt))
-            print(f"[LCR] Score: {complexity_score:.3f} (MiniBERT)")
-        else:
-            llm_norm = min(1.0, token_len / 200.0)
-            ppl_norm = min(1.0, prompt_ppl / 50.0)
-            complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
-            print(f"[Complexity] Score: {complexity_score:.3f} (llm_norm={llm_norm:.3f}, ppl_norm={ppl_norm:.3f})")
-
-        # Phase 1.3b: Extract cheap early-Llama features (layer-0 only, before pruning)
-        try:
-            early_features = model_engine.extract_early_features(prompt)
-            print(f"[Early-Llama] hidden_norm={early_features['hidden_norm']:.4f} | attn_entropy={early_features['attn_entropy']:.4f} | attn_max={early_features['attn_max']:.4f}")
-        except Exception as e:
-            print(f"[Early-Llama] Warning: extraction failed ({e}), using zeros.")
-            early_features = {"hidden_norm": 0.0, "attn_entropy": 0.0, "attn_max": 0.0}
-        lcr_inference_time_ms = (time.time() - start_lcr) * 1000
-
-        # Phase 1.4: RL-based pruning and pruned metrics
-        start_rl = time.time()
-        state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
-        pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len, state_tensor=state_tensor)
-        rl_inference_time_ms = (time.time() - start_rl) * 1000
-        # Snapshot VRAM baseline before pruning + inference to isolate incremental usage
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)  # LLM weight footprint
-            torch.cuda.reset_peak_memory_stats()
-        model_engine.apply_pruning(pruning_action)
-        pruned_metrics = benchmark.benchmark_and_get_reward(
-            model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
-        )
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            _vram_peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
-            vram_pruning_inference_gb = _vram_peak - _vram_model_gb  # incremental: pruning + generation only
-            vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-            # Real free VRAM on the entire GPU (not just PyTorch's view)
-            try:
-                _nvml_info = nvml.nvmlDeviceGetMemoryInfo(nvml.nvmlDeviceGetHandleByIndex(0))
-                vram_free_gb = _nvml_info.free / (1024 ** 3)
-            except Exception:
-                vram_free_gb = vram_total_gb - (torch.cuda.memory_reserved() / (1024 ** 3))
-        else:
-            _vram_model_gb = 0.0
-            vram_pruning_inference_gb = 0.0
-            vram_total_gb = 0.0
-            vram_free_gb = 0.0
-        total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
-        print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
-
-        # Reward: balanced speed/quality with log-PPL to prevent catastrophic penalty
-        alpha, beta = 0.9, 0.1
-        eps = 1e-8
-        speed_gain = (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
-        # Log-PPL penalty: bounded and proportional (avoids heavy-tailed PPL explosion)
-        log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
-        log_ppl_pruned = np.log(max(pruned_metrics['perplexity'], 1.01))
-        ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
-        relative_reward = alpha * speed_gain - beta * ppl_penalty
-        # Clamp reward to [-2, 2] to prevent extreme outliers from destabilizing training
-        relative_reward = float(np.clip(relative_reward, -2.0, 2.0))
-
-        next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
-        rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
-        print(f"[reward] {relative_reward:.3f}")
-        
-        # Collect detailed metrics for analysis and plots
-        metrics_list.append({
-            'episode': i+1,
-            'token_len': token_len,
-            'prompt_ppl': prompt_ppl,
-            'complexity': complexity_score,
-            'baseline_time_ms': base_metrics['time_ms'],
-            'baseline_tok_s': base_metrics['tok_s'],
-            'baseline_ppl': base_metrics['perplexity'],
-            'baseline_gen_tokens': base_metrics.get('gen_tokens', None),
-            'time_ms': lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms'],
-            'model_time_ms': pruned_metrics['time_ms'],
-            'rl_inference_time_ms': rl_inference_time_ms,
-            'lcr_inference_time_ms': lcr_inference_time_ms,
-            'tok_s': pruned_metrics['tok_s'],
-            'ppl': pruned_metrics['perplexity'],
-            'gen_tokens': pruned_metrics.get('gen_tokens', None),
-            'action_index': pruning_action.action_index,
-            'target': pruning_action.target,
-            'intensity': pruning_action.intensity,
-            'reward': relative_reward,
-            'epsilon': rl_agent.epsilon,
-            'vram_total_gb': vram_total_gb,
-            'vram_model_gb': _vram_model_gb,
-            'vram_pruning_inference_gb': vram_pruning_inference_gb,
-            'vram_free_gb': vram_free_gb,
-            'source': _prompt_source_map.get(prompt, ''),
-        })
-        
-        model_engine.restore_model()
-
-    print("\n[System] ✓ RL training loop completed!")
-    
-    # Save the trained RL policy
-    if checkpoint_path:
-        rl_agent.save(checkpoint_path)
-    
-    # Generate reports and comparative plots
-    generate_report(metrics_list)
-    generate_comparative_plots(metrics_list)
-    generate_per_source_charts(metrics_list)
-
-    # Save metrics for later report generation and analysis
-    import json
-    with open('training_metrics.json', 'w') as f:
-        json.dump(metrics_list, f)
-    
-    # Run oracle dataset zero-shot evaluation (MMLU & BoolQ) after training
     _train_zs_results = {}
-    if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
+    with _pushd(train_run_dir):
+        # Pre-training zero-shot accuracy evaluation (dense model baseline)
+        print("\n[System] Running pre-training zero-shot accuracy evaluation...")
         try:
-            _train_zs_results = run_oracle_dataset_zeroshot(
-                model_engine, train_dataset, split_filter='test',
-                phase_label='Post-Training', max_seq_len=512,
-            )
+            run_zero_shot_baseline_eval(model_engine, samples=200, phase_label='Pre-Training')
         except Exception as e:
-            print(f"[Oracle ZS] Post-training zero-shot eval failed: {e}")
+            print(f"[Zero-shot] Warning: pre-training eval skipped due to error: {e}")
 
-    # Organize training reports into folders (AFTER oracle ZS so those files are included)
-    organize_training_reports()
+        print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
 
-    # Auto-run testing on held-out test split
+        # GPU warmup: flush cold-start overhead before timing anything
+        benchmark._warmup_once(model_engine)
+
+        metrics_list = []
+        for i, prompt in enumerate(prompt_pool):
+            print("\n" + "#"*80 + f"\n# EPISODE {i+1}/{num_episodes}\n" + "#"*80)
+            print(f"[System] Using prompt: '{prompt[:80]}...'")
+
+            token_len = len(rl_agent.tokenizer.encode(prompt))
+            prompt_ppl = benchmark._calculate_perplexity(model_engine, prompt)
+            print(f"[Episode {i+1}] Token length: {token_len}, Prompt PPL: {prompt_ppl:.2f}")
+
+            model_engine.restore_model()
+            base_metrics = benchmark.benchmark_and_get_reward(
+                model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
+            )
+            print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
+
+            start_lcr = time.time()
+            if getattr(rl_agent, 'lcr_scorer', None) is not None:
+                complexity_score = float(rl_agent.lcr_scorer.score(prompt))
+                print(f"[LCR] Score: {complexity_score:.3f} (MiniBERT)")
+            else:
+                llm_norm = min(1.0, token_len / 200.0)
+                ppl_norm = min(1.0, prompt_ppl / 50.0)
+                complexity_score = 0.6 * llm_norm + 0.4 * ppl_norm
+                print(f"[Complexity] Score: {complexity_score:.3f} (llm_norm={llm_norm:.3f}, ppl_norm={ppl_norm:.3f})")
+
+            try:
+                early_features = model_engine.extract_early_features(prompt)
+                print(f"[Early-Llama] hidden_norm={early_features['hidden_norm']:.4f} | attn_entropy={early_features['attn_entropy']:.4f} | attn_max={early_features['attn_max']:.4f}")
+            except Exception as e:
+                print(f"[Early-Llama] Warning: extraction failed ({e}), using zeros.")
+                early_features = {"hidden_norm": 0.0, "attn_entropy": 0.0, "attn_max": 0.0}
+            lcr_inference_time_ms = (time.time() - start_lcr) * 1000
+
+            start_rl = time.time()
+            state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
+            pruning_action = rl_agent.get_action(prompt, prompt_ppl=prompt_ppl, token_len=token_len, state_tensor=state_tensor)
+            rl_inference_time_ms = (time.time() - start_rl) * 1000
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)
+                torch.cuda.reset_peak_memory_stats()
+            model_engine.apply_pruning(pruning_action)
+            pruned_metrics = benchmark.benchmark_and_get_reward(
+                model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
+            )
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                _vram_peak = torch.cuda.max_memory_allocated() / (1024 ** 3)
+                vram_pruning_inference_gb = _vram_peak - _vram_model_gb
+                vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                try:
+                    _nvml_info = nvml.nvmlDeviceGetMemoryInfo(nvml.nvmlDeviceGetHandleByIndex(0))
+                    vram_free_gb = _nvml_info.free / (1024 ** 3)
+                except Exception:
+                    vram_free_gb = vram_total_gb - (torch.cuda.memory_reserved() / (1024 ** 3))
+            else:
+                _vram_model_gb = 0.0
+                vram_pruning_inference_gb = 0.0
+                vram_total_gb = 0.0
+                vram_free_gb = 0.0
+            total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
+            print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
+
+            alpha, beta = 0.9, 0.1
+            eps = 1e-8
+            speed_gain = (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
+            log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
+            log_ppl_pruned = np.log(max(pruned_metrics['perplexity'], 1.01))
+            ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
+            relative_reward = alpha * speed_gain - beta * ppl_penalty
+            relative_reward = float(np.clip(relative_reward, -2.0, 2.0))
+
+            next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
+            rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
+            print(f"[reward] {relative_reward:.3f}")
+
+            metrics_list.append({
+                'episode': i+1,
+                'source_dataset': source_pool[i] if i < len(source_pool) else 'unknown',
+                'token_len': token_len,
+                'prompt_ppl': prompt_ppl,
+                'complexity': complexity_score,
+                'baseline_time_ms': base_metrics['time_ms'],
+                'baseline_tok_s': base_metrics['tok_s'],
+                'baseline_ppl': base_metrics['perplexity'],
+                'baseline_gen_tokens': base_metrics.get('gen_tokens', None),
+                'time_ms': lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms'],
+                'model_time_ms': pruned_metrics['time_ms'],
+                'rl_inference_time_ms': rl_inference_time_ms,
+                'lcr_inference_time_ms': lcr_inference_time_ms,
+                'tok_s': pruned_metrics['tok_s'],
+                'ppl': pruned_metrics['perplexity'],
+                'gen_tokens': pruned_metrics.get('gen_tokens', None),
+                'action_index': pruning_action.action_index,
+                'target': pruning_action.target,
+                'intensity': pruning_action.intensity,
+                'reward': relative_reward,
+                'epsilon': rl_agent.epsilon,
+                'vram_total_gb': vram_total_gb,
+                'vram_model_gb': _vram_model_gb,
+                'vram_pruning_inference_gb': vram_pruning_inference_gb,
+                'vram_free_gb': vram_free_gb,
+            })
+
+            model_engine.restore_model()
+
+        print("\n[System] RL training loop completed!")
+
+        if checkpoint_path:
+            rl_agent.save(checkpoint_path)
+
+        generate_report(metrics_list)
+        generate_comparative_plots(metrics_list)
+        generate_per_source_charts(metrics_list)
+
+        import json
+        with open('training_metrics.json', 'w') as f:
+            json.dump(metrics_list, f)
+
+        if train_dataset and str(train_dataset).endswith('.csv') and os.path.exists(train_dataset):
+            try:
+                _train_zs_results = run_oracle_dataset_zeroshot(
+                    model_engine, train_dataset, split_filter='test',
+                    phase_label='Post-Training', max_seq_len=512,
+                )
+            except Exception as e:
+                print(f"[Oracle ZS] Post-training zero-shot eval failed: {e}")
+
     _test_zs_results = {}
     if test_prompts_split:
         test_cap = min(len(test_prompts_split), test_samples)
+        test_run_dir = _create_test_run_dir()
         print(f"\n[System] Running evaluation on {test_cap} held-out test prompts (of {len(test_prompts_split)} available)...")
-        test_agent(model_engine, rl_agent, benchmark,
-                   num_test_episodes=test_cap,
-                   max_new_tokens=max_new_tokens,
-                   prompts=test_prompts_split[:test_cap],
-                   skip_organize=True,
-                   prompt_source_map=_prompt_source_map)
+        print(f"[System] Test run directory reserved: {test_run_dir}")
+        with _pushd(test_run_dir):
+            test_agent(model_engine, rl_agent, benchmark,
+                       num_test_episodes=test_cap,
+                       max_new_tokens=max_new_tokens,
+                       prompts=test_prompts_split[:test_cap],
+                       skip_organize=True,
+                       source_datasets=test_sources_split[:test_cap])
 
-        # Run oracle dataset zero-shot after testing too
-        if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
-            try:
-                _test_zs_results = run_oracle_dataset_zeroshot(
-                    model_engine, train_dataset, split_filter='test',
-                    phase_label='Post-Testing', max_seq_len=512,
-                )
-            except Exception as e:
-                print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
+            if train_dataset and str(train_dataset).endswith('.csv') and os.path.exists(train_dataset):
+                try:
+                    _test_zs_results = run_oracle_dataset_zeroshot(
+                        model_engine, train_dataset, split_filter='test',
+                        phase_label='Post-Testing', max_seq_len=512,
+                    )
+                except Exception as e:
+                    print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
 
-        # Generate combined comparison graph if both phases were evaluated
-        if _train_zs_results and _test_zs_results:
-            try:
-                generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
-            except Exception as e:
-                print(f"[Oracle ZS] Comparison graph generation failed: {e}")
-
-        # Organize test reports AFTER all test-related files are generated
-        organize_test_reports()
+            if _train_zs_results and _test_zs_results:
+                try:
+                    generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
+                except Exception as e:
+                    print(f"[Oracle ZS] Comparison graph generation failed: {e}")
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -1752,10 +1761,6 @@ def organize_test_reports(is_report_mode: bool = False):
         'oracle_zeroshot_post-testing.json',
         'oracle_zeroshot_post-testing.png',
         'oracle_zeroshot_comparison.png',
-        'per_source_perplexity.png',
-        'per_source_inference_time.png',
-        'per_source_speedup.png',
-        'per_source_token_throughput.png',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -1769,6 +1774,11 @@ def organize_test_reports(is_report_mode: bool = False):
         'epsilon_decay.png',
         'cumulative_reward.png',
         'vram_usage.png',
+        'per_source_perplexity.png',
+        'per_source_inference_time.png',
+        'per_source_speedup.png',
+        'per_source_token_throughput.png',
+        'per_source_metrics.json',
         'test_report.txt'
     ]
     if not is_report_mode:
@@ -1783,27 +1793,27 @@ def organize_test_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Test reports organized into {test_path}")
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None, skip_organize: bool = False, prompt_source_map: Dict[str, str] = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None, skip_organize: bool = False, source_datasets: List[str] = None):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
     # GPU warmup: flush cold-start overhead before timing
     benchmark._warmup_once(model_engine)
 
-    # Build prompt→source mapping for per-source charts
-    _psm = prompt_source_map
-    if _psm is None and test_dataset:
-        _psm = _load_prompt_source_map(test_dataset)
-
     # Set epsilon to 0 for pure exploitation
     original_epsilon = rl_agent.epsilon
     rl_agent.epsilon = 0.0
     metrics_list = []
     
+    # Track source datasets for per-source charts
+    _source_list = list(source_datasets) if source_datasets else []
+    
     if prompts is not None:
         test_prompts = prompts
     elif test_dataset and test_dataset.endswith('.csv'):
-        test_prompts = load_training_prompts(test_dataset, samples=max(num_test_episodes, 50), split_type='test')
+        _items = load_training_prompts_with_source(test_dataset, samples=max(num_test_episodes, 50), split_type='test')
+        test_prompts = [it['prompt'] for it in _items]
+        _source_list = [it['source_dataset'] for it in _items]
     else:
         # Ensure we always have >= num_test_episodes prompts by sampling with replacement
         test_prompts = [
@@ -1819,11 +1829,19 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
 
     # If dataset is smaller than requested episodes, sample with replacement so plots have multiple points.
     if len(test_prompts) < num_test_episodes:
-        test_prompts = random.choices(test_prompts, k=num_test_episodes)
+        indices = random.choices(range(len(test_prompts)), k=num_test_episodes)
+        test_prompts = [test_prompts[j] for j in indices]
+        if _source_list:
+            _source_list = [_source_list[j] for j in indices]
     else:
         if prompts is None:  # Only shuffle if not pre-split
-            random.shuffle(test_prompts)
+            combined = list(zip(test_prompts, _source_list)) if _source_list else [(p, 'unknown') for p in test_prompts]
+            random.shuffle(combined)
+            test_prompts = [c[0] for c in combined]
+            _source_list = [c[1] for c in combined]
     test_prompts = test_prompts[:num_test_episodes]
+    if _source_list:
+        _source_list = _source_list[:num_test_episodes]
     
     if force_action:
         try:
@@ -1902,35 +1920,51 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
         
         model_engine.restore_model()
-        
+
+        # Compute reward for reporting consistency with training metrics
+        alpha, beta = 0.9, 0.1
+        eps_r = 1e-8
+        speed_gain = (metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps_r)
+        log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
+        log_ppl_pruned = np.log(max(metrics['perplexity'], 1.01))
+        ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
+        test_reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -2.0, 2.0))
+
         metrics_list.append({
             'episode': i+1,
+            'source_dataset': _source_list[i] if i < len(_source_list) else 'unknown',
             'token_len': token_len,
             'prompt_ppl': prompt_ppl,
             'complexity': complexity_score,
             'baseline_time_ms': base_metrics['time_ms'],
             'baseline_tok_s': base_metrics['tok_s'],
             'baseline_ppl': base_metrics['perplexity'],
+            'baseline_gen_tokens': base_metrics.get('gen_tokens', None),
             'time_ms': total_pruned_time,
             'model_time_ms': metrics['time_ms'],
             'rl_inference_time_ms': rl_inference_time_ms,
             'lcr_inference_time_ms': lcr_inference_time_ms,
             'tok_s': metrics['tok_s'],
             'ppl': metrics['perplexity'],
+            'gen_tokens': metrics.get('gen_tokens', None),
             'action_index': action.action_index,
             'target': action.target,
             'intensity': action.intensity,
+            'reward': test_reward,
+            'epsilon': rl_agent.epsilon,
             'vram_total_gb': vram_total_gb,
             'vram_model_gb': _vram_model_gb,
             'vram_pruning_inference_gb': vram_pruning_inference_gb,
             'vram_free_gb': vram_free_gb,
-            'source': _psm.get(prompt, '') if _psm else '',
         })
     
     # Generate test reports
     generate_report(metrics_list, report_filename='test_report.txt', header='Test Report')
     generate_comparative_plots(metrics_list)
+
+    # Generate per-dataset-source bar charts (baseline vs pruned)
     generate_per_source_charts(metrics_list)
+
     import json
     with open('test_metrics.json', 'w') as f:
         json.dump(metrics_list, f)
@@ -3202,38 +3236,37 @@ def run_comparative_eval(engine, agent, tasks_list: List[str], batch_size: int =
     # NEW: Overall Dashboard
     try:
         import dashboard_gen
-        
-        # Calculate Average Accuracy
+
+        def _get_acc_from_results(results: dict) -> float:
+            """Extract average accuracy from lm-eval results dict."""
+            res_dict = results.get('results', {}) if isinstance(results, dict) else {}
+            vals = []
+            for metrics in res_dict.values():
+                val = metrics.get('acc_norm,none') or metrics.get('acc,none') or metrics.get('acc_norm') or metrics.get('acc')
+                if val is not None:
+                    vals.append(float(val))
+            return (sum(vals) / len(vals) * 100) if vals else 0.0
+
         base_acc = _get_acc_from_results(base_results)
         pruned_acc = _get_acc_from_results(pruned_results)
-        
-        # For PPL and Time, we don't have them in this specific run scope easily unless we run them.
-        # But per user request, we want an overall graph.
-        # We will use "Placeholder" or "Test Report" values if we had them.
-        # For now, since this script ONLY runs Accuracy, we will set PPL/Time to 0 or placeholders
-        # and rely on the USER knowing they come from different tests, OR we can try to run a quick PPL/Time check here.
-        
-        # IMPROVEMENT: Run a quick Benchmark for PPL/Time here so the dashboard is real.
+
         print("[Comparative Eval] Running Quick Latency/PPL Benchmark for Dashboard...")
-        # Restore Baseline for Bench
-        engine.model.to('cpu')
-        del engine.model
-        torch.cuda.empty_cache()
-        if hasattr(engine, 'restore_model'): engine.restore_model()
-        
-        # Base Bench
-        engine.model.to(default_device)
-        b_bench = engine.benchmark_and_get_reward(engine, "The quick brown fox", max_new_tokens=50, return_metrics=True)
-        
-        # Pruned Bench
-        engine.apply_pruning(target_action)
-        p_bench = engine.benchmark_and_get_reward(engine, "The quick brown fox", max_new_tokens=50, return_metrics=True)
-        
+        bench_helper = RealBenchmark()
+        # Baseline benchmark
+        engine.restore_model()
+        b_bench = bench_helper.benchmark_and_get_reward(engine, "The quick brown fox", max_new_tokens=50, return_metrics=True)
+
+        # Pruned benchmark
+        if target_action:
+            engine.apply_pruning(target_action)
+        p_bench = bench_helper.benchmark_and_get_reward(engine, "The quick brown fox", max_new_tokens=50, return_metrics=True)
+        engine.restore_model()
+
         base_metrics = {'acc': base_acc, 'ppl': b_bench['perplexity'], 'time': b_bench['time_ms']}
         pruned_metrics = {'acc': pruned_acc, 'ppl': p_bench['perplexity'], 'time': p_bench['time_ms']}
-        
+
         dashboard_gen.plot_dashboard(base_metrics, pruned_metrics)
-        
+
     except Exception as e:
         print(f"[Dashboard] Failed to generate overall dashboard: {e}")
 
@@ -3288,10 +3321,13 @@ if __name__ == "__main__":
         'llama-2-7b':   'meta-llama/Llama-2-7b-hf',
     }
     _resolved_model_name = _MODEL_MAP.get(args.model, args.model)
+    _resolved_checkpoint = _resolve_repo_path(args.checkpoint)
+    _resolved_train_dataset = _resolve_repo_path(args.train_dataset)
+    _resolved_test_dataset = _resolve_repo_path(args.test_dataset)
 
     if args.mode == 'train':
-        main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
-             train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train', device=args.device,
+        main(num_episodes=args.episodes, checkpoint_path=_resolved_checkpoint, max_new_tokens=args.max_new_tokens,
+             train_dataset=_resolved_train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train', device=args.device,
              static_profiles=args.static_profiles, sparsity_2to4=args.sparsity_2to4, compile_profiles=args.compile_profiles,
              kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, split_ratio=args.split_ratio, test_samples=args.test_samples,
              model_name=_resolved_model_name)
@@ -3306,50 +3342,48 @@ if __name__ == "__main__":
     else:
         engine = RealModelEngine(device=args.device, enable_static_profiles=args.static_profiles, enable_2to4=args.sparsity_2to4, enable_compile=args.compile_profiles, enable_kv_compression=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, model_name=_resolved_model_name)
         agent = RLControllerAgent(engine.tokenizer)
-        if os.path.exists(args.checkpoint):
-            agent.load(args.checkpoint)
+        if _resolved_checkpoint and os.path.exists(_resolved_checkpoint):
+            agent.load(_resolved_checkpoint)
         bench = RealBenchmark()
         specific_eval = bool(getattr(args, 'wikitext2', False) or getattr(args, 'boolq', False) or getattr(args, 'hellaswag', False) or getattr(args, 'mmlu', False))
-        if not specific_eval:
-            # Pre-test zero-shot accuracy evaluation (dense model baseline)
-            print("\n[System] Running pre-test zero-shot accuracy evaluation...")
-            try:
-                run_zero_shot_baseline_eval(engine, samples=200, phase_label='Pre-Test')
-            except Exception as e:
-                print(f"[Zero-shot] Warning: pre-test eval skipped due to error: {e}")
-            test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action, skip_organize=True)
-
-            # Run oracle dataset zero-shot after testing (MMLU & BoolQ)
-            _test_ds = args.test_dataset
-            if _test_ds and _test_ds.endswith('.csv') and os.path.exists(_test_ds):
+        test_run_dir = _create_test_run_dir()
+        print(f"[System] Test run directory reserved: {test_run_dir}")
+        with _pushd(test_run_dir):
+            if not specific_eval:
+                # Pre-test zero-shot accuracy evaluation (dense model baseline)
+                print("\n[System] Running pre-test zero-shot accuracy evaluation...")
                 try:
-                    run_oracle_dataset_zeroshot(
-                        engine, _test_ds, split_filter='test',
-                        force_action_str=args.force_action,
-                        phase_label='Post-Testing', max_seq_len=args.eval_max_seq_len,
-                    )
+                    run_zero_shot_baseline_eval(engine, samples=200, phase_label='Pre-Test')
                 except Exception as e:
-                    print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
+                    print(f"[Zero-shot] Warning: pre-test eval skipped due to error: {e}")
+                test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=_resolved_test_dataset, force_action=args.force_action, skip_organize=True)
 
-            if getattr(args, 'wikitext_samples', 0):
-                try:
-                    engine.restore_model()
-                except Exception:
-                    pass
-                run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
-            if hasattr(args, 'lm_eval') and args.lm_eval:
-                tasks = [t.strip() for t in args.eval_tasks.split(',')]
-                run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
+                _test_ds = _resolved_test_dataset
+                if _test_ds and str(_test_ds).endswith('.csv') and os.path.exists(_test_ds):
+                    try:
+                        run_oracle_dataset_zeroshot(
+                            engine, _test_ds, split_filter='test',
+                            force_action_str=args.force_action,
+                            phase_label='Post-Testing', max_seq_len=args.eval_max_seq_len,
+                        )
+                    except Exception as e:
+                        print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
 
-            # Organize test reports AFTER all test-related files are generated
-            organize_test_reports()
-        else:
-            if getattr(args, 'wikitext2', False):
-                run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, min_cont_tokens=args.wikitext_min_cont_tokens, force_action_str=args.force_action)
-            if getattr(args, 'boolq', False):
-                run_zeroshoot_accuracy(engine, 'boolq', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
-            if getattr(args, 'hellaswag', False):
-                run_zeroshoot_accuracy(engine, 'hellaswag', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
-            if getattr(args, 'mmlu', False):
-                run_zeroshoot_accuracy(engine, 'mmlu', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
-            organize_test_reports()
+                if getattr(args, 'wikitext_samples', 0):
+                    try:
+                        engine.restore_model()
+                    except Exception:
+                        pass
+                    run_wikitext_eval(engine, bench, split='test', samples=args.wikitext_samples, max_new_tokens=args.max_new_tokens)
+                if hasattr(args, 'lm_eval') and args.lm_eval:
+                    tasks = [t.strip() for t in args.eval_tasks.split(',')]
+                    run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
+            else:
+                if getattr(args, 'wikitext2', False):
+                    run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, min_cont_tokens=args.wikitext_min_cont_tokens, force_action_str=args.force_action)
+                if getattr(args, 'boolq', False):
+                    run_zeroshoot_accuracy(engine, 'boolq', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+                if getattr(args, 'hellaswag', False):
+                    run_zeroshoot_accuracy(engine, 'hellaswag', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)
+                if getattr(args, 'mmlu', False):
+                    run_zeroshoot_accuracy(engine, 'mmlu', samples=args.eval_samples, seed=args.eval_seed, max_seq_len=args.eval_max_seq_len, force_action_str=args.force_action)

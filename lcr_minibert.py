@@ -435,7 +435,6 @@ class MiniBertLcrScorer:
 
     def _forward(self, prompt: str) -> torch.Tensor:
         """Run BERT + ScalarMix + attention features + aux features + head; return raw output tensor [1, n_outputs]."""
-        """Run BERT + ScalarMix + attention features + aux features + head; return raw output tensor [1, n_outputs]."""
         self._lazy_init()
         if self._model is None or self._tokenizer is None or self._head is None:
             return torch.tensor([[0.5] * self.config.n_outputs])

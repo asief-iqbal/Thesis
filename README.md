@@ -360,7 +360,7 @@ The framework automatically produces per-run plots:
 
 All charts are adaptive — figure sizes, marker sizes, tick intervals, and label density scale automatically with episode count so plots remain readable from 10 to 1 000+ episodes. The time-breakdown chart uses round-interval x-axis labels (100, 200, ...) instead of per-episode numbers.
 
-Reports are stored under numbered folders in `Training Report/` and `Test Report/`.
+Reports are stored under numbered folders in `Training Report/` and `Test Report/`. RL train/test runs now reserve those folders at command start and write artifacts there directly, instead of first writing plots and JSON files to the repository root and moving them later.
 
 ---
 
@@ -444,9 +444,8 @@ flowchart LR
     D --> E["lcr_mixture.final.csv<br/>(8,974 rows)"]
     E --> F["oracle_labeler.py<br/>Dense + sparse passes"]
     F --> G["oracle_lcr_10k_dual.csv<br/>Labels + metadata"]
-    G --> H["prepare_dual_labels.py<br/>Per-method labels + aux features"]
-    H --> I["train_minibert_lcr.py<br/>Train LCR router"]
-    I --> J["checkpoints/<br/>minibert_lcr_backbone/ + minibert_lcr_head.pt"]
+    G --> H["train_minibert_lcr.py<br/>Train LCR router"]
+    H --> I["checkpoints/<br/>minibert_lcr_backbone/ + minibert_lcr_head.pt"]
 ```
 
 ---
@@ -515,7 +514,7 @@ python Adaptive_pruning.py --mode train --train-dataset Oracle_dataset.csv \
   --checkpoint checkpoints/rl_policy.pt --device gpu
 ```
 
-This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. Results are saved to `Training Report/Train N/` and `Test Report/Test N/` respectively.
+This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. `Training Report/Train N/` is created as soon as the training command starts, `Test Report/Test N/` is created as soon as the held-out test phase starts, and all RL artifacts are written directly into those folders.
 
 For datasets **without** a `Split` column, use `--split-ratio` to create one:
 
@@ -644,7 +643,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `run_ablation_studies.py`      | Automated ablation studies runner (reward sweep, framework ablations)               |
 | `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                                |
 | `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                                      |
-| `prepare_dual_labels.py`       | Per-method label preparation and auxiliary feature columns                          |
+| `build_oracle_dataset.py`      | Oracle dataset builder (streamed benchmark prompts to CSV)                         |
 | `nlp_analyzer.py`              | NLP analysis utilities                                                              |
 | `dashboard_gen.py`             | Automated dashboard and report generation                                           |
 
@@ -674,13 +673,13 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Reports
 
-| Directory                           | Content                                                                           |
-| ----------------------------------- | --------------------------------------------------------------------------------- |
-| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots, per-source benchmark charts)   |
-| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)                            |
-| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots, per-source benchmark charts) |
-| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)                           |
-| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations)                        |
+| Directory                           | Content                                                    |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `Training Report/Train N/`          | RL training runs (metrics JSON, report TXT, plots)         |
+| `Training Report/MiniBERT Train N/` | LCR training runs (model checkpoints, metrics, report)     |
+| `Test Report/Test N/`               | RL evaluation runs (metrics, zero-shot accuracy, plots)    |
+| `Test Report/MiniBERT Test N/`      | LCR test evaluation runs (held-out metrics, per-source)    |
+| `Ablation Report/`                  | Ablation study results (reward sweep, framework ablations) |
 
 ---
 

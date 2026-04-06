@@ -1,7 +1,7 @@
 import zlib
 from dataclasses import dataclass
 from typing import List
-import regex
+import re as regex
 
 _RE_CODE = regex.compile(r"(?i)\b(?:def|class)\b")
 _RE_MATH = regex.compile(r"(?:\\frac|\\sum|\\int|∑|∫|√|≤|≥|≈|≠)")

@@ -92,7 +92,7 @@ def _classify_row(row: Dict[str, str], cfg: AuditConfig) -> List[str]:
 
 
 def _read_rows(path: str) -> Tuple[List[str], List[Dict[str, str]]]:
-    with open(path, "r", encoding="utf-8", newline="") as f:
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError("CSV has no header")

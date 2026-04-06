@@ -93,7 +93,7 @@ class RealModelEngine:
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        print(f"[Engine] Llama 3.2 1B model loaded to {self.model.device}.")
+        print(f"[Engine] {self.model_name} loaded to {self.model.device}.")
         # Ensure inference-optimized defaults
         try:
             self.model.eval()

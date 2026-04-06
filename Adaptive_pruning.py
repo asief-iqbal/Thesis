@@ -1118,6 +1118,8 @@ def organize_training_reports(is_report_mode: bool = False):
         'vram_usage.png',
         'zero_shot_baseline_accuracy.png',
         'zero_shot_baseline_metrics.json',
+        'oracle_zeroshot_post-training.json',
+        'oracle_zeroshot_post-training.png',
         'training_report.txt'
     ]
     if not is_report_mode:
@@ -1131,6 +1133,21 @@ def organize_training_reports(is_report_mode: bool = False):
             print(f"[Organize] Warning: {file} not found, skipping")
     
     print(f"[Organize] Training reports organized into {train_path}")
+
+def _csv_has_split_column(dataset_path: str) -> bool:
+    """Check whether a local CSV file contains a 'Split' column."""
+    if not dataset_path or not dataset_path.strip().endswith('.csv'):
+        return False
+    try:
+        path = dataset_path.strip()
+        if not os.path.exists(path):
+            return False
+        with open(path, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            return 'Split' in (reader.fieldnames or [])
+    except Exception:
+        return False
+
 def load_training_prompts(dataset_name: str, split: str = 'train', samples: int = 5000, split_type: str = 'train') -> List[str]:
     """Load a proper prompt dataset to train/test the RL controller.
     Default: 'togethercomputer/RedPajama-Data-1T-Sample'
@@ -1258,7 +1275,8 @@ def main(num_episodes: int = 50,
          kv_compress: bool = False,
          kv_keep_ratio: float = 1.0,
          split_ratio: float = 1.0,
-         test_samples: int = 100):
+         test_samples: int = 100,
+         model_name: Optional[str] = None):
     model_engine = RealModelEngine(
         device=device,
         enable_static_profiles=static_profiles,
@@ -1266,6 +1284,7 @@ def main(num_episodes: int = 50,
         enable_compile=compile_profiles,
         enable_kv_compression=kv_compress,
         kv_keep_ratio=kv_keep_ratio,
+        model_name=model_name,
     )
     rl_agent = RLControllerAgent(model_engine.tokenizer)
     benchmark = RealBenchmark()
@@ -1275,9 +1294,16 @@ def main(num_episodes: int = 50,
     # Load a proper training prompt pool from the specified dataset
     all_prompts = load_training_prompts(train_dataset, split=train_split, samples=train_samples, split_type=split_type)
 
-    # Apply train-test split if split_ratio < 1.0
+    # Determine test prompts — prefer CSV Split column over manual split_ratio
     test_prompts_split = []
-    if 0.0 < split_ratio < 1.0:
+    _csv_has_split = _csv_has_split_column(train_dataset)
+    if _csv_has_split:
+        # Dataset already has train/test labels — load test split directly (no split_ratio)
+        test_prompts_split = load_training_prompts(train_dataset, split=train_split, samples=test_samples, split_type='test')
+        prompt_pool = all_prompts
+        print(f"[System] CSV Split column detected: {len(prompt_pool)} train / {len(test_prompts_split)} test prompts loaded directly.")
+    elif 0.0 < split_ratio < 1.0:
+        # Manual split_ratio: split the loaded prompts
         split_idx = int(len(all_prompts) * split_ratio)
         prompt_pool = all_prompts[:split_idx]
         test_prompts_split = all_prompts[split_idx:]
@@ -1444,9 +1470,6 @@ def main(num_episodes: int = 50,
     with open('training_metrics.json', 'w') as f:
         json.dump(metrics_list, f)
     
-    # Organize training reports into folders
-    organize_training_reports()
-
     # Run oracle dataset zero-shot evaluation (MMLU & BoolQ) after training
     _train_zs_results = {}
     if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
@@ -1458,7 +1481,10 @@ def main(num_episodes: int = 50,
         except Exception as e:
             print(f"[Oracle ZS] Post-training zero-shot eval failed: {e}")
 
-    # Auto-run testing on held-out split if train-test split was used
+    # Organize training reports into folders (AFTER oracle ZS so those files are included)
+    organize_training_reports()
+
+    # Auto-run testing on held-out test split
     _test_zs_results = {}
     if test_prompts_split:
         test_cap = min(len(test_prompts_split), test_samples)
@@ -1466,7 +1492,8 @@ def main(num_episodes: int = 50,
         test_agent(model_engine, rl_agent, benchmark,
                    num_test_episodes=test_cap,
                    max_new_tokens=max_new_tokens,
-                   prompts=test_prompts_split[:test_cap])
+                   prompts=test_prompts_split[:test_cap],
+                   skip_organize=True)
 
         # Run oracle dataset zero-shot after testing too
         if train_dataset and train_dataset.endswith('.csv') and os.path.exists(train_dataset):
@@ -1478,12 +1505,15 @@ def main(num_episodes: int = 50,
             except Exception as e:
                 print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
 
-    # Generate combined comparison graph if both phases were evaluated
-    if _train_zs_results and _test_zs_results:
-        try:
-            generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
-        except Exception as e:
-            print(f"[Oracle ZS] Comparison graph generation failed: {e}")
+        # Generate combined comparison graph if both phases were evaluated
+        if _train_zs_results and _test_zs_results:
+            try:
+                generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
+            except Exception as e:
+                print(f"[Oracle ZS] Comparison graph generation failed: {e}")
+
+        # Organize test reports AFTER all test-related files are generated
+        organize_test_reports()
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -1525,6 +1555,9 @@ def organize_test_reports(is_report_mode: bool = False):
         'mmlu_zeroshoot_metrics.json',
         'zero_shot_baseline_accuracy.png',
         'zero_shot_baseline_metrics.json',
+        'oracle_zeroshot_post-testing.json',
+        'oracle_zeroshot_post-testing.png',
+        'oracle_zeroshot_comparison.png',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -1552,7 +1585,7 @@ def organize_test_reports(is_report_mode: bool = False):
     
     print(f"[Organize] Test reports organized into {test_path}")
 
-def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None):
+def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_tokens: int = 50, test_dataset: str = None, force_action=None, prompts: List[str] = None, skip_organize: bool = False):
     """Test the trained RL agent on new prompts without training."""
     print(f"\n[Test] Evaluating trained agent on {num_test_episodes} test prompts...")
     
@@ -1696,7 +1729,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
     import json
     with open('test_metrics.json', 'w') as f:
         json.dump(metrics_list, f)
-    organize_test_reports()
+    if not skip_organize:
+        organize_test_reports()
     
     # Restore original epsilon
     rl_agent.epsilon = original_epsilon
@@ -3026,6 +3060,9 @@ if __name__ == "__main__":
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
     parser.add_argument('--device', type=str, default='auto', choices=['cpu', 'gpu', 'auto'], help='Device to load model on: cpu, gpu, or auto')
+    parser.add_argument('--model', type=str, default='llama-3.2-1b',
+                        choices=['llama-3.2-1b', 'llama-2-7b'],
+                        help='Backbone LLM to use: llama-3.2-1b (default) or llama-2-7b')
     parser.add_argument('--static-profiles', action='store_true', help='Enable prebuilt static pruning profiles (Phase A)')
     parser.add_argument('--sparsity-2to4', action='store_true', help='Enable 2:4 semi-structured sparsity packing on supported GPUs (Phase B)')
     parser.add_argument('--compile', dest='compile_profiles', action='store_true', help='Compile profiles with torch.compile if available (Phase B)')
@@ -3039,11 +3076,20 @@ if __name__ == "__main__":
     parser.add_argument('--eval-batch-size', type=int, default=1, help='Batch size for lm-eval')
     parser.add_argument('--eval-tasks', type=str, default='boolq,hellaswag,mmlu', help='Comma-separated list of lm-eval tasks')
     args = parser.parse_args()
+
+    # Map CLI model name to Hugging Face model ID
+    _MODEL_MAP = {
+        'llama-3.2-1b': 'meta-llama/Llama-3.2-1B',
+        'llama-2-7b':   'meta-llama/Llama-2-7b-hf',
+    }
+    _resolved_model_name = _MODEL_MAP.get(args.model, args.model)
+
     if args.mode == 'train':
         main(num_episodes=args.episodes, checkpoint_path=args.checkpoint, max_new_tokens=args.max_new_tokens,
              train_dataset=args.train_dataset, train_split=args.train_split, train_samples=args.train_samples, split_type='train', device=args.device,
              static_profiles=args.static_profiles, sparsity_2to4=args.sparsity_2to4, compile_profiles=args.compile_profiles,
-             kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, split_ratio=args.split_ratio, test_samples=args.test_samples)
+             kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, split_ratio=args.split_ratio, test_samples=args.test_samples,
+             model_name=_resolved_model_name)
     elif args.mode == 'report':
         import json
         with open('training_metrics.json', 'r') as f:
@@ -3053,7 +3099,7 @@ if __name__ == "__main__":
         # Organize training reports into folders
         organize_training_reports(is_report_mode=True)
     else:
-        engine = RealModelEngine(device=args.device, enable_static_profiles=args.static_profiles, enable_2to4=args.sparsity_2to4, enable_compile=args.compile_profiles, enable_kv_compression=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio)
+        engine = RealModelEngine(device=args.device, enable_static_profiles=args.static_profiles, enable_2to4=args.sparsity_2to4, enable_compile=args.compile_profiles, enable_kv_compression=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, model_name=_resolved_model_name)
         agent = RLControllerAgent(engine.tokenizer)
         if os.path.exists(args.checkpoint):
             agent.load(args.checkpoint)
@@ -3066,7 +3112,7 @@ if __name__ == "__main__":
                 run_zero_shot_baseline_eval(engine, samples=200, phase_label='Pre-Test')
             except Exception as e:
                 print(f"[Zero-shot] Warning: pre-test eval skipped due to error: {e}")
-            test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action)
+            test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=args.test_dataset, force_action=args.force_action, skip_organize=True)
 
             # Run oracle dataset zero-shot after testing (MMLU & BoolQ)
             _test_ds = args.test_dataset
@@ -3089,6 +3135,9 @@ if __name__ == "__main__":
             if hasattr(args, 'lm_eval') and args.lm_eval:
                 tasks = [t.strip() for t in args.eval_tasks.split(',')]
                 run_comparative_eval(engine, agent, tasks_list=tasks, batch_size=args.eval_batch_size, limit=args.eval_limit, force_action_str=args.force_action)
+
+            # Organize test reports AFTER all test-related files are generated
+            organize_test_reports()
         else:
             if getattr(args, 'wikitext2', False):
                 run_wikitext2_comparative_eval(engine, bench, samples=args.eval_samples, split='test', seed=args.eval_seed, max_new_tokens=args.max_new_tokens, max_seq_len=args.eval_max_seq_len, min_cont_tokens=args.wikitext_min_cont_tokens, force_action_str=args.force_action)

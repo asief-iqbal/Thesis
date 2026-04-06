@@ -1,6 +1,6 @@
 # CASRAP: Context-Aware Structured Runtime Adaptive Pruning
 
-**CASRAP** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. The backbone model is `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, grouped-query attention with 32 query heads and 8 key-value heads).
+**CASRAP** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
 
 The project addresses a focused research question: **can structural pruning be selected at inference time, per prompt, using both prompt sensitivity and system state, rather than a fixed offline compression profile?** The implemented answer is yes. The framework achieves measurable inference speedups of 10–40% through physical transformer-layer removal while maintaining bounded quality degradation, and the learned router generalizes across five public benchmarks.
 
@@ -352,7 +352,7 @@ The framework automatically produces per-run plots:
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
 - Controller overhead breakdown (stacked bar)
-- Process VRAM per episode (loaded-model baseline, peak during pruning + inference, and extra episode delta)
+- VRAM usage per episode (available vs used during pruning + inference)
 - Reward progression
 - Quality-vs-speed tradeoff scatter
 - Action usage distribution
@@ -507,16 +507,45 @@ HUGGINGFACE_HUB_TOKEN=your_hf_token_here
 
 ### Train the RL controller
 
+When the dataset CSV contains a `Split` column (e.g., `Oracle_dataset.csv` with 8,000 train / 2,000 test rows), the system loads train and test splits directly — no `--split-ratio` needed:
+
+```bash
+python Adaptive_pruning.py --mode train --train-dataset Oracle_dataset.csv \
+  --train-samples 8000 --episodes 8000 --test-samples 2000 \
+  --checkpoint checkpoints/rl_policy.pt --device gpu
+```
+
+This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. Results are saved to `Training Report/Train N/` and `Test Report/Test N/` respectively.
+
+For datasets **without** a `Split` column, use `--split-ratio` to create one:
+
 ```bash
 python Adaptive_pruning.py --mode train --episodes 100 --checkpoint checkpoints/rl_policy.pt \
-  --train-dataset "lcr_mixture.final.csv" --max-new-tokens 50 --device gpu
+  --train-dataset "lcr_mixture.final.csv" --max-new-tokens 50 --device gpu --split-ratio 0.8
+```
+
+#### Choosing the backbone model
+
+The default model is Llama 3.2 1B. To use Llama 2 7B instead, add `--model llama-2-7b`:
+
+```bash
+python Adaptive_pruning.py --mode train --train-dataset Oracle_dataset.csv \
+  --train-samples 8000 --episodes 8000 --test-samples 2000 \
+  --checkpoint checkpoints/rl_policy.pt --device gpu --model llama-2-7b
 ```
 
 ### Test the saved controller
 
 ```bash
 python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt \
-  --test-dataset "lcr_mixture.final.csv" --episodes 100 --max-new-tokens 50 --device gpu
+  --test-dataset "Oracle_dataset.csv" --episodes 100 --max-new-tokens 50 --device gpu
+```
+
+To test with Llama 2 7B:
+
+```bash
+python Adaptive_pruning.py --mode test --checkpoint checkpoints/rl_policy.pt \
+  --test-dataset "Oracle_dataset.csv" --episodes 100 --device gpu --model llama-2-7b
 ```
 
 ### Run benchmark-specific evaluation
@@ -578,6 +607,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | Argument           | Default                    | Description                                                                      |
 | ------------------ | -------------------------- | -------------------------------------------------------------------------------- |
 | `--mode`           | `test`                     | `train`, `test`, or `report`                                                     |
+| `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                                    |
 | `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                                 |
 | `--episodes`       | `50`                       | Number of train or test episodes; also sets the train-mode epsilon-decay horizon |
 | `--max-new-tokens` | `50`                       | Maximum generated continuation length                                            |
@@ -585,7 +615,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `--test-dataset`   | `Prompt Dataset Test.csv`  | Test CSV path                                                                    |
 | `--train-samples`  | `5000`                     | Number of training prompts                                                       |
 | `--test-samples`   | `100`                      | Number of test prompts in auto-test flows                                        |
-| `--split-ratio`    | `0.8`                      | Train/test split ratio for auto-split mode                                       |
+| `--split-ratio`    | `1.0`                      | Train/test split ratio (ignored when CSV has a `Split` column)                   |
 | `--device`         | `auto`                     | `cpu`, `gpu`, or `auto`                                                          |
 | `--wikitext2`      | `False`                    | WikiText-2 comparative evaluation                                                |
 | `--boolq`          | `False`                    | BoolQ zero-shot evaluation                                                       |
@@ -841,7 +871,7 @@ If NVML is unavailable, GPU utilization falls back to `0.0`. The pipeline still 
 
 ### VRAM chart issues on CUDA
 
-If training crashes while writing the per-episode VRAM chart, update to the latest version of `Adaptive_pruning.py`. The VRAM plot now tracks the current PyTorch process only: loaded-model baseline VRAM, peak VRAM during pruning plus generation, and the extra per-episode delta above that baseline.
+If training crashes while writing the per-episode VRAM chart, update to the latest version of `Adaptive_pruning.py`. The VRAM plot uses PyTorch CUDA device properties and expects the standard `total_memory` field when reading available GPU memory.
 
 ### Slow or unstable training
 

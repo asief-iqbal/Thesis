@@ -109,11 +109,11 @@ The project uses a five-source public benchmark mixture designed to cover divers
 | Source     |     Count | Rationale                                       |
 | ---------- | --------: | ----------------------------------------------- |
 | GSM8K      |     2,000 | Arithmetic and multi-step reasoning sensitivity |
-| MBPP       |       974 | Code-generation prompts with syntax sensitivity |
+| MBPP       |     2,000 | Code-generation prompts with syntax sensitivity |
 | WikiText-2 |     2,000 | Redundancy-rich narrative language modeling     |
 | MMLU       |     2,000 | Mixed-domain reasoning and multiple choice      |
 | BoolQ      |     2,000 | Passage-grounded binary question answering      |
-| **Total**  | **8,974** |                                                 |
+| **Total**  | **10,000** |                                                 |
 
 **Construction pipeline:**
 
@@ -643,7 +643,7 @@ Main entrypoint: `Adaptive_pruning.py`
 | `run_ablation_studies.py`      | Automated ablation studies runner (reward sweep, framework ablations)               |
 | `build_lcr_mixture_dataset.py` | Benchmark mixture builder (streams from HF datasets)                                |
 | `audit_lcr_mixture_dataset.py` | Dataset audit, cleaning, and quality reporting                                      |
-| `build_oracle_dataset.py`      | Oracle dataset builder (streamed benchmark prompts to CSV)                         |
+| `build_oracle_dataset.py`      | Oracle dataset builder (streamed benchmark prompts to CSV)                          |
 | `nlp_analyzer.py`              | NLP analysis utilities                                                              |
 | `dashboard_gen.py`             | Automated dashboard and report generation                                           |
 

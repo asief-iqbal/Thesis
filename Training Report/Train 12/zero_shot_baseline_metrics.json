@@ -1,0 +1,1 @@
+{"phase": "Pre-Training", "tasks": {"boolq": {"accuracy": 0.545, "n": 200, "correct": 109}, "mmlu": {"accuracy": 0.385, "n": 200, "correct": 77}}}

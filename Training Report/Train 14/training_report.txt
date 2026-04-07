@@ -1,0 +1,34 @@
+Training Report
+============================================================
+Episodes: 80
+Overall Avg Total Time (LCR+RL+Model): 1266.25ms
+  Avg LCR Inference: 25.53ms
+  Avg RL Agent: 1.02ms
+  Avg Model Inference (pruned): 1239.69ms
+  Avg Baseline Inference (unpruned): 1476.27ms
+  VRAM total: 8.00 GB | Avg model: 4.61 GB | Avg pruning+inference: 0.255 GB | Avg free: 0.36 GB
+Overall Avg PPL (pruned, arithmetic): 235.60
+Overall PPL (pruned, token-weighted): 5.22
+Overall Avg PPL (baseline, arithmetic): 2.31
+Overall PPL (baseline, token-weighted): 2.07
+
+Overall Avg Reward: 0.0373
+
+Averages by Prune Type and Intensity:
+  none 0.0: Avg Time 1577.04ms, Avg PPL 1.84, TW-PPL 1.78, Avg Reward -0.0081 (5 samples)
+  transformer_layers 0.06: Avg Time 1416.08ms, Avg PPL 1.37, TW-PPL 1.35, Avg Reward 0.0763 (5 samples)
+  transformer_layers 0.12: Avg Time 1360.19ms, Avg PPL 1.37, TW-PPL 1.37, Avg Reward 0.1623 (5 samples)
+  transformer_layers 0.19: Avg Time 1302.39ms, Avg PPL 11.10, TW-PPL 2.83, Avg Reward -0.0660 (4 samples)
+  transformer_layers 0.25: Avg Time 1232.88ms, Avg PPL 3.71, TW-PPL 3.24, Avg Reward 0.1666 (5 samples)
+  transformer_layers 0.31: Avg Time 1145.81ms, Avg PPL 153.29, TW-PPL 52.01, Avg Reward 0.0716 (5 samples)
+  transformer_layers 0.38: Avg Time 1109.36ms, Avg PPL 150.21, TW-PPL 25.99, Avg Reward 0.0693 (6 samples)
+  transformer_layers 0.44: Avg Time 1009.25ms, Avg PPL 18.37, TW-PPL 12.05, Avg Reward 0.3262 (4 samples)
+  transformer_layers 0.5: Avg Time 903.62ms, Avg PPL 51.38, TW-PPL 6.42, Avg Reward 0.3392 (6 samples)
+  transformer_layers 0.56: Avg Time 949.89ms, Avg PPL 2003.76, TW-PPL 5.79, Avg Reward 0.1034 (5 samples)
+  transformer_layers 0.62: Avg Time 920.68ms, Avg PPL 1448.35, TW-PPL 44.97, Avg Reward -0.3283 (4 samples)
+  attention_heads 0.125: Avg Time 1492.27ms, Avg PPL 3.40, TW-PPL 3.35, Avg Reward -0.0604 (5 samples)
+  attention_heads 0.25: Avg Time 1492.96ms, Avg PPL 2.82, TW-PPL 2.77, Avg Reward 0.0106 (4 samples)
+  attention_heads 0.375: Avg Time 1407.86ms, Avg PPL 2.68, TW-PPL 2.67, Avg Reward 0.0606 (4 samples)
+  attention_heads 0.5: Avg Time 1416.20ms, Avg PPL 3.69, TW-PPL 3.53, Avg Reward 0.0077 (4 samples)
+  attention_heads 0.625: Avg Time 1481.35ms, Avg PPL 206.06, TW-PPL 11.34, Avg Reward -0.3994 (4 samples)
+  attention_heads 0.75: Avg Time 1445.64ms, Avg PPL 4.51, TW-PPL 3.82, Avg Reward -0.0947 (5 samples)

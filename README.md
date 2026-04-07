@@ -352,7 +352,7 @@ The framework automatically produces per-run plots:
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
 - Controller overhead breakdown (stacked bar)
-- VRAM usage per episode (available vs used during pruning + inference)
+- VRAM usage per episode (before vs after pruning, two-line chart)
 - Reward progression
 - Quality-vs-speed tradeoff scatter
 - Action usage distribution
@@ -360,7 +360,7 @@ The framework automatically produces per-run plots:
 
 All charts are adaptive — figure sizes, marker sizes, tick intervals, and label density scale automatically with episode count so plots remain readable from 10 to 1 000+ episodes. The time-breakdown chart uses round-interval x-axis labels (100, 200, ...) instead of per-episode numbers.
 
-Reports are stored under numbered folders in `Training Report/` and `Test Report/`. RL train/test runs now reserve those folders at command start and write artifacts there directly, instead of first writing plots and JSON files to the repository root and moving them later.
+Reports are stored under numbered folders in `Training Report/` and `Test Report/`. RL train/test runs now reserve those folders at command start and write artifacts there directly. Zero-shot accuracy charts are saved separately per split as before-vs-after pruning comparisons: `zeroshot_accuracy_compare_train.json/png` in the training run folder and `zeroshot_accuracy_compare_test.json/png` in the test run folder.
 
 ---
 
@@ -514,7 +514,7 @@ python Adaptive_pruning.py --mode train --train-dataset Oracle_dataset.csv \
   --checkpoint checkpoints/rl_policy.pt --device gpu
 ```
 
-This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. `Training Report/Train N/` is created as soon as the training command starts, `Test Report/Test N/` is created as soon as the held-out test phase starts, and all RL artifacts are written directly into those folders.
+This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. `Training Report/Train N/` is created as soon as the training command starts, `Test Report/Test N/` is created as soon as the held-out test phase starts, and all RL artifacts are written directly into those folders. Post-training zero-shot evaluation uses the train split, while post-testing zero-shot evaluation uses the test split.
 
 For datasets **without** a `Split` column, use `--split-ratio` to create one:
 
@@ -881,6 +881,8 @@ If training crashes while writing the per-episode VRAM chart, update to the late
 ### LCR checkpoint fallback
 
 If `checkpoints/minibert_lcr_backbone/` or `checkpoints/minibert_lcr_head.pt` are missing, the system falls back to a heuristic proxy. This keeps the pipeline operational but is not the reported model.
+
+On Windows, the runtime scorer now resolves `checkpoints/minibert_lcr_backbone/` and `checkpoints/minibert_lcr_head.pt` to absolute local paths before calling Hugging Face loaders. This avoids repo-ID validation failures when the exported MiniBERT backbone is present locally.
 
 ---
 

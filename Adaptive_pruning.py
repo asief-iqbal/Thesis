@@ -906,32 +906,24 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         plt.close(fig)
         print("[Report] Cumulative reward plot saved to cumulative_reward.png")
 
-    # 10) VRAM breakdown per episode: total capacity, LLM model, pruning+inference, and real free
-    vram_total = [m.get('vram_total_gb', 0) for m in metrics]
+    # 10) VRAM usage per episode: before pruning vs after pruning
     vram_model = [m.get('vram_model_gb', 0) for m in metrics]
     vram_pi = [m.get('vram_pruning_inference_gb', m.get('vram_used_gb', 0)) for m in metrics]
-    vram_free = [m.get('vram_free_gb', 0) for m in metrics]
-    if any(v > 0 for v in vram_total):
+    vram_after = [m + p for m, p in zip(vram_model, vram_pi)]
+    if any(v > 0 for v in vram_model):
         episodes_v = [m['episode'] for m in metrics]
         fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        # 1. Total GPU VRAM capacity (flat ceiling)
-        ax.plot(episodes_v, vram_total, color='gray', linestyle='--', linewidth=2, label='Total GPU VRAM')
-        # 2. LLM model weight footprint (standing allocation before pruning)
-        ax.fill_between(episodes_v, vram_model, alpha=0.30, color='blue')
-        ax.plot(episodes_v, vram_model, color='blue', linewidth=2, label='LLM Model Footprint')
-        # 3. Incremental VRAM for pruning + inference (stacked on top of model)
-        vram_model_plus_pi = [m + p for m, p in zip(vram_model, vram_pi)]
-        ax.fill_between(episodes_v, vram_model, vram_model_plus_pi, alpha=0.40, color='red')
-        ax.plot(episodes_v, vram_model_plus_pi, color='red', linewidth=2, label='+ Pruning & Inference')
-        # 4. Real free VRAM on the entire PC (from NVML)
-        ax.plot(episodes_v, vram_free, color='green', linewidth=2, label='Free VRAM (entire GPU)')
-        ax.set_title('VRAM Breakdown per Episode', fontsize=16, fontweight='bold')
+        ax.plot(episodes_v, vram_model, color='#2196F3', linewidth=2, marker='o',
+                markersize=max(2, 6 - n_episodes // 100), label='Before Pruning')
+        ax.plot(episodes_v, vram_after, color='#FF9800', linewidth=2, marker='o',
+                markersize=max(2, 6 - n_episodes // 100), label='After Pruning')
+        ax.set_title('VRAM Usage per Episode (Before vs After Pruning)', fontsize=16, fontweight='bold')
         ax.set_xlabel('Episode', fontsize=12)
         ax.set_ylabel('VRAM (GB)', fontsize=12)
         ax.set_ylim(bottom=0)
         ax.grid(True, alpha=0.3)
         _set_episode_xticks(ax, episodes_v, tick_step)
-        ax.legend(loc='upper right')
+        ax.legend(loc='upper right', fontsize=10)
         fig.tight_layout()
         fig.savefig('vram_usage.png', dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1314,8 +1306,8 @@ def organize_training_reports(is_report_mode: bool = False):
         'vram_usage.png',
         'zero_shot_baseline_accuracy.png',
         'zero_shot_baseline_metrics.json',
-        'oracle_zeroshot_post-training.json',
-        'oracle_zeroshot_post-training.png',
+        'zeroshot_accuracy_compare_train.json',
+        'zeroshot_accuracy_compare_train.png',
         'per_source_perplexity.png',
         'per_source_inference_time.png',
         'per_source_speedup.png',
@@ -1683,7 +1675,7 @@ def main(num_episodes: int = 50,
         if train_dataset and str(train_dataset).endswith('.csv') and os.path.exists(train_dataset):
             try:
                 _train_zs_results = run_oracle_dataset_zeroshot(
-                    model_engine, train_dataset, split_filter='test',
+                    model_engine, train_dataset, split_filter='train',
                     phase_label='Post-Training', max_seq_len=512,
                 )
             except Exception as e:
@@ -1711,12 +1703,6 @@ def main(num_episodes: int = 50,
                     )
                 except Exception as e:
                     print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
-
-            if _train_zs_results and _test_zs_results:
-                try:
-                    generate_zeroshot_comparison_graph(_train_zs_results, _test_zs_results)
-                except Exception as e:
-                    print(f"[Oracle ZS] Comparison graph generation failed: {e}")
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -1758,9 +1744,8 @@ def organize_test_reports(is_report_mode: bool = False):
         'mmlu_zeroshoot_metrics.json',
         'zero_shot_baseline_accuracy.png',
         'zero_shot_baseline_metrics.json',
-        'oracle_zeroshot_post-testing.json',
-        'oracle_zeroshot_post-testing.png',
-        'oracle_zeroshot_comparison.png',
+        'zeroshot_accuracy_compare_test.json',
+        'zeroshot_accuracy_compare_test.png',
         'accuracy_compare.png',
         'accuracy_benchmark_baseline.png',
         'accuracy_benchmark_pruned.png',
@@ -2451,6 +2436,11 @@ def _eval_mmlu_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_l
     return {'accuracy': acc, 'correct': correct, 'n': total}
 
 
+def _oracle_zeroshot_artifact_stem(phase_label: str, split_filter: str) -> str:
+    split_slug = (split_filter or 'unknown').lower().replace(' ', '_')
+    return f'zeroshot_accuracy_compare_{split_slug}'
+
+
 def run_oracle_dataset_zeroshot(
     engine: RealModelEngine,
     dataset_path: str,
@@ -2533,18 +2523,19 @@ def run_oracle_dataset_zeroshot(
         print("[Oracle ZS] No pruning action available, skipping pruned evaluation")
 
     # Save results JSON
-    out_json = f'oracle_zeroshot_{phase_label.lower().replace(" ", "_")}.json'
+    artifact_stem = _oracle_zeroshot_artifact_stem(phase_label, split_filter)
+    out_json = f'{artifact_stem}.json'
     with open(out_json, 'w') as f:
         _json.dump({'phase': phase_label, 'split': split_filter, 'dataset': dataset_path, 'results': results}, f, indent=2)
     print(f"[Oracle ZS] Saved {out_json}")
 
     # Generate per-phase bar chart (dense vs pruned)
-    _plot_oracle_zeroshot_bars(results, phase_label)
+    _plot_oracle_zeroshot_bars(results, phase_label, split_filter=split_filter, output_path=f'{artifact_stem}.png')
 
     return results
 
 
-def _plot_oracle_zeroshot_bars(results: dict, phase_label: str):
+def _plot_oracle_zeroshot_bars(results: dict, phase_label: str, split_filter: str = 'test', output_path: Optional[str] = None):
     """Plot dense vs pruned accuracy for MMLU & BoolQ."""
     tasks = []
     dense_accs = []
@@ -2564,11 +2555,11 @@ def _plot_oracle_zeroshot_bars(results: dict, phase_label: str):
     x = np.arange(len(tasks))
     width = 0.35
     fig, ax = plt.subplots(figsize=(8, 6))
-    bars1 = ax.bar(x - width/2, dense_accs, width, label='Dense (Before Pruned)', color='#2196F3', alpha=0.85)
-    bars2 = ax.bar(x + width/2, pruned_accs, width, label='Pruned (After Pruned)', color='#FF9800', alpha=0.85)
+    bars1 = ax.bar(x - width/2, dense_accs, width, label='Before Pruning (Dense)', color='#2196F3', alpha=0.85)
+    bars2 = ax.bar(x + width/2, pruned_accs, width, label='After Pruning (Pruned)', color='#FF9800', alpha=0.85)
 
     ax.set_ylabel('Accuracy (%)', fontsize=12)
-    ax.set_title(f'{phase_label}: Zero-Shot Accuracy — Dense vs Pruned', fontsize=13, fontweight='bold')
+    ax.set_title(f'Zero-Shot Accuracy: Before vs After Pruning ({split_filter.title()} Data)', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(tasks, fontsize=12)
     ax.set_ylim(0, 100)
@@ -2581,7 +2572,7 @@ def _plot_oracle_zeroshot_bars(results: dict, phase_label: str):
             ax.text(b.get_x() + b.get_width()/2., min(99, h + 1), f'{h:.1f}%', ha='center', va='bottom', fontsize=9)
 
     plt.tight_layout()
-    fname = f'oracle_zeroshot_{phase_label.lower().replace(" ", "_")}.png'
+    fname = output_path or f'{_oracle_zeroshot_artifact_stem(phase_label, split_filter)}.png'
     plt.savefig(fname, dpi=300, bbox_inches='tight')
     plt.close()
     print(f'[Report] Saved {fname}')

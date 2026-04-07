@@ -1,0 +1,52 @@
+{
+  "wikitext2": {
+    "n_episodes": 19,
+    "baseline_ppl": 2.4910783767700195,
+    "pruned_ppl": 209.38035813758248,
+    "baseline_time_s": 1.273872877422132,
+    "pruned_time_s": 1.0687487250880192,
+    "speedup": 1.1919292603761649,
+    "baseline_tok_s": 39.37119419385342,
+    "pruned_tok_s": 45.70993696836532
+  },
+  "gsm8k": {
+    "n_episodes": 10,
+    "baseline_ppl": 1.8297335267066956,
+    "pruned_ppl": 4.70089031457901,
+    "baseline_time_s": 1.2456252098083496,
+    "pruned_time_s": 0.9537539482116699,
+    "speedup": 1.3060236470254734,
+    "baseline_tok_s": 40.46382863935151,
+    "pruned_tok_s": 54.51782720763335
+  },
+  "boolq": {
+    "n_episodes": 23,
+    "baseline_ppl": 2.0054760238398677,
+    "pruned_ppl": 68.36408361144687,
+    "baseline_time_s": 1.2731914001962414,
+    "pruned_time_s": 1.092148024102916,
+    "speedup": 1.165768167041307,
+    "baseline_tok_s": 37.37104856887195,
+    "pruned_tok_s": 46.12556251711344
+  },
+  "mmlu": {
+    "n_episodes": 18,
+    "baseline_ppl": 3.137860589557224,
+    "pruned_ppl": 227.1646762225363,
+    "baseline_time_s": 1.2574378119574654,
+    "pruned_time_s": 1.1057362291547987,
+    "speedup": 1.1371950912005697,
+    "baseline_tok_s": 38.62408348189066,
+    "pruned_tok_s": 38.54238361000613
+  },
+  "mbpp": {
+    "n_episodes": 10,
+    "baseline_ppl": 1.6559727668762207,
+    "pruned_ppl": 173.8528915643692,
+    "baseline_time_s": 1.2442548751831055,
+    "pruned_time_s": 1.0029580116271972,
+    "speedup": 1.2405852097082595,
+    "baseline_tok_s": 40.998057472566174,
+    "pruned_tok_s": 48.18957001167978
+  }
+}

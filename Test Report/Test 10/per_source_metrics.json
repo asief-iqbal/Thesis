@@ -1,0 +1,12 @@
+{
+  "gsm8k": {
+    "n_episodes": 1,
+    "baseline_ppl": 2.4047889709472656,
+    "pruned_ppl": 4211.5732421875,
+    "baseline_time_s": 0.4095759391784668,
+    "pruned_time_s": 0.40004491806030273,
+    "speedup": 1.0238248773772134,
+    "baseline_tok_s": 26.857046393066828,
+    "pruned_tok_s": 4.999438587290141
+  }
+}

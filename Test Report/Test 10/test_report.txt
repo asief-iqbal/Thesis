@@ -1,0 +1,18 @@
+Test Report
+============================================================
+Episodes: 1
+Overall Avg Total Time (LCR+RL+Model): 427.05ms
+  Avg LCR Inference: 19.00ms
+  Avg RL Agent: 8.00ms
+  Avg Model Inference (pruned): 400.04ms
+  Avg Baseline Inference (unpruned): 409.58ms
+  VRAM total: 8.00 GB | Avg model: 4.61 GB | Avg pruning+inference: 0.217 GB | Avg free: 0.21 GB
+Overall Avg PPL (pruned, arithmetic): 4211.57
+Overall PPL (pruned, token-weighted): 4211.57
+Overall Avg PPL (baseline, arithmetic): 2.40
+Overall PPL (baseline, token-weighted): 2.40
+
+Overall Avg Reward: -1.4793
+
+Averages by Prune Type and Intensity:
+  attention_heads 0.75: Avg Time 427.05ms, Avg PPL 4211.57, TW-PPL 4211.57, Avg Reward -1.4793 (1 samples)

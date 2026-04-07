@@ -44,6 +44,35 @@ except Exception:
     _TRANSFORMERS_AVAILABLE = False
 
 
+_MODULE_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_existing_path(path_value: Optional[str]) -> Optional[Path]:
+    if not path_value:
+        return None
+
+    raw_path = Path(path_value).expanduser()
+    candidates = [raw_path]
+    if not raw_path.is_absolute():
+        candidates.append(_MODULE_ROOT / raw_path)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved.exists():
+            return resolved
+    return None
+
+
+def _resolve_pretrained_source(model_name: str) -> Tuple[str, bool]:
+    local_path = _resolve_existing_path(model_name)
+    if local_path is not None:
+        return local_path.as_posix(), True
+    return str(model_name), False
+
+
 # ---------------------------------------------------------------------------
 # Auxiliary text feature extraction (lightweight, ~0.1ms)
 # ---------------------------------------------------------------------------
@@ -313,12 +342,24 @@ class MiniBertLcrScorer:
             return
 
         device = torch.device(self.config.device)
-        self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_name, use_fast=True)
+        pretrained_source, local_files_only = _resolve_pretrained_source(self.config.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_source,
+            use_fast=True,
+            local_files_only=local_files_only,
+        )
         # Prefer safetensors to avoid torch.load(.bin) restrictions on older Torch versions.
         try:
-            self._model = AutoModel.from_pretrained(self.config.model_name, use_safetensors=True)
+            self._model = AutoModel.from_pretrained(
+                pretrained_source,
+                use_safetensors=True,
+                local_files_only=local_files_only,
+            )
         except Exception:
-            self._model = AutoModel.from_pretrained(self.config.model_name)
+            self._model = AutoModel.from_pretrained(
+                pretrained_source,
+                local_files_only=local_files_only,
+            )
         self._model.to(device)
         self._model.eval()
 
@@ -364,8 +405,8 @@ class MiniBertLcrScorer:
 
         ckpt_path = self.config.head_checkpoint_path
         if ckpt_path:
-            ckpt = Path(ckpt_path)
-            if ckpt.exists():
+            ckpt = _resolve_existing_path(ckpt_path)
+            if ckpt is not None:
                 try:
                     try:
                         state = torch.load(str(ckpt), map_location=device, weights_only=True)
@@ -409,7 +450,7 @@ class MiniBertLcrScorer:
                     except Exception:
                         print(f"[LCR] Warning: failed to load head checkpoint {ckpt}: {e}")
             else:
-                print(f"[LCR] Head checkpoint not found: {ckpt} (using fallback proxy)")
+                print(f"[LCR] Head checkpoint not found: {ckpt_path} (using fallback proxy)")
         else:
             print("[LCR] No head checkpoint configured (using fallback proxy).")
 

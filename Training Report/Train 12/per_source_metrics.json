@@ -1,0 +1,12 @@
+{
+  "mmlu": {
+    "n_episodes": 1,
+    "baseline_ppl": 14.899001121520996,
+    "pruned_ppl": 7.458215713500977,
+    "baseline_time_s": 0.422778844833374,
+    "pruned_time_s": 0.3700592517852783,
+    "speedup": 1.1424625726657565,
+    "baseline_tok_s": 21.287725509414003,
+    "pruned_tok_s": 29.72496957428481
+  }
+}

@@ -608,10 +608,11 @@ class RealBenchmark:
         # Synchronize GPU after generation for accurate elapsed time
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        elapsed_s = (time.time() - start_time)
+        elapsed_s = max(1e-12, time.time() - start_time)
         inference_time_ms = elapsed_s * 1000
-        # Actual generated tokens may vary; throughput uses actual for accuracy
-        gen_token_count = len(engine.tokenizer.encode(generated_response))
+        # Fixed-length generation (eos_token_id=None + min_length enforced) produces
+        # exactly planned_tokens new tokens — avoid expensive decode→re-encode roundtrip.
+        gen_token_count = planned_tokens
         tokens_per_sec = (gen_token_count / elapsed_s) if elapsed_s > 0 else 0.0
         # Compute PPL on the generated continuation, conditioned on the prompt
         perplexity = self._calculate_perplexity_on_continuation(engine, prompt, generated_response)
@@ -748,18 +749,17 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     total_times = [m['time_ms'] for m in metrics]
     episodes = [m['episode'] for m in metrics]
 
-    # Remove outliers for consistency
-    def remove_outliers_times(data_list):
-        import numpy as np
+    # Remove outliers: compute bounds once, then filter by index (O(n))
+    def _outlier_bounds(data_list):
         if not data_list:
-            return data_list
+            return float('-inf'), float('inf')
         q1, q3 = np.percentile(data_list, 25), np.percentile(data_list, 75)
         iqr = q3 - q1
-        lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-        return [d for d in data_list if lb <= d <= ub]
+        return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
     # Since times are related, filter based on total time outliers
-    filtered_indices = [i for i, t in enumerate(total_times) if t in remove_outliers_times(total_times)]
+    lb_t, ub_t = _outlier_bounds(total_times)
+    filtered_indices = [i for i, t in enumerate(total_times) if lb_t <= t <= ub_t]
     episodes_filtered = [episodes[i] for i in filtered_indices]
     lcr_times_filtered = [lcr_times[i] for i in filtered_indices]
     rl_times_filtered = [rl_times[i] for i in filtered_indices]
@@ -906,28 +906,72 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
         plt.close(fig)
         print("[Report] Cumulative reward plot saved to cumulative_reward.png")
 
-    # 10) VRAM usage per episode: before pruning vs after pruning
-    vram_model = [m.get('vram_model_gb', 0) for m in metrics]
-    vram_pi = [m.get('vram_pruning_inference_gb', m.get('vram_used_gb', 0)) for m in metrics]
-    vram_after = [m + p for m, p in zip(vram_model, vram_pi)]
-    if any(v > 0 for v in vram_model):
+    # 10) VRAM / Model Size comparison: baseline vs pruned
+    baseline_param = [m.get('baseline_param_mb', 0) for m in metrics]
+    pruned_param = [m.get('pruned_param_mb', 0) for m in metrics]
+    baseline_vram = [m.get('baseline_vram_peak_gb', 0) for m in metrics]
+    pruned_vram = [m.get('pruned_vram_peak_gb', 0) for m in metrics]
+    has_params = any(v > 0 for v in baseline_param)
+    has_vram = any(v > 0 for v in baseline_vram)
+    if has_params or has_vram:
         episodes_v = [m['episode'] for m in metrics]
-        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        ax.plot(episodes_v, vram_model, color='#2196F3', linewidth=2, marker='o',
-                markersize=max(2, 6 - n_episodes // 100), label='Before Pruning')
-        ax.plot(episodes_v, vram_after, color='#FF9800', linewidth=2, marker='o',
-                markersize=max(2, 6 - n_episodes // 100), label='After Pruning')
-        ax.set_title('VRAM Usage per Episode (Before vs After Pruning)', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Episode', fontsize=12)
-        ax.set_ylabel('VRAM (GB)', fontsize=12)
-        ax.set_ylim(bottom=0)
-        ax.grid(True, alpha=0.3)
-        _set_episode_xticks(ax, episodes_v, tick_step)
-        ax.legend(loc='upper right', fontsize=10)
+        ms = max(2, 6 - n_episodes // 100)
+        n_panels = int(has_params) + int(has_vram)
+        fig, axes = plt.subplots(n_panels, 1, figsize=(max(10, min(18, n_episodes * 0.03)), 5 * n_panels))
+        if n_panels == 1:
+            axes = [axes]
+        panel_idx = 0
+
+        # Panel A: Active Model Parameters (the real structural saving)
+        if has_params:
+            ax = axes[panel_idx]; panel_idx += 1
+            ax.plot(episodes_v, baseline_param, color='#E53935', linewidth=2, marker='o',
+                    markersize=ms, label='Baseline (Unpruned)')
+            ax.plot(episodes_v, pruned_param, color='#43A047', linewidth=2, marker='s',
+                    markersize=ms, label='Pruned Model')
+            ax.fill_between(episodes_v, pruned_param, baseline_param,
+                            where=[p < b for p, b in zip(pruned_param, baseline_param)],
+                            alpha=0.20, color='#66BB6A', label='Params Reduced')
+            param_savings = [b - p for b, p in zip(baseline_param, pruned_param)]
+            avg_ps = sum(param_savings) / len(param_savings) if param_savings else 0
+            avg_bp = sum(baseline_param) / len(baseline_param) if baseline_param else 1
+            pct_ps = (avg_ps / avg_bp * 100) if avg_bp > 0 else 0
+            ax.set_title(f'Active Model Parameters: Baseline vs Pruned (Avg Reduction: {avg_ps:.1f} MB / {pct_ps:.1f}%)',
+                         fontsize=13, fontweight='bold')
+            ax.set_xlabel('Episode', fontsize=11)
+            ax.set_ylabel('Model Parameters (MB)', fontsize=11)
+            ax.set_ylim(bottom=0)
+            ax.grid(True, alpha=0.3)
+            _set_episode_xticks(ax, episodes_v, tick_step)
+            ax.legend(loc='upper right', fontsize=9)
+
+        # Panel B: Peak VRAM during inference (runtime measurement)
+        if has_vram:
+            ax = axes[panel_idx]; panel_idx += 1
+            ax.plot(episodes_v, baseline_vram, color='#E53935', linewidth=2, marker='o',
+                    markersize=ms, label='Baseline Peak VRAM')
+            ax.plot(episodes_v, pruned_vram, color='#43A047', linewidth=2, marker='s',
+                    markersize=ms, label='Pruned Peak VRAM')
+            ax.fill_between(episodes_v, pruned_vram, baseline_vram,
+                            where=[p < b for p, b in zip(pruned_vram, baseline_vram)],
+                            alpha=0.18, color='#66BB6A', label='VRAM Saved')
+            vram_savings = [b - p for b, p in zip(baseline_vram, pruned_vram)]
+            avg_vs = sum(vram_savings) / len(vram_savings) if vram_savings else 0
+            avg_bv = sum(baseline_vram) / len(baseline_vram) if baseline_vram else 1
+            pct_vs = (avg_vs / avg_bv * 100) if avg_bv > 0 else 0
+            ax.set_title(f'Runtime VRAM: Baseline vs Pruned (Avg Saving: {avg_vs:.3f} GB / {pct_vs:.1f}%)',
+                         fontsize=13, fontweight='bold')
+            ax.set_xlabel('Episode', fontsize=11)
+            ax.set_ylabel('Peak VRAM (GB)', fontsize=11)
+            ax.set_ylim(bottom=0)
+            ax.grid(True, alpha=0.3)
+            _set_episode_xticks(ax, episodes_v, tick_step)
+            ax.legend(loc='upper right', fontsize=9)
+
         fig.tight_layout()
         fig.savefig('vram_usage.png', dpi=300, bbox_inches='tight')
         plt.close(fig)
-        print("[Report] VRAM usage plot saved to vram_usage.png")
+        print("[Report] VRAM/model-size comparison plot saved to vram_usage.png")
 
 # =========================================================================
 # PER-SOURCE-DATASET BAR CHARTS (BASELINE VS PRUNED)
@@ -1154,27 +1198,24 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
     print("[Report] Pruning action usage plot saved to pruning_action_usage.png")
 
 
+    def remove_outliers_xy(xs, ys):
+        if not ys:
+            return xs, ys
+        q1, q3 = np.percentile(ys, 25), np.percentile(ys, 75)
+        iqr = q3 - q1
+        lb, ub = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+        filt = [(x, y) for x, y in zip(xs, ys) if lb <= y <= ub]
+        if not filt:
+            return xs, ys
+        fx, fy = zip(*filt)
+        return list(fx), list(fy)
+
     episodes = [m['episode'] for m in metrics_list]
     times = [m['time_ms'] for m in metrics_list]
     ppls = [m['ppl'] for m in metrics_list]
 
-    # Function to remove outliers using IQR
-    def remove_outliers(data):
-        import numpy as np
-        q1 = np.percentile(data, 25)
-        q3 = np.percentile(data, 75)
-        iqr = q3 - q1
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        return [d for d in data if lower_bound <= d <= upper_bound]
-
-    # Inference Time Plot
-    times_filtered = remove_outliers(times)
-    episodes_filtered_time = episodes[:len(times_filtered)]  # Assume order, but to be precise, filter indices
-    # Since we filtered, need to get corresponding episodes
-    indices = [i for i, t in enumerate(times) if times[i] in times_filtered]
-    episodes_filtered_time = [episodes[i] for i in indices]
-    times_filtered = times_filtered
+    # Inference Time Plot (range-based outlier filtering, aligned with episodes)
+    episodes_filtered_time, times_filtered = remove_outliers_xy(episodes, times)
 
     plt.figure(figsize=(10, 6))
     plt.scatter(episodes_filtered_time, times_filtered, alpha=0.6, label='Data')
@@ -1192,11 +1233,8 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
     plt.close()
     print("[Report] Inference time plot saved to inference_time.png")
 
-    # Perplexity Plot
-    ppls_filtered = remove_outliers(ppls)
-    indices_ppl = [i for i, p in enumerate(ppls) if ppls[i] in ppls_filtered]
-    episodes_filtered_ppl = [episodes[i] for i in indices_ppl]
-    ppls_filtered = ppls_filtered
+    # Perplexity Plot (range-based outlier filtering, aligned with episodes)
+    episodes_filtered_ppl, ppls_filtered = remove_outliers_xy(episodes, ppls)
 
     plt.figure(figsize=(10, 6))
     plt.scatter(episodes_filtered_ppl, ppls_filtered, alpha=0.6, label='Data')
@@ -1248,8 +1286,21 @@ def generate_report(metrics_list: List[Dict[str, Any]], report_filename: str = '
         avg_vram_pi = sum(m.get('vram_pruning_inference_gb', m.get('vram_used_gb', 0)) for m in metrics_list) / n
         avg_vram_free = sum(m.get('vram_free_gb', 0) for m in metrics_list) / n
         avg_vram_total = max((m.get('vram_total_gb', 0) for m in metrics_list), default=0)
+        avg_baseline_vram = sum(m.get('baseline_vram_peak_gb', 0) for m in metrics_list) / n
+        avg_pruned_vram = sum(m.get('pruned_vram_peak_gb', 0) for m in metrics_list) / n
         if avg_vram_total > 0:
             f.write(f"  VRAM total: {avg_vram_total:.2f} GB | Avg model: {avg_vram_model:.2f} GB | Avg pruning+inference: {avg_vram_pi:.3f} GB | Avg free: {avg_vram_free:.2f} GB\n")
+            if avg_baseline_vram > 0:
+                vram_saving = avg_baseline_vram - avg_pruned_vram
+                vram_saving_pct = (vram_saving / avg_baseline_vram * 100) if avg_baseline_vram > 0 else 0
+                f.write(f"  Avg Baseline Peak VRAM: {avg_baseline_vram:.3f} GB | Avg Pruned Peak VRAM: {avg_pruned_vram:.3f} GB | VRAM Saved: {vram_saving:.3f} GB ({vram_saving_pct:.1f}%)\n")
+        # Active model parameter footprint
+        avg_base_params = sum(m.get('baseline_param_mb', 0) for m in metrics_list) / n
+        avg_pruned_params = sum(m.get('pruned_param_mb', 0) for m in metrics_list) / n
+        if avg_base_params > 0:
+            param_saving = avg_base_params - avg_pruned_params
+            param_saving_pct = (param_saving / avg_base_params * 100) if avg_base_params > 0 else 0
+            f.write(f"  Avg Baseline Params: {avg_base_params:.1f} MB | Avg Pruned Params: {avg_pruned_params:.1f} MB | Params Reduced: {param_saving:.1f} MB ({param_saving_pct:.1f}%)\n")
         f.write(f"Overall Avg PPL (pruned, arithmetic): {total_ppl/n:.2f}\n")
         f.write(f"Overall PPL (pruned, token-weighted): {tw_ppl_pruned:.2f}\n")
         avg_baseline_ppl = sum(m.get('baseline_ppl', 0) for m in metrics_list) / n
@@ -1467,7 +1518,7 @@ def load_training_prompts_with_source(dataset_name: str, split: str = 'train', s
 def main(num_episodes: int = 50,
          checkpoint_path: Optional[str] = None,
          max_new_tokens: int = 50,
-         train_dataset: str = 'Prompt Dataset Train.csv',
+         train_dataset: str = 'Oracle_dataset.csv',
          train_split: str = 'train',
          train_samples: int = 5000,
          split_type: str = 'train',
@@ -1562,10 +1613,22 @@ def main(num_episodes: int = 50,
             print(f"[Episode {i+1}] Token length: {token_len}, Prompt PPL: {prompt_ppl:.2f}")
 
             model_engine.restore_model()
+            # Measure baseline (unpruned) active model parameter footprint
+            baseline_param_mb = sum(p.numel() * p.element_size() for p in model_engine.model.parameters()) / (1024 ** 2)
+            # Track baseline (unpruned) peak VRAM
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                _base_vram_before = torch.cuda.memory_allocated() / (1024 ** 3)
+                torch.cuda.reset_peak_memory_stats()
             base_metrics = benchmark.benchmark_and_get_reward(
                 model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
             )
-            print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)}")
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                baseline_vram_peak_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            else:
+                baseline_vram_peak_gb = 0.0
+            print(f"[Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | GenTokens: {base_metrics.get('gen_tokens', 0)} | Peak VRAM: {baseline_vram_peak_gb:.2f} GB | Params: {baseline_param_mb:.1f} MB")
 
             start_lcr = time.time()
             if getattr(rl_agent, 'lcr_scorer', None) is not None:
@@ -1593,8 +1656,13 @@ def main(num_episodes: int = 50,
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)
-                torch.cuda.reset_peak_memory_stats()
             model_engine.apply_pruning(pruning_action)
+            # Measure pruned model active parameter footprint
+            pruned_param_mb = sum(p.numel() * p.element_size() for p in model_engine.model.parameters()) / (1024 ** 2)
+            # Reset peak AFTER pruning so we measure only inference VRAM on the pruned model
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.reset_peak_memory_stats()
             pruned_metrics = benchmark.benchmark_and_get_reward(
                 model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True
             )
@@ -1614,7 +1682,8 @@ def main(num_episodes: int = 50,
                 vram_total_gb = 0.0
                 vram_free_gb = 0.0
             total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + pruned_metrics['time_ms']
-            print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
+            _pruned_peak = _vram_peak if torch.cuda.is_available() else 0.0
+            print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | Params: {pruned_param_mb:.1f}/{baseline_param_mb:.1f} MB | Peak VRAM: {_pruned_peak:.2f} GB | free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
 
             alpha, beta = 0.9, 0.1
             eps = 1e-8
@@ -1655,6 +1724,10 @@ def main(num_episodes: int = 50,
                 'vram_model_gb': _vram_model_gb,
                 'vram_pruning_inference_gb': vram_pruning_inference_gb,
                 'vram_free_gb': vram_free_gb,
+                'baseline_vram_peak_gb': baseline_vram_peak_gb,
+                'pruned_vram_peak_gb': _vram_peak if torch.cuda.is_available() else 0.0,
+                'baseline_param_mb': baseline_param_mb,
+                'pruned_param_mb': pruned_param_mb,
             })
 
             model_engine.restore_model()
@@ -1851,8 +1924,20 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         
         # Baseline: no pruning
         model_engine.restore_model()
+        # Measure baseline (unpruned) active model parameter footprint
+        baseline_param_mb = sum(p.numel() * p.element_size() for p in model_engine.model.parameters()) / (1024 ** 2)
+        # Track baseline (unpruned) peak VRAM
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            _base_vram_before = torch.cuda.memory_allocated() / (1024 ** 3)
+            torch.cuda.reset_peak_memory_stats()
         base_metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
-        print(f"[Test Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f}")
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            baseline_vram_peak_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+        else:
+            baseline_vram_peak_gb = 0.0
+        print(f"[Test Baseline] Time: {base_metrics['time_ms']:.2f}ms | Tok/s: {base_metrics['tok_s']:.2f} | PPL: {base_metrics['perplexity']:.2f} | Peak VRAM: {baseline_vram_peak_gb:.2f} GB | Params: {baseline_param_mb:.1f} MB")
         
         # LCR score + early-Llama features (timed together)
         start_lcr = time.time()
@@ -1882,8 +1967,13 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             _vram_model_gb = torch.cuda.memory_allocated() / (1024 ** 3)  # LLM weight footprint
-            torch.cuda.reset_peak_memory_stats()
         model_engine.apply_pruning(action)
+        # Measure pruned model active parameter footprint
+        pruned_param_mb = sum(p.numel() * p.element_size() for p in model_engine.model.parameters()) / (1024 ** 2)
+        # Reset peak AFTER pruning so we measure only inference VRAM on the pruned model
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
         metrics = benchmark.benchmark_and_get_reward(model_engine, prompt, max_new_tokens=max_new_tokens, return_metrics=True)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -1902,7 +1992,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             vram_total_gb = 0.0
             vram_free_gb = 0.0
         total_pruned_time = lcr_inference_time_ms + rl_inference_time_ms + metrics['time_ms']
-        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | VRAM model:{_vram_model_gb:.2f} prune+infer:{vram_pruning_inference_gb:.3f} free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
+        _pruned_peak = _vram_peak if torch.cuda.is_available() else 0.0
+        print(f"[Test Pruned] Action: {action.target} ({action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {metrics['tok_s']:.2f} | PPL: {metrics['perplexity']:.2f} | Params: {pruned_param_mb:.1f}/{baseline_param_mb:.1f} MB | Peak VRAM: {_pruned_peak:.2f} GB | free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
         
         model_engine.restore_model()
 
@@ -1941,6 +2032,10 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'vram_model_gb': _vram_model_gb,
             'vram_pruning_inference_gb': vram_pruning_inference_gb,
             'vram_free_gb': vram_free_gb,
+            'baseline_vram_peak_gb': baseline_vram_peak_gb,
+            'pruned_vram_peak_gb': _vram_peak if torch.cuda.is_available() else 0.0,
+            'baseline_param_mb': baseline_param_mb,
+            'pruned_param_mb': pruned_param_mb,
         })
     
     # Generate test reports
@@ -3284,8 +3379,8 @@ if __name__ == "__main__":
     parser.add_argument('--eval-seed', type=int, default=42)
     parser.add_argument('--eval-max-seq-len', type=int, default=512)
     parser.add_argument('--wikitext-min-cont-tokens', type=int, default=32, help='Minimum continuation tokens used when computing WikiText-2 perplexity (avoids degenerate 1-token PPL).')
-    parser.add_argument('--train-dataset', type=str, default='lcr_mixture.final.csv')
-    parser.add_argument('--test-dataset', type=str, default='lcr_mixture.final.csv')
+    parser.add_argument('--train-dataset', type=str, default='Oracle_dataset.csv')
+    parser.add_argument('--test-dataset', type=str, default='Oracle_dataset.csv')
     parser.add_argument('--train-split', type=str, default='train')
     parser.add_argument('--train-samples', type=int, default=5000)
     parser.add_argument('--device', type=str, default='auto', choices=['cpu', 'gpu', 'auto'], help='Device to load model on: cpu, gpu, or auto')

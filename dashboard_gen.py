@@ -72,4 +72,5 @@ def plot_dashboard(base_metrics, pruned_metrics, filename='overall_dashboard.png
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(filename, dpi=300)
+    plt.close(fig)
     print(f"[Dashboard] Saved {filename}")

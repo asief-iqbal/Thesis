@@ -352,7 +352,7 @@ The framework automatically produces per-run plots:
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
 - Controller overhead breakdown (stacked bar)
-- VRAM usage per episode (before vs after pruning, two-line chart)
+- VRAM / model-size comparison (two-panel chart: active model parameters before vs after pruning, and runtime peak VRAM)
 - Reward progression
 - Quality-vs-speed tradeoff scatter
 - Action usage distribution

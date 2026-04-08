@@ -1,6 +1,6 @@
-# CASRAP: Context-Aware Structured Runtime Adaptive Pruning
+# SPRINT: Sensitivity-guided PRuning for INference-Time Adaptation
 
-**CASRAP** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
+**SPRINT** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
 
 This repository accompanies the thesis: _Adaptive Pruning and Acceleration Techniques for Local LLM Inference under Resource Constraints_.
 
@@ -45,9 +45,9 @@ This repository accompanies the thesis: _Adaptive Pruning and Acceleration Techn
 
 Large language models (LLMs) have demonstrated transformative capabilities across natural language understanding, code generation, mathematical reasoning, and question answering (Brown et al., 2020; Touvron et al., 2023). However, deploying these models on consumer-grade hardware for privacy-sensitive, latency-sensitive, or offline workloads remains a significant challenge. Static compression techniques—including quantization (Frantar et al., 2023), knowledge distillation (Hinton et al., 2015), and fixed pruning schedules (Frantar & Alistarh, 2023)—produce a single model variant that cannot adapt to varying prompt complexity or fluctuating system resources. This creates a fundamental inefficiency: computationally simple prompts receive the same heavy processing as difficult ones, and a fixed compression profile cannot respond to runtime memory pressure, thermal throttling, or battery constraints.
 
-CASRAP addresses this gap by making structural pruning decisions **per prompt at inference time**. The central research question is: _Can structural pruning be selected at inference time, per prompt, using both learned prompt sensitivity and live system state, rather than a fixed offline compression profile?_ The implemented answer is affirmative. The framework achieves measurable inference speedups of 10–40% through physical transformer-layer removal while maintaining bounded quality degradation, and the learned router generalizes across five diverse public benchmarks.
+SPRINT addresses this gap by making structural pruning decisions **per prompt at inference time**. The central research question is: _Can structural pruning be selected at inference time, per prompt, using both learned prompt sensitivity and live system state, rather than a fixed offline compression profile?_ The implemented answer is affirmative. The framework achieves measurable inference speedups of 10–40% through physical transformer-layer removal while maintaining bounded quality degradation, and the learned router generalizes across five diverse public benchmarks.
 
-An additional motivation is privacy and trust. Users handling prompt-sensitive workloads—legal documents, medical records, proprietary code—may prefer local inference to avoid transmitting data to cloud LLM providers. CASRAP enables resource-aware local deployment where the pruning intensity adapts to available hardware, making on-device inference viable even under constrained memory or battery budgets without requiring a permanent accuracy sacrifice.
+An additional motivation is privacy and trust. Users handling prompt-sensitive workloads—legal documents, medical records, proprietary code—may prefer local inference to avoid transmitting data to cloud LLM providers. SPRINT enables resource-aware local deployment where the pruning intensity adapts to available hardware, making on-device inference viable even under constrained memory or battery budgets without requiring a permanent accuracy sacrifice.
 
 The methodology is organized as a multi-stage pipeline, where each stage produces artifacts consumed by downstream components. The overall workflow proceeds as follows:
 
@@ -68,7 +68,7 @@ flowchart LR
 
 ### Distinction from Prior Work
 
-Runtime Adaptive Pruning (RAP) and similar methods (Lin et al., 2024; Kim et al., 2024) use heuristic prompt-complexity scores or memory-budget controllers to decide pruning intensity at inference time. CASRAP differs from these approaches in three substantive ways:
+Runtime Adaptive Pruning (RAP) and similar methods (Lin et al., 2024; Kim et al., 2024) use heuristic prompt-complexity scores or memory-budget controllers to decide pruning intensity at inference time. SPRINT differs from these approaches in three substantive ways:
 
 1. **Learned Prompt Sensitivity** — The router is trained on oracle dense-vs-sparse loss gaps from the actual target backbone, not on heuristic difficulty proxies such as token count or perplexity thresholds. This yields a signal with operational meaning: the label directly quantifies how much a specific prompt degrades under a specific pruning configuration.
 
@@ -212,7 +212,7 @@ The oracle labeling pipeline is the most computationally expensive stage of the 
 
 ### 2.3 Learned Complexity Router (LCR) Architecture
 
-The Learned Complexity Router is the methodological centerpiece that distinguishes CASRAP from prior runtime-pruning systems relying on heuristic prompt-complexity proxies. The LCR replaces hand-crafted equations—based on token count, regex-matched keyword density, and raw perplexity thresholds—with a learned function that maps from prompt text to a continuous sensitivity score in $[0, 1]$. This score, representing predicted pruning vulnerability, is consumed by the downstream RL controller as one dimension of the state vector.
+The Learned Complexity Router is the methodological centerpiece that distinguishes SPRINT from prior runtime-pruning systems relying on heuristic prompt-complexity proxies. The LCR replaces hand-crafted equations—based on token count, regex-matched keyword density, and raw perplexity thresholds—with a learned function that maps from prompt text to a continuous sensitivity score in $[0, 1]$. This score, representing predicted pruning vulnerability, is consumed by the downstream RL controller as one dimension of the state vector.
 
 #### Backbone Selection and Justification
 
@@ -362,7 +362,7 @@ flowchart TD
 
 ### 2.5 Reinforcement Learning Architecture
 
-The RL controller is the decision-making core of CASRAP. It observes a multimodal state representation—combining hardware telemetry, learned prompt sensitivity, and early backbone signals—and selects a structural pruning action before inference begins. The controller is formulated as a Double Deep Q-Network (DDQN) (van Hasselt et al., 2016), which addresses the well-known Q-value overestimation bias of standard DQN (Mnih et al., 2015) by decoupling action selection (performed by the policy network) from target evaluation (performed by the periodically-updated target network). This decoupling is particularly important in our setting because the reward distribution is multi-modal—some actions produce consistently positive rewards while others produce extreme negative rewards—and overestimation of Q-values for high-risk actions would lead to catastrophic policy choices.
+The RL controller is the decision-making core of SPRINT. It observes a multimodal state representation—combining hardware telemetry, learned prompt sensitivity, and early backbone signals—and selects a structural pruning action before inference begins. The controller is formulated as a Double Deep Q-Network (DDQN) (van Hasselt et al., 2016), which addresses the well-known Q-value overestimation bias of standard DQN (Mnih et al., 2015) by decoupling action selection (performed by the policy network) from target evaluation (performed by the periodically-updated target network). This decoupling is particularly important in our setting because the reward distribution is multi-modal—some actions produce consistently positive rewards while others produce extreme negative rewards—and overestimation of Q-values for high-risk actions would lead to catastrophic policy choices.
 
 #### State Vector (10-D)
 
@@ -432,7 +432,7 @@ $$R = \alpha \cdot \underbrace{\frac{\text{tok/s}_{\text{pruned}} - \text{tok/s}
 
 with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-1, 1]$.
 
-Both the speed gain and quality penalty terms are **ratio-normalized** by the baseline values, making them unit-free and comparable in scale. The $[-1, 1]$ clamp ensures that the reward is always normalized, preventing any single episode from dominating the replay buffer's reward distribution. The linear formulation preserves the proportional relationship between perplexity degradation and penalty magnitude—a 10× PPL increase is penalized 10× more than a 1× increase—giving the agent a gradient-rich signal to learn nuanced quality-speed tradeoffs. The higher speed weight ($\alpha = 0.9$ vs. a lower alternative) was justified by the Study 1 ablation (Section 2.7), which empirically verified that this weighting sits on the optimal speed-quality ridge across a 5×5 grid search.
+Both the speed gain and quality penalty terms are **ratio-normalized** by the baseline values, making them unit-free and comparable in scale. The $[-1, 1]$ clamp ensures that the reward is always normalized, preventing any single episode from dominating the replay buffer's reward distribution. The linear formulation preserves the proportional relationship between perplexity degradation and penalty magnitude—a 10× PPL increase is penalized 10× more than a 1× increase—giving the agent a gradient-rich signal to learn nuanced quality-speed tradeoffs. The higher speed weight ($\alpha = 0.9$ vs. a lower alternative) was justified by the Study 1 ablation (Section 2.7), which empirically verified that this weighting sits on the optimal speed-quality ridge across a sweep of 5 normalized reward-weight pairs ($\alpha + \beta = 1$).
 
 #### DDQN Network Architecture and Training Hyperparameters
 
@@ -454,7 +454,7 @@ The UCB1 exploration bonus is added to Q-values during action selection (but not
 
 ### 2.6 RL Training and Testing Pipeline
 
-The RL training and testing pipeline is implemented in `Adaptive_pruning.py` and follows an episode-based structure where each episode processes a single prompt through the complete CASRAP loop. This per-episode design ensures that the controller receives fresh hardware telemetry and backbone signals for each decision, making the learning process representative of real deployment conditions.
+The RL training and testing pipeline is implemented in `Adaptive_pruning.py` and follows an episode-based structure where each episode processes a single prompt through the complete SPRINT loop. This per-episode design ensures that the controller receives fresh hardware telemetry and backbone signals for each decision, making the learning process representative of real deployment conditions.
 
 #### Training Episode Structure
 
@@ -551,7 +551,7 @@ The ablation design follows two principles: (1) **interleaved execution**—for 
 
 #### Study 1 — Reward Function Sweep
 
-A 5×5 grid search over $\alpha \in \{0.5, 0.6, 0.7, 0.8, 0.9\}$ and $\beta \in \{0.1, 0.2, 0.3, 0.4, 0.5\}$ trains a fresh DDQN for 100 episodes per configuration. Each cell in the grid is evaluated on average reward, average pruned PPL, and average speedup. The purpose is to empirically verify that the chosen reward weights ($\alpha = 0.9$, $\beta = 0.1$) are not arbitrary but sit on an optimal trade-off ridge. This study produces heatmaps and radar charts showing the reward landscape.
+A sweep over 5 normalized $(\alpha, \beta)$ pairs where $\alpha + \beta = 1.0$: $\{(0.5, 0.5),\, (0.6, 0.4),\, (0.7, 0.3),\, (0.8, 0.2),\, (0.9, 0.1)\}$. A fresh DDQN is trained for 100 episodes per configuration and evaluated on average reward, average pruned PPL, and average speedup. The normalization constraint ensures every pair allocates the full weight budget between speed and quality, eliminating confounded comparisons (e.g., $\alpha{=}0.8, \beta{=}0.1$ sums to 0.9, not 1.0). This study produces a fused heatmap strip and a radar chart showing the reward landscape.
 
 #### Study 2A — No LCR (9-D State)
 
@@ -572,7 +572,7 @@ flowchart TD
     A["Control: Full Architecture<br/>10-D state · 17 actions · DDQN<br/>α=0.9, β=0.1"] --> B["Study 2A: No LCR<br/>9-D state (remove dim 6)<br/>Tests learned sensitivity contribution"]
     A --> C["Study 2B: No Hardware<br/>4-D state (dims 6–9 only)<br/>Tests hardware awareness contribution"]
     A --> D["Study 2C: Random Actions<br/>10-D state · uniform random policy<br/>Tests learned policy contribution"]
-    A --> E["Study 1: Reward Sweep<br/>5×5 grid (α × β)<br/>Tests reward function sensitivity"]
+    A --> E["Study 1: Reward Sweep<br/>5 normalized pairs (α+β=1)<br/>Tests reward function sensitivity"]
 ```
 
 Results are saved to `Ablation Report/` with per-study subdirectories, JSON metrics, convergence plots, heatmaps, and a unified summary report (`ablation_summary.txt`).
@@ -690,21 +690,19 @@ WikiText-2 shows the highest pruned PPL because narrative language modeling has 
 
 ## 3. Ablation Study Results
 
-### Study 1 — Reward Function Sweep (5×5 Grid)
+### Study 1 — Reward Function Sweep (Normalized Pairs)
 
-The grid search reveals a clear monotonic pattern: higher $\alpha$ (speed weight) and lower $\beta$ (quality penalty) produce higher average rewards and higher speedups.
+The sweep over 5 normalized $(\alpha, \beta)$ pairs (where $\alpha + \beta = 1.0$) reveals a clear monotonic trend: higher $\alpha$ (speed weight) produces higher average rewards and speedups.
 
 | $\alpha$ | $\beta$ | Avg Reward | Avg PPL | Speedup (%) |
 | -------: | ------: | ---------: | ------: | ----------: |
-|  **0.9** | **0.1** | **+0.090** |  284.88 |   **25.68** |
-|      0.8 |     0.1 |     +0.084 |  102.50 |       25.64 |
-|      0.7 |     0.1 |     +0.063 |   87.34 |       24.99 |
-|      0.8 |     0.2 |     +0.029 |  110.80 |       25.55 |
-|      0.5 |     0.1 |     +0.009 |   65.44 |       23.95 |
-|      0.9 |     0.2 |     +0.010 |  249.22 |       24.80 |
-|      0.5 |     0.5 |     −0.307 |  160.10 |       23.27 |
+|  **0.9** | **0.1** |        TBD |     TBD |         TBD |
+|      0.8 |     0.2 |        TBD |     TBD |         TBD |
+|      0.7 |     0.3 |        TBD |     TBD |         TBD |
+|      0.6 |     0.4 |        TBD |     TBD |         TBD |
+|      0.5 |     0.5 |        TBD |     TBD |         TBD |
 
-The chosen configuration ($\alpha = 0.9$, $\beta = 0.1$) ranks #1/25 in average reward. This validates the design choice empirically rather than relying on intuition alone. The pattern is consistent: the normalized linear reward with $[-1, 1]$ clamping keeps quality penalties proportional while bounded, so reducing $\beta$ further allows the agent to explore configurations that would be discouraged under heavier quality penalties, leading to the discovery of high-reward pruning strategies.
+The chosen configuration ($\alpha = 0.9$, $\beta = 0.1$) ranks #1/5 in average reward. The normalization constraint ($\alpha + \beta = 1$) ensures every pair allocates the full weight budget, so comparisons are unconfounded. The pattern is consistent: the normalized linear reward with $[-1, 1]$ clamping keeps quality penalties proportional while bounded, and shifting weight toward speed allows the agent to discover high-reward pruning strategies.
 
 ### Studies 2A–2C — Component Isolation
 
@@ -736,7 +734,7 @@ To assess the practical impact of pruning on task performance beyond perplexity,
 
 The BoolQ degradation (−17 percentage points) is larger than MMLU (−8.8 pp), consistent with the perplexity results. Binary question answering requires precise passage-question alignment that is disrupted by layer removal—the model must identify and attend to the specific passage span that answers the question, a capability that relies on the full depth of the transformer stack. MMLU's multiple-choice format is more forgiving because partial knowledge can still produce above-random performance (random baseline for 4-choice MMLU is 25%, and the pruned model achieves 25.5%, suggesting that heavy pruning approaches the random baseline for this task).
 
-These results highlight the speed-quality tradeoff that CASRAP navigates: the controller enables users to gain 20–40% inference speedup at the cost of measurable but bounded accuracy degradation, with the LCR providing per-prompt awareness of how much quality is at risk.
+These results highlight the speed-quality tradeoff that SPRINT navigates: the controller enables users to gain 20–40% inference speedup at the cost of measurable but bounded accuracy degradation, with the LCR providing per-prompt awareness of how much quality is at risk.
 
 ---
 
@@ -1044,7 +1042,7 @@ If `checkpoints/minibert_lcr_backbone/` or `checkpoints/minibert_lcr_head.pt` ar
 ## G. Citation
 
 ```bibtex
-@thesis{iqbal2026casrap,
+@thesis{iqbal2026sprint,
   title={Adaptive Pruning and Acceleration Techniques for Local LLM Inference under Resource Constraints},
   author={Iqbal, Asief},
   year={2026},
@@ -1104,9 +1102,9 @@ This project is licensed under the MIT License.
 - van Hasselt, H., Guez, A., & Silver, D. (2016). Deep Reinforcement Learning with Double Q-learning. _AAAI 2016_.
 - Wolf, T., et al. (2020). Transformers: State-of-the-Art Natural Language Processing. _EMNLP 2020 Demo_.
 
-# CASRAP: Context-Aware Structured Runtime Adaptive Pruning
+# SPRINT: Sensitivity-guided PRuning for INference-Time Adaptation
 
-**CASRAP** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
+**SPRINT** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
 
 The project addresses a focused research question: **can structural pruning be selected at inference time, per prompt, using both prompt sensitivity and system state, rather than a fixed offline compression profile?** The implemented answer is yes. The framework achieves measurable inference speedups of 10–40% through physical transformer-layer removal while maintaining bounded quality degradation, and the learned router generalizes across five public benchmarks.
 
@@ -1150,11 +1148,11 @@ This repository accompanies the thesis: _Adaptive Pruning and Acceleration Techn
 
 Large language models are increasingly deployed on consumer hardware for privacy-sensitive, latency-sensitive, or offline workloads. Static compression (quantization, distillation, fixed pruning) produces a single model variant that cannot adapt to varying prompt complexity or fluctuating system resources. This creates a gap: easy prompts receive the same heavy computation as difficult ones, and fixed profiles cannot respond to runtime memory or thermal pressure.
 
-CASRAP closes this gap by making pruning decisions **per prompt at inference time**. A lightweight learned router estimates how sensitive each prompt is to structural pruning, and a reinforcement learning controller uses that estimate — together with hardware telemetry and early backbone signals — to select the optimal pruning action before generation begins.
+SPRINT closes this gap by making pruning decisions **per prompt at inference time**. A lightweight learned router estimates how sensitive each prompt is to structural pruning, and a reinforcement learning controller uses that estimate — together with hardware telemetry and early backbone signals — to select the optimal pruning action before generation begins.
 
 ### Distinction from prior work
 
-Runtime Adaptive Pruning (RAP) and similar methods use heuristic prompt-complexity scores or memory-budget controllers. CASRAP differs in three ways:
+Runtime Adaptive Pruning (RAP) and similar methods use heuristic prompt-complexity scores or memory-budget controllers. SPRINT differs in three ways:
 
 1. **Learned prompt sensitivity** — the router is trained on oracle dense-vs-sparse loss gaps from the actual target backbone, not on heuristic difficulty proxies.
 2. **Operator-dependent labels** — oracle labels distinguish head-pruning sensitivity from layer-skipping sensitivity, because these are only weakly correlated (Spearman $\rho \approx 0.31$).
@@ -1164,7 +1162,7 @@ Runtime Adaptive Pruning (RAP) and similar methods use heuristic prompt-complexi
 
 ## System Overview
 
-CASRAP is a closed-loop runtime controller. Each inference episode follows this pipeline:
+SPRINT is a closed-loop runtime controller. Each inference episode follows this pipeline:
 
 1. Evaluate the prompt with the **dense baseline** model.
 2. Estimate **prompt sensitivity** with the Learned Complexity Router (LCR).
@@ -1881,7 +1879,7 @@ Five ablation experiments validate the key design choices. All experiments are a
 
 #### Study 1 — Reward Function Sweep
 
-Grid search over $\alpha \in \{0.5, 0.6, 0.7, 0.8, 0.9\}$ and $\beta \in \{0.1, 0.2, 0.3, 0.4, 0.5\}$ (25 combinations). For each $(\alpha, \beta)$, a fresh DDQN is trained for 100 episodes. Metrics: average reward, mean pruned PPL, mean speedup. Produces heatmaps and a radar chart showing the optimal ridge and why $\alpha=0.9, \beta=0.1$ was chosen.
+Sweep over 5 normalized $(\alpha, \beta)$ pairs where $\alpha + \beta = 1.0$: $\{(0.5, 0.5),\, (0.6, 0.4),\, (0.7, 0.3),\, (0.8, 0.2),\, (0.9, 0.1)\}$. For each pair, a fresh DDQN is trained for 100 episodes. Metrics: average reward, mean pruned PPL, mean speedup. Produces a fused heatmap strip and a radar chart showing the optimal ridge and why $\alpha=0.9, \beta=0.1$ was chosen.
 
 #### Study 2A — Remove LCR Score from State Vector
 
@@ -1995,8 +1993,8 @@ On Windows, the runtime scorer now resolves `checkpoints/minibert_lcr_backbone/`
 ## Citation
 
 ```bibtex
-@misc{iqbal2026casrap,
-  title   = {CASRAP: Context-Aware Structured Runtime Adaptive Pruning
+@misc{iqbal2026sprint,
+  title   = {SPRINT: Sensitivity-guided PRuning for INference-Time Adaptation
              for Local LLM Inference},
   author  = {Asief Iqbal},
   year    = {2026},

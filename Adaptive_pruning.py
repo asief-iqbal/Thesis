@@ -1589,15 +1589,7 @@ def main(num_episodes: int = 50,
     except Exception as e:
         print(f"[Calib] Warning: calibration skipped due to error: {e}")
 
-    _train_zs_results = {}
     with _pushd(train_run_dir):
-        # Pre-training zero-shot accuracy evaluation (dense model baseline)
-        print("\n[System] Running pre-training zero-shot accuracy evaluation...")
-        try:
-            run_zero_shot_baseline_eval(model_engine, samples=200, phase_label='Pre-Training')
-        except Exception as e:
-            print(f"[Zero-shot] Warning: pre-training eval skipped due to error: {e}")
-
         print(f"\n[System] Starting RL Training for {num_episodes} episodes...")
 
         # GPU warmup: flush cold-start overhead before timing anything
@@ -1743,16 +1735,6 @@ def main(num_episodes: int = 50,
         with open('training_metrics.json', 'w') as f:
             json.dump(metrics_list, f)
 
-        if train_dataset and str(train_dataset).endswith('.csv') and os.path.exists(train_dataset):
-            try:
-                _train_zs_results = run_oracle_dataset_zeroshot(
-                    model_engine, train_dataset, split_filter='train',
-                    phase_label='Post-Training', max_seq_len=512,
-                )
-            except Exception as e:
-                print(f"[Oracle ZS] Post-training zero-shot eval failed: {e}")
-
-    _test_zs_results = {}
     if test_prompts_split:
         test_cap = min(len(test_prompts_split), test_samples)
         test_run_dir = _create_test_run_dir()
@@ -1765,15 +1747,6 @@ def main(num_episodes: int = 50,
                        prompts=test_prompts_split[:test_cap],
                        skip_organize=True,
                        source_datasets=test_sources_split[:test_cap])
-
-            if train_dataset and str(train_dataset).endswith('.csv') and os.path.exists(train_dataset):
-                try:
-                    _test_zs_results = run_oracle_dataset_zeroshot(
-                        model_engine, train_dataset, split_filter='test',
-                        phase_label='Post-Testing', max_seq_len=512,
-                    )
-                except Exception as e:
-                    print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
 
 def organize_test_reports(is_report_mode: bool = False):
     """Organize test reports into numbered subfolders under 'Test Report'."""
@@ -2480,7 +2453,10 @@ def _load_oracle_dataset_rows(dataset_path: str, source_filter: str, split_filte
 def _eval_boolq_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_len: int = 512) -> dict:
     """Evaluate BoolQ zero-shot accuracy from oracle dataset rows using mean log-prob."""
     correct, total = 0, 0
-    for row in rows:
+    n_rows = len(rows)
+    for idx, row in enumerate(rows):
+        if (idx + 1) % 50 == 0 or idx == 0:
+            print(f"  [BoolQ] {idx+1}/{n_rows}", end="\r", flush=True)
         prompt_text = (row.get('Prompt') or '').strip()
         if not prompt_text:
             continue
@@ -2505,7 +2481,10 @@ def _eval_boolq_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_
 def _eval_mmlu_from_dataset(engine: RealModelEngine, rows: List[dict], max_seq_len: int = 512) -> dict:
     """Evaluate MMLU zero-shot accuracy from oracle dataset rows using mean log-prob."""
     correct, total = 0, 0
-    for row in rows:
+    n_rows = len(rows)
+    for idx, row in enumerate(rows):
+        if (idx + 1) % 50 == 0 or idx == 0:
+            print(f"  [MMLU] {idx+1}/{n_rows}", end="\r", flush=True)
         prompt_text = (row.get('Prompt') or '').strip()
         if not prompt_text:
             continue
@@ -2539,6 +2518,7 @@ def run_oracle_dataset_zeroshot(
     force_action_str: Optional[str] = None,
     phase_label: str = 'Post-Training',
     max_seq_len: int = 512,
+    max_samples: int = 200,
 ) -> dict:
     """Run zero-shot accuracy on MMLU & BoolQ from the oracle dataset CSV.
     
@@ -2550,9 +2530,12 @@ def run_oracle_dataset_zeroshot(
     print(f"\n[Oracle ZS] === {phase_label}: Zero-Shot Evaluation from Oracle Dataset ===")
     print(f"[Oracle ZS] Dataset: {dataset_path}, Split: {split_filter}")
 
-    # Load rows for each task
+    # Load rows for each task (capped to max_samples per task)
     boolq_rows = _load_oracle_dataset_rows(dataset_path, 'boolq', split_filter)
     mmlu_rows = _load_oracle_dataset_rows(dataset_path, 'mmlu', split_filter)
+    if max_samples and max_samples > 0:
+        boolq_rows = boolq_rows[:max_samples]
+        mmlu_rows = mmlu_rows[:max_samples]
     print(f"[Oracle ZS] BoolQ rows: {len(boolq_rows)}, MMLU rows: {len(mmlu_rows)}")
 
     if not boolq_rows and not mmlu_rows:
@@ -3362,7 +3345,7 @@ def run_comparative_eval(engine, agent, tasks_list: List[str], batch_size: int =
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Adaptive Pruning RL Controller")
-    parser.add_argument('--mode', choices=['train','test','report'], default='test')
+    parser.add_argument('--mode', choices=['train','test','report','zeroshot'], default='test')
     parser.add_argument('--checkpoint', type=str, default=os.path.join('checkpoints','rl_policy.pt'))
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--max-new-tokens', type=int, default=50)
@@ -3413,6 +3396,37 @@ if __name__ == "__main__":
              static_profiles=args.static_profiles, sparsity_2to4=args.sparsity_2to4, compile_profiles=args.compile_profiles,
              kv_compress=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, split_ratio=args.split_ratio, test_samples=args.test_samples,
              model_name=_resolved_model_name)
+    elif args.mode == 'zeroshot':
+        engine = RealModelEngine(device=args.device, enable_static_profiles=args.static_profiles, enable_2to4=args.sparsity_2to4, enable_compile=args.compile_profiles, enable_kv_compression=args.kv_compress, kv_keep_ratio=args.kv_keep_ratio, model_name=_resolved_model_name)
+        _zs_dataset = _resolved_test_dataset or _resolved_train_dataset
+        zs_run_dir = _create_test_run_dir()
+        print(f"[System] Zero-shot run directory: {zs_run_dir}")
+        with _pushd(zs_run_dir):
+            # Dense baseline zero-shot (BoolQ + MMLU from streaming)
+            print("\n[System] Running zero-shot baseline evaluation (dense model)...")
+            try:
+                run_zero_shot_baseline_eval(engine, samples=args.eval_samples, phase_label='Zero-Shot Baseline', max_seq_len=args.eval_max_seq_len)
+            except Exception as e:
+                print(f"[Zero-shot] Baseline eval failed: {e}")
+            # Oracle dataset zero-shot: dense vs pruned on train split
+            if _zs_dataset and str(_zs_dataset).endswith('.csv') and os.path.exists(_zs_dataset):
+                try:
+                    run_oracle_dataset_zeroshot(
+                        engine, _zs_dataset, split_filter='train',
+                        force_action_str=args.force_action,
+                        phase_label='Oracle-Train', max_seq_len=args.eval_max_seq_len,
+                    )
+                except Exception as e:
+                    print(f"[Oracle ZS] Train-split eval failed: {e}")
+                try:
+                    run_oracle_dataset_zeroshot(
+                        engine, _zs_dataset, split_filter='test',
+                        force_action_str=args.force_action,
+                        phase_label='Oracle-Test', max_seq_len=args.eval_max_seq_len,
+                    )
+                except Exception as e:
+                    print(f"[Oracle ZS] Test-split eval failed: {e}")
+            print("\n[System] Zero-shot evaluation complete.")
     elif args.mode == 'report':
         import json
         with open('training_metrics.json', 'r') as f:
@@ -3432,24 +3446,7 @@ if __name__ == "__main__":
         print(f"[System] Test run directory reserved: {test_run_dir}")
         with _pushd(test_run_dir):
             if not specific_eval:
-                # Pre-test zero-shot accuracy evaluation (dense model baseline)
-                print("\n[System] Running pre-test zero-shot accuracy evaluation...")
-                try:
-                    run_zero_shot_baseline_eval(engine, samples=200, phase_label='Pre-Test')
-                except Exception as e:
-                    print(f"[Zero-shot] Warning: pre-test eval skipped due to error: {e}")
                 test_agent(engine, agent, bench, num_test_episodes=args.episodes, max_new_tokens=args.max_new_tokens, test_dataset=_resolved_test_dataset, force_action=args.force_action, skip_organize=True)
-
-                _test_ds = _resolved_test_dataset
-                if _test_ds and str(_test_ds).endswith('.csv') and os.path.exists(_test_ds):
-                    try:
-                        run_oracle_dataset_zeroshot(
-                            engine, _test_ds, split_filter='test',
-                            force_action_str=args.force_action,
-                            phase_label='Post-Testing', max_seq_len=args.eval_max_seq_len,
-                        )
-                    except Exception as e:
-                        print(f"[Oracle ZS] Post-testing zero-shot eval failed: {e}")
 
                 if getattr(args, 'wikitext_samples', 0):
                     try:

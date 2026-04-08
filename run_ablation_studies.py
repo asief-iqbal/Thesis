@@ -641,11 +641,9 @@ def _generate_study1_fused_heatmap(grid_results, outdir):
         # Annotate cells
         for i in range(n):
             val = mat[0, i]
-            mid = (mat.max() + mat.min()) / 2
-            color = "white" if val > mid else "black"
             weight = "bold" if (chosen_idx is not None and i == chosen_idx) else "normal"
             ax.text(i, 0, f"{val:{fmt}}", ha="center", va="center",
-                    color=color, fontsize=11, fontweight=weight)
+                    color="black", fontsize=11, fontweight=weight)
 
         # Highlight chosen
         if chosen_idx is not None:

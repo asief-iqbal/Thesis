@@ -948,7 +948,7 @@ Main entrypoint: `Adaptive_pruning.py`
 
 | Argument           | Default                    | Description                                                           |
 | ------------------ | -------------------------- | --------------------------------------------------------------------- |
-| `--mode`           | `test`                     | `train`, `test`, or `report`                                          |
+| `--mode`           | `test`                     | `train`, `test`, `zeroshot`, or `report`                              |
 | `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                          |
 | `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                      |
 | `--episodes`       | `50`                       | Number of train or test episodes; also sets the epsilon-decay horizon |
@@ -1464,7 +1464,7 @@ The framework automatically produces per-run plots:
 
 All charts are adaptive — figure sizes, marker sizes, tick intervals, and label density scale automatically with episode count so plots remain readable from 10 to 1 000+ episodes. The time-breakdown chart uses round-interval x-axis labels (100, 200, ...) instead of per-episode numbers.
 
-Reports are stored under numbered folders in `Training Report/` and `Test Report/`. RL train/test runs now reserve those folders at command start and write artifacts there directly. Zero-shot accuracy charts are saved separately per split as before-vs-after pruning comparisons: `zeroshot_accuracy_compare_train.json/png` in the training run folder and `zeroshot_accuracy_compare_test.json/png` in the test run folder.
+Reports are stored under numbered folders in `Training Report/` and `Test Report/`. RL train/test runs now reserve those folders at command start and write artifacts there directly. Zero-shot accuracy evaluation is a separate `--mode zeroshot` command and is no longer bundled into RL train or test pipelines.
 
 ---
 
@@ -1618,7 +1618,17 @@ python Adaptive_pruning.py --mode train --train-dataset Oracle_dataset.csv \
   --checkpoint checkpoints/rl_policy.pt --device gpu
 ```
 
-This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. `Training Report/Train N/` is created as soon as the training command starts, `Test Report/Test N/` is created as soon as the held-out test phase starts, and all RL artifacts are written directly into those folders. Post-training zero-shot evaluation uses the train split, while post-testing zero-shot evaluation uses the test split.
+This trains on all 8,000 train-labeled rows, then auto-tests on 2,000 test-labeled rows. `Training Report/Train N/` is created as soon as the training command starts, `Test Report/Test N/` is created as soon as the held-out test phase starts, and all RL artifacts are written directly into those folders.
+
+### Run zero-shot accuracy evaluation
+
+Zero-shot accuracy (BoolQ + MMLU, dense vs pruned) is a **separate command** — it is not bundled into RL train or test:
+
+```bash
+python Adaptive_pruning.py --mode zeroshot --test-dataset Oracle_dataset.csv --device gpu
+```
+
+This evaluates the dense baseline and optionally a pruned configuration (via `--force-action`) on both train and test splits of the oracle dataset. Results are saved to a new `Test Report/Test N/` folder.
 
 For datasets **without** a `Split` column, use `--split-ratio` to create one:
 
@@ -1709,7 +1719,7 @@ Main entrypoint: `Adaptive_pruning.py`
 
 | Argument           | Default                    | Description                                                                      |
 | ------------------ | -------------------------- | -------------------------------------------------------------------------------- |
-| `--mode`           | `test`                     | `train`, `test`, or `report`                                                     |
+| `--mode`           | `test`                     | `train`, `test`, `zeroshot`, or `report`                                             |
 | `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                                     |
 | `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                                 |
 | `--episodes`       | `50`                       | Number of train or test episodes; also sets the train-mode epsilon-decay horizon |

@@ -1688,11 +1688,9 @@ def main(num_episodes: int = 50,
             alpha, beta = 0.9, 0.1
             eps = 1e-8
             speed_gain = (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
-            log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
-            log_ppl_pruned = np.log(max(pruned_metrics['perplexity'], 1.01))
-            ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
+            ppl_penalty = (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps)
             relative_reward = alpha * speed_gain - beta * ppl_penalty
-            relative_reward = float(np.clip(relative_reward, -2.0, 2.0))
+            relative_reward = float(np.clip(relative_reward, -1.0, 1.0))
 
             next_state_tensor = rl_agent._get_state_vector(prompt, prompt_ppl=prompt_ppl, token_len=token_len, lcr_score=complexity_score, early_features=early_features)
             rl_agent.train_step(state_tensor, pruning_action.action_index, relative_reward, next_state_tensor)
@@ -2001,10 +1999,8 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
         alpha, beta = 0.9, 0.1
         eps_r = 1e-8
         speed_gain = (metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps_r)
-        log_ppl_base = np.log(max(base_metrics['perplexity'], 1.01))
-        log_ppl_pruned = np.log(max(metrics['perplexity'], 1.01))
-        ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
-        test_reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -2.0, 2.0))
+        ppl_penalty = (metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps_r)
+        test_reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -1.0, 1.0))
 
         metrics_list.append({
             'episode': i+1,

@@ -6,13 +6,13 @@ Random policy:   True
 Alpha:           0.9
 Beta:            0.1
 
-Episodes:        50
-Avg Reward:      0.1192  (std=0.3125)
-Avg PPL:         141.65
-Avg Speedup:     24.65%
-Baseline PPL:    2.48
+Episodes:        100
+Avg Reward:      0.0574  (std=0.1996)
+Avg PPL:         152.04
+Avg Speedup:     18.12%
+Baseline PPL:    2.23
 
 Converged (last 20 episodes):
-  Reward:        0.0979
-  PPL:           81.87
-  Speedup:       22.97%
+  Reward:        -0.0341
+  PPL:           17.50
+  Speedup:       4.79%

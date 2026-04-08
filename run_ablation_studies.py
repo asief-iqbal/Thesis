@@ -414,10 +414,8 @@ def run_episode(engine: RealModelEngine, benchmark: RealBenchmark,
     # Reward (same formula as Adaptive_pruning.py)
     eps_r = 1e-8
     speed_gain = (pruned["tok_s"] - baseline["tok_s"]) / (baseline["tok_s"] + eps_r)
-    log_ppl_base   = np.log(max(baseline["perplexity"], 1.01))
-    log_ppl_pruned = np.log(max(pruned["perplexity"], 1.01))
-    ppl_penalty = max(0.0, log_ppl_pruned - log_ppl_base)
-    reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -2.0, 2.0))
+    ppl_penalty = (pruned["perplexity"] - baseline["perplexity"]) / (baseline["perplexity"] + eps_r)
+    reward = float(np.clip(alpha * speed_gain - beta * ppl_penalty, -1.0, 1.0))
 
     next_full_state = build_full_state(prompt_data, monitor.get_state())
     next_state_t = select_state(next_full_state, state_indices)

@@ -74,7 +74,7 @@ Runtime Adaptive Pruning (RAP) and similar methods (Lin et al., 2024; Kim et al.
 
 2. **Operator-Dependent Labels** — Oracle labels distinguish head-pruning sensitivity from layer-skipping sensitivity, because these are only weakly correlated. In our experiments, the cross-method Spearman correlation between attention-head-pruning gaps and layer-skipping gaps is approximately $\rho \approx 0.31$. This low correlation justifies treating each pruning method as requiring its own sensitivity estimate, rather than collapsing them into a single generic "difficulty" score.
 
-3. **Physical Layer Removal** — The layer-skipping engine physically removes layers from the model's `nn.ModuleList` and reassigns `layer_idx` for correct `DynamicCache` alignment (Wolf et al., 2020). Prior implementations that monkey-patch forward methods to identity functions cause KV-cache misalignment—skipped layers do not call `cache.update()`, so subsequent layers read incorrect cache entries. This bug causes pruned inference to be *slower* than the baseline. Physical removal eliminates this issue entirely and yields genuine speedups.
+3. **Physical Layer Removal** — The layer-skipping engine physically removes layers from the model's `nn.ModuleList` and reassigns `layer_idx` for correct `DynamicCache` alignment (Wolf et al., 2020). Prior implementations that monkey-patch forward methods to identity functions cause KV-cache misalignment—skipped layers do not call `cache.update()`, so subsequent layers read incorrect cache entries. This bug causes pruned inference to be _slower_ than the baseline. Physical removal eliminates this issue entirely and yields genuine speedups.
 
 ---
 
@@ -88,14 +88,14 @@ A well-constructed evaluation dataset is essential for any runtime pruning syste
 
 The five benchmark sources were selected to cover five functionally distinct categories of language model prompts. Each source stresses a different axis of model competence, ensuring that the learned router must generalize across prompt types rather than overfitting to a single task distribution:
 
-| Source | Count | Domain | Rationale |
-|--------|------:|--------|-----------|
-| **GSM8K** | 2,000 | Mathematical Reasoning | Grade-school math word problems requiring multi-step arithmetic and logical chains. These prompts stress the model's ability to maintain coherent reasoning across token sequences (Cobbe et al., 2021). Mathematical prompts are particularly interesting for pruning because errors in intermediate reasoning steps compound nonlinearly, making them highly sensitive to structural compression. |
-| **MBPP** | 2,000 | Code Generation | Python programming tasks with natural language descriptions. Code prompts contain structured syntax patterns and keyword dependencies that differ fundamentally from natural language (Austin et al., 2021). The presence of syntactic constraints (balanced brackets, indentation, variable scope) makes code generation sensitive to attention-head removal, which disrupts long-range dependency tracking. |
-| **WikiText-2** | 2,000 | Narrative Language Modeling | Long-form Wikipedia paragraphs with redundancy-rich prose. WikiText serves as the canonical language-modeling benchmark and provides a baseline for measuring perplexity degradation under pruning (Merity et al., 2017). Narrative text has high lexical redundancy, making it relatively robust to moderate pruning. |
-| **MMLU** | 2,000 | Mixed-Domain Reasoning | Multiple-choice questions spanning 57 academic subjects from humanities to STEM. MMLU tests broad knowledge retrieval and multi-domain generalization (Hendrycks et al., 2021). The structured multiple-choice format provides clear answer boundaries that interact with pruning differently than open-ended generation. |
-| **BoolQ** | 2,000 | Question Answering | Passage-grounded binary yes/no questions drawn from Google search queries. BoolQ requires reading comprehension and passage-question alignment (Clark et al., 2019). The passage+question format provides rich contextual grounding. |
-| **Total** | **10,000** | | |
+| Source         |      Count | Domain                      | Rationale                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ---------: | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GSM8K**      |      2,000 | Mathematical Reasoning      | Grade-school math word problems requiring multi-step arithmetic and logical chains. These prompts stress the model's ability to maintain coherent reasoning across token sequences (Cobbe et al., 2021). Mathematical prompts are particularly interesting for pruning because errors in intermediate reasoning steps compound nonlinearly, making them highly sensitive to structural compression.           |
+| **MBPP**       |      2,000 | Code Generation             | Python programming tasks with natural language descriptions. Code prompts contain structured syntax patterns and keyword dependencies that differ fundamentally from natural language (Austin et al., 2021). The presence of syntactic constraints (balanced brackets, indentation, variable scope) makes code generation sensitive to attention-head removal, which disrupts long-range dependency tracking. |
+| **WikiText-2** |      2,000 | Narrative Language Modeling | Long-form Wikipedia paragraphs with redundancy-rich prose. WikiText serves as the canonical language-modeling benchmark and provides a baseline for measuring perplexity degradation under pruning (Merity et al., 2017). Narrative text has high lexical redundancy, making it relatively robust to moderate pruning.                                                                                        |
+| **MMLU**       |      2,000 | Mixed-Domain Reasoning      | Multiple-choice questions spanning 57 academic subjects from humanities to STEM. MMLU tests broad knowledge retrieval and multi-domain generalization (Hendrycks et al., 2021). The structured multiple-choice format provides clear answer boundaries that interact with pruning differently than open-ended generation.                                                                                     |
+| **BoolQ**      |      2,000 | Question Answering          | Passage-grounded binary yes/no questions drawn from Google search queries. BoolQ requires reading comprehension and passage-question alignment (Clark et al., 2019). The passage+question format provides rich contextual grounding.                                                                                                                                                                          |
+| **Total**      | **10,000** |                             |                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 This distribution ensures that no single task dominates the dataset. Each source contributes exactly 2,000 prompts after the full pipeline, yielding a balanced 5×2,000 = 10,000 prompt mixture. The balance is important because source-imbalanced datasets would bias the LCR toward over-representing the dominant source's sensitivity distribution, leading to poor generalization on minority sources, a concern well-documented in the multi-task learning literature (Raffel et al., 2020).
 
@@ -151,18 +151,18 @@ The oracle labeling stage produces the ground-truth target variable for the Lear
 
 For each prompt in the curated dataset, the oracle pipeline (`oracle_labeler.py`) performs the following sequence of inference passes:
 
-1. **Dense Teacher-Forcing Pass**: The unpruned backbone (Llama-3.2-1B) processes the prompt using teacher-forcing (next-token prediction with ground-truth input tokens), producing a dense cross-entropy loss $\ell_D$ and dense perplexity $PPL_D = \exp(\ell_D)$.
+1. **Dense Teacher-Forcing Pass**: The unpruned backbone (Llama-3.2-1B) processes the prompt using teacher-forcing (next-token prediction with ground-truth input tokens), producing a dense cross-entropy loss $\ell_D$ and dense perplexity $\text{PPL}_D = \exp(\ell_D)$.
 
-2. **Sparse Teacher-Forcing Pass(es)**: For each pruning configuration in a specified set, the backbone is structurally pruned, the same prompt is processed, and a sparse loss $\ell_S$ and sparse perplexity $PPL_S$ are recorded. After each sparse pass, the model is fully restored to its original dense state, ensuring no information leakage between sparse configurations.
+2. **Sparse Teacher-Forcing Pass(es)**: For each pruning configuration in a specified set, the backbone is structurally pruned, the same prompt is processed, and a sparse loss $\ell_S$ and sparse perplexity $\text{PPL}_S$ are recorded. After each sparse pass, the model is fully restored to its original dense state, ensuring no information leakage between sparse configurations.
 
 The principal label is the **non-negative loss gap**:
 
 $$\Delta \ell = \max(0, \; \ell_S - \ell_D)$$
 
-This formulation is preferred over a raw perplexity gap ($PPL_S - PPL_D$) for two reasons grounded in the statistical properties of language model evaluation (Jelinek et al., 1977; Manning & Schütze, 1999):
+This formulation is preferred over a raw perplexity gap ($\text{PPL}_S - \text{PPL}_D$) for two reasons grounded in the statistical properties of language model evaluation (Jelinek et al., 1977; Manning & Schütze, 1999):
 
 - **Numerical stability**: Perplexity is an exponentiated loss. A small loss difference (e.g., $\Delta \ell = 2$) maps to a perplexity ratio of $e^2 \approx 7.4$, but a large difference ($\Delta \ell = 8$) maps to $e^8 \approx 2981$. Working in log-space (loss directly) avoids this heavy-tailed instability that would dominate regression training and skew the learned sensitivity distribution.
-- **Interpretability**: The loss gap corresponds to a log-perplexity ratio: $\Delta \ell = \ln(PPL_S) - \ln(PPL_D)$. This makes the label directly comparable across prompts with different baseline perplexities, providing a unit-free measure of relative degradation.
+- **Interpretability**: The loss gap corresponds to a log-perplexity ratio: $\Delta \ell = \ln(\text{PPL}_S) - \ln(\text{PPL}_D)$. This makes the label directly comparable across prompts with different baseline perplexities, providing a unit-free measure of relative degradation.
 
 The non-negativity constraint ($\max(0, \cdot)$) clamps the rare cases where pruning accidentally improves the loss (noise or regularization effects), ensuring that sensitivity labels are always $\geq 0$ and that the downstream regression target has a well-defined lower bound.
 
@@ -220,7 +220,7 @@ The choice of `prajjwal1/bert-mini` (Turc et al., 2019) as the LCR backbone is m
 
 1. **Ultra-low latency**: The router must execute in <20ms on CPU to avoid adding meaningful overhead to the inference pipeline. BERT-mini (4 layers, 256 hidden dimensions, 4 attention heads, 11.3M parameters) achieves approximately 3ms on CPU and <1ms on GPU, which is negligible compared to the ~1,300ms inference time of the Llama-3.2-1B backbone. Any latency added by the router that exceeds the latency saved by pruning would negate the framework's purpose.
 
-2. **Encoder architecture**: Prompt sensitivity is a property of the *entire* prompt, not a sequential generation task. Bidirectional encoder models like BERT produce richer whole-sequence representations than autoregressive decoders for classification and regression tasks because they can attend to both left and right context simultaneously (Devlin et al., 2019). Prior work on efficient text classification has consistently found that small BERT variants outperform comparably-sized decoder-only models on single-sequence regression and classification tasks (Sun et al., 2019). A decoder-only router would need to process the entire prompt autoregressively, adding unnecessary sequential computation.
+2. **Encoder architecture**: Prompt sensitivity is a property of the _entire_ prompt, not a sequential generation task. Bidirectional encoder models like BERT produce richer whole-sequence representations than autoregressive decoders for classification and regression tasks because they can attend to both left and right context simultaneously (Devlin et al., 2019). Prior work on efficient text classification has consistently found that small BERT variants outperform comparably-sized decoder-only models on single-sequence regression and classification tasks (Sun et al., 2019). A decoder-only router would need to process the entire prompt autoregressively, adding unnecessary sequential computation.
 
 3. **Sufficient capacity with bounded complexity**: Despite its small size, BERT-mini produces 256-dimensional contextualized representations that capture syntactic and semantic patterns relevant to pruning sensitivity. When augmented with auxiliary features (text statistics and attention-derived signals), the total representation dimensionality reaches 304, providing ample capacity for a regression target that has well-defined variance bounds ($[0, 1]$). Alternative choices were evaluated: TinyBERT (Jiao et al., 2020) and DistilBERT (Sanh et al., 2019) are 2–4× larger than BERT-mini and would increase router latency proportionally without proportional gains on our regression task. A simple MLP over bag-of-words features was tested during early development and achieved Spearman $\rho < 0.45$, confirming that contextualized representations provide a meaningful boost over surface-level features.
 
@@ -250,17 +250,17 @@ $$\text{ScalarMix}(h_0, \ldots, h_4) = \gamma \sum_{i=0}^{4} \text{softmax}(w)_i
 
 **Component 3 — Auxiliary Text Features**: Nine lightweight statistical features (each <0.1ms to compute) provide explicit domain signals that complement the contextualized representations:
 
-| Feature | Computation | Rationale |
-|---------|-------------|-----------|
-| `log_token_count` | $\log(\text{token count})$ | Prompt length in log-scale correlates with complexity |
-| `compression_ratio` | `len(zlib.compress(text)) / len(text.encode())` | Text compressibility indicates redundancy |
-| `avg_word_length` | Mean characters per word | Longer words suggest technical/specialized vocabulary |
-| `special_char_ratio` | Non-alphanumeric character fraction | High in code and math prompts |
-| `unique_token_ratio` | Unique words / total words | Lexical diversity indicator |
-| `has_code_markers` | Regex detection of `def`, `class`, `import`, braces | Binary code-detection signal |
-| `numeric_density` | Fraction of digit characters | High in mathematical prompts |
-| `has_question` | Regex detection of question marks or question words | Question-answering format indicator |
-| `avg_sentence_length` | Mean words per sentence | Sentence complexity proxy |
+| Feature               | Computation                                         | Rationale                                             |
+| --------------------- | --------------------------------------------------- | ----------------------------------------------------- |
+| `log_token_count`     | $\log(\text{token count})$                          | Prompt length in log-scale correlates with complexity |
+| `compression_ratio`   | `len(zlib.compress(text)) / len(text.encode())`     | Text compressibility indicates redundancy             |
+| `avg_word_length`     | Mean characters per word                            | Longer words suggest technical/specialized vocabulary |
+| `special_char_ratio`  | Non-alphanumeric character fraction                 | High in code and math prompts                         |
+| `unique_token_ratio`  | Unique words / total words                          | Lexical diversity indicator                           |
+| `has_code_markers`    | Regex detection of `def`, `class`, `import`, braces | Binary code-detection signal                          |
+| `numeric_density`     | Fraction of digit characters                        | High in mathematical prompts                          |
+| `has_question`        | Regex detection of question marks or question words | Question-answering format indicator                   |
+| `avg_sentence_length` | Mean words per sentence                             | Sentence complexity proxy                             |
 
 These features are concatenated with the 48 attention features and projected through a linear layer (GELU activation) from 57 dimensions to 48 dimensions, producing the auxiliary embedding.
 
@@ -288,11 +288,11 @@ The training script supports a two-file workflow: the dataset CSV (`Oracle_datas
 
 When the dataset CSV contains a pre-existing `Split` column (80% train / 20% test), the script respects it directly. Within the train partition, a further validation split (10% of train rows) is held out for early stopping and hyperparameter selection. Source-stratified splitting ensures that each benchmark source maintains its proportional representation in train, validation, and test sets:
 
-| Split | GSM8K | MBPP | WikiText | MMLU | BoolQ | **Total** |
-|-------|------:|-----:|---------:|-----:|------:|----------:|
-| Train | 1,440 | 1,440 | 1,440 | 1,440 | 1,440 | **7,200** |
-| Val | 160 | 160 | 160 | 160 | 160 | **800** |
-| Test | 400 | 400 | 400 | 400 | 400 | **2,000** |
+| Split | GSM8K |  MBPP | WikiText |  MMLU | BoolQ | **Total** |
+| ----- | ----: | ----: | -------: | ----: | ----: | --------: |
+| Train | 1,440 | 1,440 |    1,440 | 1,440 | 1,440 | **7,200** |
+| Val   |   160 |   160 |      160 |   160 |   160 |   **800** |
+| Test  |   400 |   400 |      400 |   400 |   400 | **2,000** |
 
 #### Training Loop
 
@@ -316,7 +316,7 @@ Each training epoch proceeds through the following steps:
 
 After each epoch, the model is evaluated on the held-out validation set. A compound objective $0.4 \times R^2 + 0.5 \times \rho + 0.1 \times \text{bin3\_acc}$ is computed, which weights the three metrics according to their importance for the downstream task:
 
-- **Spearman rank correlation $\rho$** (weight 0.5): This is the most important metric because the RL controller cares about the *relative ordering* of prompts more than absolute calibration. If the router correctly ranks prompt A as more sensitive than prompt B, the controller can assign more conservative pruning to A regardless of the exact predicted value.
+- **Spearman rank correlation $\rho$** (weight 0.5): This is the most important metric because the RL controller cares about the _relative ordering_ of prompts more than absolute calibration. If the router correctly ranks prompt A as more sensitive than prompt B, the controller can assign more conservative pruning to A regardless of the exact predicted value.
 - **$R^2$ coefficient of determination** (weight 0.4): Measures the proportion of variance in oracle labels explained by the router's predictions, providing a calibration-sensitive complement to the ranking metric.
 - **3-bin classification accuracy** (weight 0.1): Operational utility metric—prompts are binned into low ($[0, 0.33]$), medium $(0.33, 0.67]$, and high $(0.67, 1.0]$) sensitivity, and classification accuracy measures how well the router separates these operationally distinct categories.
 
@@ -341,22 +341,22 @@ flowchart TD
 
 #### Hyperparameter Summary
 
-| Parameter | Value | Justification |
-|-----------|-------|---------------|
-| Backbone | `prajjwal1/bert-mini` | Ultra-low latency (~3ms CPU, <1ms GPU) |
-| Max sequence length | 128 | Matches oracle truncation, prevents distribution mismatch |
-| Fused input dimension | 304 | 256 (BERT mean-pool) + 48 (aux + attn projection) |
-| Dropout | 0.20 | Standard regularization for small fine-tuned models |
-| Batch size | 48 | Fits in GPU memory with BERT-mini; efficient gradient estimates |
-| Epochs | 50 (early stopping, patience 20) | Prevents overfitting on ~7,200 training samples |
-| Learning rate | $4 \times 10^{-5}$ | Within the Devlin et al. (2019) recommended range for BERT fine-tuning |
-| Backbone LR factor | 0.20 | Slower backbone adaptation prevents catastrophic forgetting |
-| Weight decay | 0.03 | L2 regularization following Loshchilov & Hutter (2019) |
-| Label smoothing | 0.01 | Mild output regularization for regression calibration |
-| Source-balanced oversampling | Enabled | Equal source representation per epoch |
-| Loss function | Huber/SmoothL1 ($\delta = 0.15$) | Robust to label outliers; bounded gradients |
-| Warmup ratio | 0.15 | Linear warmup + cosine decay, standard practice |
-| Gradient clip norm | 1.0 | Prevents training instability from outlier batches |
+| Parameter                    | Value                            | Justification                                                          |
+| ---------------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| Backbone                     | `prajjwal1/bert-mini`            | Ultra-low latency (~3ms CPU, <1ms GPU)                                 |
+| Max sequence length          | 128                              | Matches oracle truncation, prevents distribution mismatch              |
+| Fused input dimension        | 304                              | 256 (BERT mean-pool) + 48 (aux + attn projection)                      |
+| Dropout                      | 0.20                             | Standard regularization for small fine-tuned models                    |
+| Batch size                   | 48                               | Fits in GPU memory with BERT-mini; efficient gradient estimates        |
+| Epochs                       | 50 (early stopping, patience 20) | Prevents overfitting on ~7,200 training samples                        |
+| Learning rate                | $4 \times 10^{-5}$               | Within the Devlin et al. (2019) recommended range for BERT fine-tuning |
+| Backbone LR factor           | 0.20                             | Slower backbone adaptation prevents catastrophic forgetting            |
+| Weight decay                 | 0.03                             | L2 regularization following Loshchilov & Hutter (2019)                 |
+| Label smoothing              | 0.01                             | Mild output regularization for regression calibration                  |
+| Source-balanced oversampling | Enabled                          | Equal source representation per epoch                                  |
+| Loss function                | Huber/SmoothL1 ($\delta = 0.15$) | Robust to label outliers; bounded gradients                            |
+| Warmup ratio                 | 0.15                             | Linear warmup + cosine decay, standard practice                        |
+| Gradient clip norm           | 1.0                              | Prevents training instability from outlier batches                     |
 
 ---
 
@@ -368,18 +368,18 @@ The RL controller is the decision-making core of CASRAP. It observes a multimoda
 
 The 10-dimensional state vector is the joint representation that the controller observes before making each pruning decision. Its design reflects the hypothesis that optimal pruning requires knowledge of three distinct information sources: the computational environment, the prompt's intrinsic sensitivity, and the backbone's early processing behavior. Each dimension is normalized to approximately $[0, 1]$ to prevent any single feature from dominating the Q-network's hidden representations.
 
-| Dim | Feature | Source | Normalization | Rationale |
-|-----|---------|--------|---------------|-----------|
-| 0 | CPU utilization | `psutil` | $/100$ | System load affects available compute budget |
-| 1 | Available system memory | `psutil` | $/16$ GB | Memory pressure may constrain model loading and KV-cache |
-| 2 | Battery percentage | `psutil` | $/100$ | Battery-aware pruning on laptops and edge devices |
-| 3 | GPU availability | NVML | Binary $\{0, 1\}$ | Presence of GPU acceleration fundamentally changes the speed-quality tradeoff |
-| 4 | Free GPU memory | NVML | $/8$ GB (RTX 4060) | Available VRAM determines feasible model configurations |
-| 5 | GPU utilization | NVML | $/100$ | Current GPU load from concurrent processes |
-| 6 | LCR sensitivity score | BERT-mini router | Already $[0, 1]$ | Prompt-specific pruning vulnerability prediction |
-| 7 | Layer-0 hidden-state norm | Llama backbone | $/\text{hidden\_dim}$ | Early representation magnitude indicates activation scale |
-| 8 | Layer-0 attention entropy | Llama backbone | $/\log(\text{seq\_len})$ | How diffuse early attention is (max entropy = uniform) |
-| 9 | Layer-0 attention concentration | Llama backbone | Already $[0, 1]$ | Max attention mass on any single token |
+| Dim | Feature                         | Source           | Normalization            | Rationale                                                                     |
+| --- | ------------------------------- | ---------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| 0   | CPU utilization                 | `psutil`         | $/100$                   | System load affects available compute budget                                  |
+| 1   | Available system memory         | `psutil`         | $/16$ GB                 | Memory pressure may constrain model loading and KV-cache                      |
+| 2   | Battery percentage              | `psutil`         | $/100$                   | Battery-aware pruning on laptops and edge devices                             |
+| 3   | GPU availability                | NVML             | Binary $\{0, 1\}$        | Presence of GPU acceleration fundamentally changes the speed-quality tradeoff |
+| 4   | Free GPU memory                 | NVML             | $/8$ GB (RTX 4060)       | Available VRAM determines feasible model configurations                       |
+| 5   | GPU utilization                 | NVML             | $/100$                   | Current GPU load from concurrent processes                                    |
+| 6   | LCR sensitivity score           | BERT-mini router | Already $[0, 1]$         | Prompt-specific pruning vulnerability prediction                              |
+| 7   | Layer-0 hidden-state norm       | Llama backbone   | $/\text{hidden\_dim}$    | Early representation magnitude indicates activation scale                     |
+| 8   | Layer-0 attention entropy       | Llama backbone   | $/\log(\text{seq\_len})$ | How diffuse early attention is (max entropy = uniform)                        |
+| 9   | Layer-0 attention concentration | Llama backbone   | Already $[0, 1]$         | Max attention mass on any single token                                        |
 
 **Hardware features (dims 0–5)** provide the controller with awareness of resource constraints. On battery-powered devices, aggressive pruning may be preferred to reduce energy consumption and extend battery life. Under high GPU utilization from concurrent processes, lighter pruning configurations avoid VRAM contention and OOM errors. These features enable the controller to adapt its behavior to the deployment environment without requiring manual configuration profiles for each hardware setup—a key advantage over static pruning approaches that must be manually calibrated per device.
 
@@ -391,12 +391,12 @@ The 10-dimensional state vector is the joint representation that the controller 
 
 The action space was designed so that every discrete action maps to a **mechanically distinct** structural outcome on the Llama-3.2-1B backbone (16 transformer layers, 8 KV heads in GQA configuration). This eliminates the problem of duplicate actions—where two discrete indices produce identical physical pruning—that wastes exploratory capacity and confuses the RL policy by presenting identical outcomes as different choices.
 
-| Action Type | Count | Intensities | Physical Effect |
-|-------------|------:|-------------|-----------------|
-| `none` | 1 | — | No pruning applied; full dense inference |
-| `transformer_layers` | 10 | 6%, 12%, 19%, 25%, 31%, 38%, 44%, 50%, 56%, 62% | Physically remove 1–10 of 16 layers |
-| `attention_heads` | 6 | 12.5%, 25%, 37.5%, 50%, 62.5%, 75% | Remove 1–6 of 8 KV groups (GQA-safe) |
-| **Total** | **17** | | |
+| Action Type          |  Count | Intensities                                     | Physical Effect                          |
+| -------------------- | -----: | ----------------------------------------------- | ---------------------------------------- |
+| `none`               |      1 | —                                               | No pruning applied; full dense inference |
+| `transformer_layers` |     10 | 6%, 12%, 19%, 25%, 31%, 38%, 44%, 50%, 56%, 62% | Physically remove 1–10 of 16 layers      |
+| `attention_heads`    |      6 | 12.5%, 25%, 37.5%, 50%, 62.5%, 75%              | Remove 1–6 of 8 KV groups (GQA-safe)     |
+| **Total**            | **17** |                                                 |                                          |
 
 The action space is deliberately **layer-skip-heavy** (10 layer actions vs. 6 head actions) because physical layer removal yields the largest inference speedups for autoregressive generation, which is memory-bandwidth-bound (Pope et al., 2023). Reducing the number of layers directly reduces the number of sequential matrix multiplications in the forward pass, producing near-linear latency reduction. Head pruning has a smaller impact on latency because reducing the attention dimension does not proportionally reduce the dominant memory-bandwidth cost of loading KV-cache entries from GPU VRAM.
 
@@ -420,33 +420,33 @@ flowchart TD
 
 The reward function encodes the fundamental tradeoff between inference speed and output quality. Designing this function required careful consideration of the numerical properties of perplexity, which has a heavy-tailed distribution under aggressive pruning.
 
-**Initial formulation (abandoned)**: The first version used a linear PPL ratio with $\alpha = 0.7$, $\beta = 0.3$:
+**Considered alternative (log-PPL formulation)**: An earlier version used a log-PPL penalty to compress the quality degradation scale:
 
-$$R = 0.7 \cdot \frac{tok/s_{\text{pruned}} - tok/s_{\text{base}}}{tok/s_{\text{base}} + \varepsilon} - 0.3 \cdot \frac{PPL_{\text{pruned}} - PPL_{\text{base}}}{PPL_{\text{base}} + \varepsilon}$$
+$$R_{\text{log}} = \alpha \cdot \frac{\text{tok/s}_{\text{pruned}} - \text{tok/s}_{\text{base}}}{\text{tok/s}_{\text{base}} + \varepsilon} - \beta \cdot \max\!\bigl(0,\; \ln \text{PPL}_{\text{pruned}} - \ln \text{PPL}_{\text{base}}\bigr)$$
 
-This produced catastrophic penalties when pruning caused perplexity spikes. For example, when aggressive layer skipping caused PPL to increase from 2 to 893, the quality penalty term alone was approximately $-116$, overwhelming any speed benefit by two orders of magnitude. The agent rapidly converged on near-no-op actions (always selecting `none`), because the risk of a single catastrophic penalty outweighed the potential cumulative gain from hundreds of successful pruning episodes. This "risk-aversion collapse" is a known failure mode in RL with unbounded negative rewards (Mihatsch & Neuneier, 2002).
+While this compresses extreme perplexity spikes (e.g., PPL from 2 to 893 produces a penalty of only $0.1 \times 6.1 = 0.61$), it over-compresses the quality signal, making the agent insensitive to moderate quality degradation. The agent learned to treat a 5× PPL increase similarly to a 50× increase, undermining fine-grained quality-speed tradeoff learning.
 
-**Final formulation**: The adopted reward uses a **log-PPL penalty** to compress the quality degradation scale:
+**Final formulation**: The adopted reward uses a **normalized linear PPL ratio** that preserves the proportional quality signal while being bounded to $[-1, 1]$:
 
-$$R = \alpha \cdot \underbrace{\frac{tok/s_{\text{pruned}} - tok/s_{\text{base}}}{tok/s_{\text{base}} + \varepsilon}}_{\text{speed gain}} \;-\; \beta \cdot \underbrace{\max\!\bigl(0,\; \ln PPL_{\text{pruned}} - \ln PPL_{\text{base}}\bigr)}_{\text{log-PPL penalty}}$$
+$$R = \alpha \cdot \underbrace{\frac{\text{tok/s}_{\text{pruned}} - \text{tok/s}_{\text{base}}}{\text{tok/s}_{\text{base}} + \varepsilon}}_{\text{speed gain}} \;-\; \beta \cdot \underbrace{\frac{\text{PPL}_{\text{pruned}} - \text{PPL}_{\text{base}}}{\text{PPL}_{\text{base}} + \varepsilon}}_{\text{quality penalty}}$$
 
-with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-2, 2]$.
+with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-1, 1]$.
 
-The log transformation ensures that a perplexity increase from 2 to 893 produces a penalty of $\beta \cdot (\ln 893 - \ln 2) = 0.1 \times 6.1 = 0.61$ rather than $-116$. This bounded penalty allows the agent to explore aggressive pruning configurations without risk of catastrophic policy collapse. The higher speed weight ($\alpha = 0.9$ vs. the original $0.7$) was justified by the Study 1 ablation (Section 2.7), which empirically verified that this weighting sits on the optimal speed-quality ridge across a 5×5 grid search. The $[-2, 2]$ clamping provides an additional safety bound that prevents any single episode from dominating the replay buffer's reward distribution.
+Both the speed gain and quality penalty terms are **ratio-normalized** by the baseline values, making them unit-free and comparable in scale. The $[-1, 1]$ clamp ensures that the reward is always normalized, preventing any single episode from dominating the replay buffer's reward distribution. The linear formulation preserves the proportional relationship between perplexity degradation and penalty magnitude—a 10× PPL increase is penalized 10× more than a 1× increase—giving the agent a gradient-rich signal to learn nuanced quality-speed tradeoffs. The higher speed weight ($\alpha = 0.9$ vs. a lower alternative) was justified by the Study 1 ablation (Section 2.7), which empirically verified that this weighting sits on the optimal speed-quality ridge across a 5×5 grid search.
 
 #### DDQN Network Architecture and Training Hyperparameters
 
-| Parameter | Value | Justification |
-|-----------|-------|---------------|
-| Policy/target MLP | $10 \rightarrow 128 \rightarrow 128 \rightarrow 17$ | Two hidden layers with ReLU; standard for low-dimensional RL (Mnih et al., 2015) |
-| Replay buffer | 10,000 transitions | Sufficient for experience diversity across 8,000 training episodes |
-| Batch size | 32 | Standard mini-batch for DQN family |
-| Optimizer | AdamW (Loshchilov & Hutter, 2019) | Decoupled weight decay for stable training |
-| Learning rate | $1 \times 10^{-4}$ | Standard for DDQN with experience replay |
-| Discount factor $\gamma$ | 0.95 | Moderate future-awareness; pruning is a single-step decision but episodes share the same evolving policy |
-| Target network update | Hard copy every 200 steps | Polyak-style hard update following van Hasselt et al. (2016) |
-| Epsilon schedule | Decays from 1.0 to 0.10 over the training episode horizon | Dynamic: computed as $\epsilon_{t+1} = \epsilon_t \cdot \exp(\ln(0.10/1.0) / N)$ |
-| UCB exploration bonus | $c\sqrt{\ln N / N_a}$ with $c = 1.0$ | Encourages exploration of under-visited actions (Auer et al., 2002) |
+| Parameter                | Value                                                     | Justification                                                                                            |
+| ------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Policy/target MLP        | $10 \rightarrow 128 \rightarrow 128 \rightarrow 17$       | Two hidden layers with ReLU; standard for low-dimensional RL (Mnih et al., 2015)                         |
+| Replay buffer            | 10,000 transitions                                        | Sufficient for experience diversity across 8,000 training episodes                                       |
+| Batch size               | 32                                                        | Standard mini-batch for DQN family                                                                       |
+| Optimizer                | AdamW (Loshchilov & Hutter, 2019)                         | Decoupled weight decay for stable training                                                               |
+| Learning rate            | $1 \times 10^{-4}$                                        | Standard for DDQN with experience replay                                                                 |
+| Discount factor $\gamma$ | 0.95                                                      | Moderate future-awareness; pruning is a single-step decision but episodes share the same evolving policy |
+| Target network update    | Hard copy every 200 steps                                 | Polyak-style hard update following van Hasselt et al. (2016)                                             |
+| Epsilon schedule         | Decays from 1.0 to 0.10 over the training episode horizon | Dynamic: computed as $\epsilon_{t+1} = \epsilon_t \cdot \exp(\ln(0.10/1.0) / N)$                         |
+| UCB exploration bonus    | $c\sqrt{\ln N / N_a}$ with $c = 1.0$                      | Encourages exploration of under-visited actions (Auer et al., 2002)                                      |
 
 The UCB1 exploration bonus is added to Q-values during action selection (but not during ε-greedy random exploration). This ensures that even after ε has decayed to 0.10, the agent continues to explore actions that have been selected infrequently, preventing premature convergence to a suboptimal subset of the action space. The combination of ε-greedy with UCB is a well-established strategy for balancing exploration and exploitation in finite-action-space RL settings (Sutton & Barto, 2018).
 
@@ -470,7 +470,7 @@ flowchart TD
     F --> G["DDQN action selection<br/>(ε-greedy + UCB bonus)"]
     G --> H["Apply physical pruning<br/>(layer removal OR head slicing)"]
     H --> I["Pruned benchmark<br/>CUDA-synchronized timing<br/>→ time, tok/s, PPL"]
-    I --> J["Compute reward R<br/>(log-PPL formulation,<br/>clamp to [-2, 2])"]
+    I --> J["Compute reward R<br/>(normalized linear PPL,<br/>clamp to [-1, 1])"]
     J --> K["Store (s, a, r, s') in<br/>replay buffer (10k capacity)"]
     K --> L["Sample mini-batch (32)<br/>and perform DDQN update"]
     L --> M["Update target network<br/>(every 200 steps)"]
@@ -488,13 +488,14 @@ flowchart TD
 
 5. **Pruned Benchmark**: The same prompt is processed by the pruned model with identical timing methodology (CUDA synchronization barriers). The continuation perplexity is computed by masking prompt tokens in the loss labels, so quality reflects only the generated continuation—not the prompt's next-token predictability.
 
-6. **Reward Computation and DDQN Update**: The reward is computed using the log-PPL formulation, the transition $(s, a, r, s')$ is stored in the replay buffer, and a DDQN training step is performed if the buffer contains enough samples (≥ batch size). The target network is hard-copied from the policy network every 200 steps.
+6. **Reward Computation and DDQN Update**: The reward is computed using the normalized linear PPL formulation, the transition $(s, a, r, s')$ is stored in the replay buffer, and a DDQN training step is performed if the buffer contains enough samples (≥ batch size). The target network is hard-copied from the policy network every 200 steps.
 
 7. **Model Restoration**: The model is fully restored to its dense state before the next episode begins. This ensures that the baseline measurement in the next episode is always from the unpruned model, preventing any accumulation of pruning effects across episodes.
 
 #### Test Episode Structure
 
 During testing, the pipeline is identical except:
+
 - $\epsilon = 0$ — pure exploitation, no random exploration.
 - The UCB bonus is still active, providing mild exploration of under-visited actions.
 - No DDQN training updates are performed.
@@ -508,11 +509,19 @@ The pruning engine (`model_loader.py`, `pruners/`) is a concrete, reversible run
 
 **GQA-safe structural head pruning** (`pruners/structured_head_slicer.py`): Llama-3.2-1B uses grouped-query attention (GQA) with 32 query heads and 8 KV heads (group size $g = 4$). Head pruning must remove entire KV groups together with their associated query heads to maintain the GQA invariant. The implementation ranks KV groups by aggregated importance (sum of associated query-head importances), removes the least-important groups by structurally rebuilding `q_proj`, `k_proj`, `v_proj`, and `o_proj` weight matrices with reduced dimensions, and updates `num_heads` and `num_key_value_heads` on every attention layer.
 
-**Zero-cost weight-magnitude importance scoring** (`model_loader.py`): Importance scores are computed entirely from weight magnitudes at model load time, requiring zero additional inference, zero hooks, and zero calibration prompts. Head importance for query head $h$ in layer $\ell$ is:
+**Zero-cost weight-magnitude importance scoring** (`model_loader.py`): To decide which heads or layers to prune, the system needs a ranking of "least important" to "most important." Rather than running calibration prompts through the model (which adds latency and complexity), importance scores are computed **entirely from the weight matrices at model load time** — no inference required.
+
+The core idea is simple: **larger weights contribute more to the model's output; smaller weights can be removed with less damage.** The "size" of each weight matrix is measured using the Frobenius norm ($\|\cdot\|_F$), which is essentially the square root of the sum of all squared entries — a single number summarizing how much "energy" is stored in that matrix.
+
+**Head importance** — For each attention head, we sum the norms of its associated weight matrices (query, output, key, value projections):
 
 $$I_h = \|W_Q^{(h)}\|_F + \|W_O^{(:,h)}\|_F + \frac{1}{g}\|W_K^{(\lfloor h/g \rfloor)}\|_F + \frac{1}{g}\|W_V^{(\lfloor h/g \rfloor)}\|_F$$
 
-where $g$ is the GQA group size and $\|\cdot\|_F$ is the Frobenius norm. KV norms are divided by the group size to avoid inflating shared KV heads. Layer importance is the total Frobenius norm of all parameters in the layer: $I_\ell = \sum_{p \in \text{params}(\ell)} \|p\|_F$. This approach is well-established in the magnitude pruning literature (Han et al., 2015) and provides a deterministic, hardware-independent ranking.
+The key and value weights are shared across $g = 4$ query heads in Llama's grouped-query attention (GQA), so their norms are divided by $g$ to avoid counting shared parameters multiple times. Heads with the lowest total score are pruned first.
+
+**Layer importance** — For each transformer layer, we simply sum the norms of all parameters in that layer: $I_\ell = \sum_{p \in \text{params}(\ell)} \|p\|_F$. Layers with smaller total norms are considered less important and are candidates for removal.
+
+This approach is well-established in the magnitude pruning literature (Han et al., 2015) and provides a deterministic, hardware-independent ranking that is computed once at model load and reused across all episodes.
 
 #### Automatic Reporting
 
@@ -578,36 +587,36 @@ The LCR router was trained across two checkpoints during the development cycle. 
 
 ### Final Model Performance (MiniBERT Train 23)
 
-| Metric | Validation | Test |
-|--------|-----------|------|
-| MSE | 0.0348 | 0.0356 |
-| $R^2$ | 0.5521 | 0.5013 |
-| Spearman $\rho$ | 0.7473 | **0.7194** |
-| 3-bin accuracy | 65.5% | 64.5% |
-| 95% CI for $\rho$ (test) | — | [0.693, 0.745] |
+| Metric                   | Validation | Test           |
+| ------------------------ | ---------- | -------------- |
+| MSE                      | 0.0348     | 0.0356         |
+| $R^2$                    | 0.5521     | 0.5013         |
+| Spearman $\rho$          | 0.7473     | **0.7194**     |
+| 3-bin accuracy           | 65.5%      | 64.5%          |
+| 95% CI for $\rho$ (test) | —          | [0.693, 0.745] |
 
 The model converged at epoch 40 (of 50 maximum), with early stopping patience of 20 epochs. Training time was 356 seconds (~6 minutes) on a single RTX 4060.
 
 ### Per-Source Test Metrics (MiniBERT Train 23)
 
-| Source | $R^2$ | Spearman $\rho$ | 3-bin Acc | MSE |
-|--------|------:|----------------:|----------:|----:|
-| BoolQ | 0.605 | 0.793 | 68.8% | 0.025 |
-| MBPP | 0.677 | 0.827 | 76.3% | 0.018 |
-| MMLU | 0.424 | 0.661 | 58.5% | 0.045 |
-| WikiText-2 | 0.298 | 0.597 | 57.0% | 0.046 |
-| GSM8K | 0.176 | 0.513 | 61.8% | 0.043 |
+| Source     | $R^2$ | Spearman $\rho$ | 3-bin Acc |   MSE |
+| ---------- | ----: | --------------: | --------: | ----: |
+| BoolQ      | 0.605 |           0.793 |     68.8% | 0.025 |
+| MBPP       | 0.677 |           0.827 |     76.3% | 0.018 |
+| MMLU       | 0.424 |           0.661 |     58.5% | 0.045 |
+| WikiText-2 | 0.298 |           0.597 |     57.0% | 0.046 |
+| GSM8K      | 0.176 |           0.513 |     61.8% | 0.043 |
 
 The router achieves strong performance on BoolQ ($\rho = 0.79$) and MBPP ($\rho = 0.83$)—tasks where prompt structure (passage+question format, code instruction format) provides clear textual signal about pruning sensitivity. Performance is lowest on GSM8K ($\rho = 0.51$), where mathematical reasoning sensitivity depends more on the backbone's internal computational graph than on surface text features. This per-source variation is expected: approximately 50% of the variance in pruning sensitivity arises from Llama-internal processing dynamics that are not observable from the input text alone, supporting the $R^2 \approx 0.50$ ceiling interpretation.
 
 ### Comparison with Earlier Checkpoint (MiniBERT Train 20)
 
-| Metric | Train 20 (Test) | Train 23 (Test) | Δ |
-|--------|----------------:|----------------:|--:|
-| $R^2$ | 0.495 | 0.501 | +0.006 |
-| Spearman $\rho$ | 0.701 | 0.719 | +0.018 |
-| 3-bin accuracy | 65.1% | 64.5% | −0.6% |
-| 95% CI ($\rho$) | [0.672, 0.727] | [0.693, 0.745] | Narrower |
+| Metric          | Train 20 (Test) | Train 23 (Test) |        Δ |
+| --------------- | --------------: | --------------: | -------: |
+| $R^2$           |           0.495 |           0.501 |   +0.006 |
+| Spearman $\rho$ |           0.701 |           0.719 |   +0.018 |
+| 3-bin accuracy  |           65.1% |           64.5% |    −0.6% |
+| 95% CI ($\rho$) |  [0.672, 0.727] |  [0.693, 0.745] | Narrower |
 
 Train 23 improves ranking quality ($\rho$) while maintaining comparable classification accuracy, confirming that the full-dataset labeling with the separate oracle file workflow produces better-calibrated sensitivity estimates. The overlapping but shifting confidence intervals indicate a genuine, if modest, improvement.
 
@@ -625,17 +634,17 @@ For the downstream RL controller, Spearman $\rho = 0.72$ (ranking quality) matte
 
 ### Test Report 13 (40 episodes)
 
-| Metric | Value |
-|--------|------:|
-| Average pruned inference time | 1,249.75 ms |
-| Average baseline inference time | 1,427.10 ms |
-| Average speedup | 20.65% |
-| Average pruned PPL (token-weighted) | 6.38 |
-| Average baseline PPL (token-weighted) | 2.14 |
-| Average reward | +0.0681 |
-| LCR overhead | 28.16 ms (2.3% of total) |
-| RL agent overhead | 1.14 ms (0.09% of total) |
-| Total controller overhead | ~29.3 ms (2.4% of total) |
+| Metric                                |                    Value |
+| ------------------------------------- | -----------------------: |
+| Average pruned inference time         |              1,249.75 ms |
+| Average baseline inference time       |              1,427.10 ms |
+| Average speedup                       |                   20.65% |
+| Average pruned PPL (token-weighted)   |                     6.38 |
+| Average baseline PPL (token-weighted) |                     2.14 |
+| Average reward                        |                  +0.0681 |
+| LCR overhead                          | 28.16 ms (2.3% of total) |
+| RL agent overhead                     | 1.14 ms (0.09% of total) |
+| Total controller overhead             | ~29.3 ms (2.4% of total) |
 
 The controller achieves consistent speedups across pruning intensities while maintaining bounded quality degradation. The token-weighted PPL (the correct aggregate metric for language model evaluation (Merity et al., 2017)) shows the pruned model at 6.38 vs. 2.14 for the baseline—a 3× increase that, while substantial, is bounded and predictable.
 
@@ -643,38 +652,38 @@ The controller achieves consistent speedups across pruning intensities while mai
 
 The policy concentrates on layer-skipping actions, consistent with the memory-bandwidth-bound nature of autoregressive generation:
 
-| Action | Usage | Avg Time (ms) | Avg PPL (TW) | Avg Reward |
-|--------|------:|-------------:|-------------:|-----------:|
-| none | 3 | 1,447 | 1.88 | −0.001 |
-| layers 6% | 3 | 1,389 | 1.36 | +0.037 |
-| layers 12% | 3 | 1,309 | 1.61 | +0.078 |
-| layers 19% | 3 | 1,259 | 1.37 | +0.154 |
-| layers 25% | 2 | 1,365 | 8.69 | −0.097 |
-| layers 31% | 2 | 1,176 | 20.20 | +0.101 |
-| layers 44% | 2 | 1,013 | 13.12 | +0.235 |
-| layers 50% | 4 | 988 | 7.54 | **+0.426** |
-| layers 56% | 2 | 888 | 22.90 | +0.327 |
-| layers 62% | 2 | 812 | 153.04 | +0.240 |
+| Action     | Usage | Avg Time (ms) | Avg PPL (TW) | Avg Reward |
+| ---------- | ----: | ------------: | -----------: | ---------: |
+| none       |     3 |         1,447 |         1.88 |     −0.001 |
+| layers 6%  |     3 |         1,389 |         1.36 |     +0.037 |
+| layers 12% |     3 |         1,309 |         1.61 |     +0.078 |
+| layers 19% |     3 |         1,259 |         1.37 |     +0.154 |
+| layers 25% |     2 |         1,365 |         8.69 |     −0.097 |
+| layers 31% |     2 |         1,176 |        20.20 |     +0.101 |
+| layers 44% |     2 |         1,013 |        13.12 |     +0.235 |
+| layers 50% |     4 |           988 |         7.54 | **+0.426** |
+| layers 56% |     2 |           888 |        22.90 |     +0.327 |
+| layers 62% |     2 |           812 |       153.04 |     +0.240 |
 
-The highest-reward action is `transformer_layers 50%` (removing 8 of 16 layers), which achieves a 31% latency reduction. The policy learned to prefer aggressive layer skipping because the log-PPL reward formulation compresses quality penalties, allowing the agent to recognize that a moderate increase in perplexity (from ~2 to ~8–15) is a favorable tradeoff for a 25–35% inference speedup.
+The highest-reward action is `transformer_layers 50%` (removing 8 of 16 layers), which achieves a 31% latency reduction. The policy learned to prefer aggressive layer skipping because the normalized reward formulation maintains a proportional quality-speed tradeoff, allowing the agent to recognize that a moderate increase in perplexity (from ~2 to ~8–15) is a favorable tradeoff for a 25–35% inference speedup.
 
 ### Per-Source Performance (Test 13)
 
-| Source | Baseline PPL | Pruned PPL | Speedup | Baseline tok/s | Pruned tok/s |
-|--------|------------:|----------:|--------:|---------------:|-------------:|
-| WikiText-2 | 2.77 | 384.16 | 1.32× | 33.82 | 45.65 |
-| GSM8K | 2.51 | 28.63 | 1.14× | 35.45 | 42.35 |
-| BoolQ | 1.79 | 22.02 | 1.18× | 35.22 | 43.58 |
-| MMLU | 2.86 | 13.41 | 1.14× | 35.34 | 41.63 |
-| MBPP | 1.75 | 23.67 | 1.09× | 35.33 | 40.32 |
+| Source     | Baseline PPL | Pruned PPL | Speedup | Baseline tok/s | Pruned tok/s |
+| ---------- | -----------: | ---------: | ------: | -------------: | -----------: |
+| WikiText-2 |         2.77 |     384.16 |   1.32× |          33.82 |        45.65 |
+| GSM8K      |         2.51 |      28.63 |   1.14× |          35.45 |        42.35 |
+| BoolQ      |         1.79 |      22.02 |   1.18× |          35.22 |        43.58 |
+| MMLU       |         2.86 |      13.41 |   1.14× |          35.34 |        41.63 |
+| MBPP       |         1.75 |      23.67 |   1.09× |          35.33 |        40.32 |
 
 WikiText-2 shows the highest pruned PPL because narrative language modeling has lower per-token redundancy—each token contributes relatively independent information, making the task more sensitive to layer removal. MMLU shows the best quality retention (pruned PPL 13.41 vs. baseline 2.86), suggesting that the structured multiple-choice format is more robust to structural compression.
 
 ### Test Report 15 (10 episodes)
 
-| Metric | Value |
-|--------|------:|
-| Average reward | +0.007 |
+| Metric             |            Value |
+| ------------------ | ---------------: |
+| Average reward     |           +0.007 |
 | Parameters reduced | 783.2 MB (16.6%) |
 
 ---
@@ -686,25 +695,25 @@ WikiText-2 shows the highest pruned PPL because narrative language modeling has 
 The grid search reveals a clear monotonic pattern: higher $\alpha$ (speed weight) and lower $\beta$ (quality penalty) produce higher average rewards and higher speedups.
 
 | $\alpha$ | $\beta$ | Avg Reward | Avg PPL | Speedup (%) |
-|---------:|--------:|-----------:|--------:|------------:|
-| **0.9** | **0.1** | **+0.090** | 284.88 | **25.68** |
-| 0.8 | 0.1 | +0.084 | 102.50 | 25.64 |
-| 0.7 | 0.1 | +0.063 | 87.34 | 24.99 |
-| 0.8 | 0.2 | +0.029 | 110.80 | 25.55 |
-| 0.5 | 0.1 | +0.009 | 65.44 | 23.95 |
-| 0.9 | 0.2 | +0.010 | 249.22 | 24.80 |
-| 0.5 | 0.5 | −0.307 | 160.10 | 23.27 |
+| -------: | ------: | ---------: | ------: | ----------: |
+|  **0.9** | **0.1** | **+0.090** |  284.88 |   **25.68** |
+|      0.8 |     0.1 |     +0.084 |  102.50 |       25.64 |
+|      0.7 |     0.1 |     +0.063 |   87.34 |       24.99 |
+|      0.8 |     0.2 |     +0.029 |  110.80 |       25.55 |
+|      0.5 |     0.1 |     +0.009 |   65.44 |       23.95 |
+|      0.9 |     0.2 |     +0.010 |  249.22 |       24.80 |
+|      0.5 |     0.5 |     −0.307 |  160.10 |       23.27 |
 
-The chosen configuration ($\alpha = 0.9$, $\beta = 0.1$) ranks #1/25 in average reward. This validates the design choice empirically rather than relying on intuition alone. The pattern is consistent: log-PPL compression already bounds the quality penalty, so reducing $\beta$ further allows the agent to explore configurations that would be discouraged under heavier quality penalties, leading to the discovery of high-reward pruning strategies.
+The chosen configuration ($\alpha = 0.9$, $\beta = 0.1$) ranks #1/25 in average reward. This validates the design choice empirically rather than relying on intuition alone. The pattern is consistent: the normalized linear reward with $[-1, 1]$ clamping keeps quality penalties proportional while bounded, so reducing $\beta$ further allows the agent to explore configurations that would be discouraged under heavier quality penalties, leading to the discovery of high-reward pruning strategies.
 
 ### Studies 2A–2C — Component Isolation
 
-| Study | State Dim | Policy | Avg Reward | Tail-20 Reward | Speedup (%) | Tail-20 Speedup (%) |
-|-------|----------:|--------|----------:|--------------:|------------:|--------------------:|
-| **Control** | **10** | **DDQN** | **+0.060** | **+0.004** | **20.65** | **17.67** |
-| 2A: No LCR | 9 | DDQN | +0.051 | −0.019 | 20.96 | 16.63 |
-| 2B: No HW | 4 | DDQN | +0.069 | +0.029 | 21.38 | 21.68 |
-| 2C: Random | 10 | Random | +0.057 | **−0.034** | 18.12 | **4.79** |
+| Study       | State Dim | Policy   | Avg Reward | Tail-20 Reward | Speedup (%) | Tail-20 Speedup (%) |
+| ----------- | --------: | -------- | ---------: | -------------: | ----------: | ------------------: |
+| **Control** |    **10** | **DDQN** | **+0.060** |     **+0.004** |   **20.65** |           **17.67** |
+| 2A: No LCR  |         9 | DDQN     |     +0.051 |         −0.019 |       20.96 |               16.63 |
+| 2B: No HW   |         4 | DDQN     |     +0.069 |         +0.029 |       21.38 |               21.68 |
+| 2C: Random  |        10 | Random   |     +0.057 |     **−0.034** |       18.12 |            **4.79** |
 
 **Key findings:**
 
@@ -720,10 +729,10 @@ The chosen configuration ($\alpha = 0.9$, $\beta = 0.1$) ranks #1/25 in average 
 
 To assess the practical impact of pruning on task performance beyond perplexity, zero-shot accuracy was measured on BoolQ and MMLU under the controller's selected pruning configuration:
 
-| Task | Dense Accuracy | Pruned Accuracy | Δ |
-|------|---------------:|----------------:|--:|
-| BoolQ | 62.0% | 45.0% | −17.0 pp |
-| MMLU | 34.3% | 25.5% | −8.8 pp |
+| Task  | Dense Accuracy | Pruned Accuracy |        Δ |
+| ----- | -------------: | --------------: | -------: |
+| BoolQ |          62.0% |           45.0% | −17.0 pp |
+| MMLU  |          34.3% |           25.5% |  −8.8 pp |
 
 The BoolQ degradation (−17 percentage points) is larger than MMLU (−8.8 pp), consistent with the perplexity results. Binary question answering requires precise passage-question alignment that is disrupted by layer removal—the model must identify and attend to the specific passage span that answers the question, a capability that relies on the full depth of the transformer stack. MMLU's multiple-choice format is more forgiving because partial knowledge can still produce above-random performance (random baseline for 4-choice MMLU is 25%, and the pruned model achieves 25.5%, suggesting that heavy pruning approaches the random baseline for this task).
 
@@ -735,15 +744,16 @@ These results highlight the speed-quality tradeoff that CASRAP navigates: the co
 
 An important empirical finding from the oracle labeling stage validates the multi-method composite label design:
 
-| Metric | Head pruning vs. Layer skipping |
-|--------|--------------------------------|
-| Spearman $\rho$ | ≈ 0.172 |
-| Pearson $r$ | ≈ 0.214 |
-| $R^2$ | ≈ 0.046 |
+| Metric          | Head pruning vs. Layer skipping |
+| --------------- | ------------------------------- |
+| Spearman $\rho$ | ≈ 0.172                         |
+| Pearson $r$     | ≈ 0.214                         |
+| $R^2$           | ≈ 0.046                         |
 
 Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correlated** ($R^2 \approx 0.05$). This is expected: attention-head pruning disrupts the multi-head attention mechanism (reducing the model's ability to attend to multiple positions simultaneously), while layer skipping removes entire transformer blocks (reducing the model's depth and progressive feature refinement). A prompt that is robust to narrower attention (head pruning) may still be sensitive to shallower processing (layer skipping), and vice versa.
 
 This low correlation justifies three design decisions:
+
 1. Multi-method oracle labeling rather than a single difficulty score.
 2. The layer-skip-heavy action space (layer removal is more effective for latency).
 3. Future extension to multi-output routing (separate sensitivity predictions per pruning type).
@@ -754,34 +764,34 @@ This low correlation justifies three design decisions:
 
 ### Contributions
 
-| Component | Status | Contribution |
-|-----------|--------|--------------|
-| Benchmark mixture pipeline | Complete | Reproducible, audited, 5-source multi-domain |
-| Oracle sensitivity labeling | Complete | Operational definition, multi-method, loss-gap based |
-| Learned Complexity Router | **Strongest** | Spearman $\rho = 0.72$, deployed at runtime, reusable |
-| Physical pruning engine | Complete | DynamicCache-correct, GQA-safe, fully reversible |
-| DDQN controller | Functional | 20–40% test-time speedup, learned effective policy |
-| End-to-end integration | Complete | All components connected in a single pipeline |
+| Component                   | Status        | Contribution                                          |
+| --------------------------- | ------------- | ----------------------------------------------------- |
+| Benchmark mixture pipeline  | Complete      | Reproducible, audited, 5-source multi-domain          |
+| Oracle sensitivity labeling | Complete      | Operational definition, multi-method, loss-gap based  |
+| Learned Complexity Router   | **Strongest** | Spearman $\rho = 0.72$, deployed at runtime, reusable |
+| Physical pruning engine     | Complete      | DynamicCache-correct, GQA-safe, fully reversible      |
+| DDQN controller             | Functional    | 20–40% test-time speedup, learned effective policy    |
+| End-to-end integration      | Complete      | All components connected in a single pipeline         |
 
 ### Design Evolution and Lessons Learned
 
-| Earlier State | Current State | What Changed |
-|---------------|---------------|--------------|
-| Heuristic prompt-complexity score | Trained BERT-mini LCR ($\rho = 0.72$) | Replaced hand-crafted equations with learned function |
-| Ad hoc prompt pool | Audited 5-source benchmark mixture (10,000 rows) | Reproducible, public-benchmark-based dataset |
-| Single sparse label | Multi-method composite labels ($\Delta\ell$ from heads + layers) | Captures both pruning sensitivity modes |
-| 7-feature controller state | 10-D state (hardware + LCR + early-Llama) | Added learned and backbone-specific signals |
-| Identity-forward layer skipping | **Physical layer removal** with DynamicCache alignment | Critical correctness fix (negative → positive speedup) |
-| Linear PPL reward ($\alpha=0.7, \beta=0.3$) | **Log-PPL reward** ($\alpha=0.9, \beta=0.1$) | Bounded penalty prevents policy collapse |
-| Hook-based calibration | Zero-cost weight-magnitude importance | Faster, deterministic, reproducible |
+| Earlier State                               | Current State                                                    | What Changed                                           |
+| ------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------ |
+| Heuristic prompt-complexity score           | Trained BERT-mini LCR ($\rho = 0.72$)                            | Replaced hand-crafted equations with learned function  |
+| Ad hoc prompt pool                          | Audited 5-source benchmark mixture (10,000 rows)                 | Reproducible, public-benchmark-based dataset           |
+| Single sparse label                         | Multi-method composite labels ($\Delta\ell$ from heads + layers) | Captures both pruning sensitivity modes                |
+| 7-feature controller state                  | 10-D state (hardware + LCR + early-Llama)                        | Added learned and backbone-specific signals            |
+| Identity-forward layer skipping             | **Physical layer removal** with DynamicCache alignment           | Critical correctness fix (negative → positive speedup) |
+| Log-PPL reward (over-compressed signal)     | **Normalized linear PPL reward** ($\alpha=0.9, \beta=0.1$, $[-1,1]$) | Proportional penalty preserves gradient-rich tradeoff  |
+| Hook-based calibration                      | Zero-cost weight-magnitude importance                            | Faster, deterministic, reproducible                    |
 
 ### Runtime Overhead
 
-| Component | Average Time | Percentage of Total |
-|-----------|-------------|-------------------|
-| LCR inference | ~28 ms | 2.3% |
-| RL action selection | ~1 ms | 0.09% |
-| **Total controller overhead** | **~29 ms** | **2.4%** |
+| Component                     | Average Time | Percentage of Total |
+| ----------------------------- | ------------ | ------------------- |
+| LCR inference                 | ~28 ms       | 2.3%                |
+| RL action selection           | ~1 ms        | 0.09%               |
+| **Total controller overhead** | **~29 ms**   | **2.4%**            |
 
 Controller overhead is included in all reported pruned latency figures, ensuring honest accounting.
 
@@ -790,7 +800,7 @@ Controller overhead is included in all reported pruned latency figures, ensuring
 - The learned prompt-sensitivity router provides a principled replacement for heuristic complexity scores, with empirically validated rank correlation ($\rho = 0.72$) to oracle labels.
 - The DDQN controller successfully learns a non-trivial policy that concentrates on high-reward actions during exploitation, as confirmed by the ablation against random action selection (tail-20 speedup: 17.67% DDQN vs. 4.79% random).
 - The physical layer-removal implementation correctly handles DynamicCache alignment, producing genuine speedups that were previously prevented by a subtle caching bug.
-- The log-PPL reward formulation prevents catastrophic policy collapse under heavy-tailed perplexity distributions, a practical contribution that addresses a failure mode not discussed in prior RL-for-pruning work.
+- The normalized linear PPL reward formulation with $[-1, 1]$ clamping provides a proportional, bounded quality-speed signal that enables nuanced policy learning under heavy-tailed perplexity distributions, a practical contribution that addresses a failure mode not discussed in prior RL-for-pruning work.
 
 ### Limitations
 
@@ -817,13 +827,13 @@ Controller overhead is included in all reported pruned latency figures, ensuring
 
 All experiments were conducted on consumer-grade local hardware, consistent with the thesis goal of resource-aware local inference:
 
-| Component | Specification |
-|-----------|---------------|
-| GPU | NVIDIA RTX 4060, 8 GB VRAM |
-| CPU | AMD Ryzen 7 5700X (8 cores, 16 threads) |
-| RAM | 16 GB DDR4 |
-| Storage | NVMe SSD |
-| OS | Windows 10/11 |
+| Component | Specification                           |
+| --------- | --------------------------------------- |
+| GPU       | NVIDIA RTX 4060, 8 GB VRAM              |
+| CPU       | AMD Ryzen 7 5700X (8 cores, 16 threads) |
+| RAM       | 16 GB DDR4                              |
+| Storage   | NVMe SSD                                |
+| OS        | Windows 10/11                           |
 
 **Software stack:** Python 3.9+, PyTorch 2.5 (CUDA 12.1), Hugging Face Transformers, Hugging Face Datasets, psutil, matplotlib, NVML (optional).
 
@@ -938,28 +948,28 @@ python run_ablation_studies.py --studies 1,2a,2b,2c
 
 Main entrypoint: `Adaptive_pruning.py`
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--mode` | `test` | `train`, `test`, or `report` |
-| `--model` | `llama-3.2-1b` | Backbone LLM: `llama-3.2-1b` or `llama-2-7b` |
-| `--checkpoint` | `checkpoints/rl_policy.pt` | Save/load path for the RL policy |
-| `--episodes` | `50` | Number of train or test episodes; also sets the epsilon-decay horizon |
-| `--max-new-tokens` | `50` | Maximum generated continuation length |
-| `--train-dataset` | `Prompt Dataset Train.csv` | Training CSV path |
-| `--test-dataset` | `Prompt Dataset Test.csv` | Test CSV path |
-| `--train-samples` | `5000` | Number of training prompts |
-| `--test-samples` | `100` | Number of test prompts in auto-test flows |
-| `--split-ratio` | `1.0` | Train/test split ratio (ignored when CSV has a `Split` column) |
-| `--device` | `auto` | `cpu`, `gpu`, or `auto` |
-| `--wikitext2` | `False` | WikiText-2 comparative evaluation |
-| `--boolq` | `False` | BoolQ zero-shot evaluation |
-| `--hellaswag` | `False` | HellaSwag zero-shot evaluation |
-| `--mmlu` | `False` | MMLU zero-shot evaluation |
-| `--eval-samples` | `1000` | Samples for benchmark-specific evaluation |
-| `--eval-seed` | `42` | Random seed for evaluation sampling |
-| `--force-action` | `None` | Force `target:intensity` instead of RL |
-| `--lm-eval` | `False` | Run lm-eval-harness tasks |
-| `--eval-tasks` | `boolq,hellaswag,mmlu` | lm-eval task list |
+| Argument           | Default                    | Description                                                           |
+| ------------------ | -------------------------- | --------------------------------------------------------------------- |
+| `--mode`           | `test`                     | `train`, `test`, or `report`                                          |
+| `--model`          | `llama-3.2-1b`             | Backbone LLM: `llama-3.2-1b` or `llama-2-7b`                          |
+| `--checkpoint`     | `checkpoints/rl_policy.pt` | Save/load path for the RL policy                                      |
+| `--episodes`       | `50`                       | Number of train or test episodes; also sets the epsilon-decay horizon |
+| `--max-new-tokens` | `50`                       | Maximum generated continuation length                                 |
+| `--train-dataset`  | `Prompt Dataset Train.csv` | Training CSV path                                                     |
+| `--test-dataset`   | `Prompt Dataset Test.csv`  | Test CSV path                                                         |
+| `--train-samples`  | `5000`                     | Number of training prompts                                            |
+| `--test-samples`   | `100`                      | Number of test prompts in auto-test flows                             |
+| `--split-ratio`    | `1.0`                      | Train/test split ratio (ignored when CSV has a `Split` column)        |
+| `--device`         | `auto`                     | `cpu`, `gpu`, or `auto`                                               |
+| `--wikitext2`      | `False`                    | WikiText-2 comparative evaluation                                     |
+| `--boolq`          | `False`                    | BoolQ zero-shot evaluation                                            |
+| `--hellaswag`      | `False`                    | HellaSwag zero-shot evaluation                                        |
+| `--mmlu`           | `False`                    | MMLU zero-shot evaluation                                             |
+| `--eval-samples`   | `1000`                     | Samples for benchmark-specific evaluation                             |
+| `--eval-seed`      | `42`                       | Random seed for evaluation sampling                                   |
+| `--force-action`   | `None`                     | Force `target:intensity` instead of RL                                |
+| `--lm-eval`        | `False`                    | Run lm-eval-harness tasks                                             |
+| `--eval-tasks`     | `boolq,hellaswag,mmlu`     | lm-eval task list                                                     |
 
 ---
 
@@ -967,60 +977,64 @@ Main entrypoint: `Adaptive_pruning.py`
 
 ### Core scripts
 
-| Path | Role |
-|------|------|
-| `Adaptive_pruning.py` | RL training, testing, reporting, benchmark evaluation |
-| `model_loader.py` | Llama loading, pruning application/restoration, weight-magnitude importance ranking |
-| `lcr_minibert.py` | Runtime LCR scorer (loads BERT-mini backbone + regression head) |
-| `oracle_labeler.py` | Dense-vs-sparse oracle sensitivity labeling |
-| `train_minibert_lcr.py` | LCR MiniBERT fine-tuning and evaluation |
-| `build_lcr_mixture_dataset.py` | Dataset assembly from HF streams |
-| `audit_lcr_mixture_dataset.py` | Dataset quality audit and cleaning |
-| `run_minibert_lcr_pipeline.py` | One-click LCR pipeline wrapper |
-| `run_ablation_studies.py` | Ablation study runner (Studies 1, 2A–2C) |
-| `nlp_analyzer.py` | NLP analysis utilities |
-| `dashboard_gen.py` | Dashboard generation |
+| Path                           | Role                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `Adaptive_pruning.py`          | RL training, testing, reporting, benchmark evaluation                               |
+| `model_loader.py`              | Llama loading, pruning application/restoration, weight-magnitude importance ranking |
+| `lcr_minibert.py`              | Runtime LCR scorer (loads BERT-mini backbone + regression head)                     |
+| `oracle_labeler.py`            | Dense-vs-sparse oracle sensitivity labeling                                         |
+| `train_minibert_lcr.py`        | LCR MiniBERT fine-tuning and evaluation                                             |
+| `build_lcr_mixture_dataset.py` | Dataset assembly from HF streams                                                    |
+| `audit_lcr_mixture_dataset.py` | Dataset quality audit and cleaning                                                  |
+| `run_minibert_lcr_pipeline.py` | One-click LCR pipeline wrapper                                                      |
+| `run_ablation_studies.py`      | Ablation study runner (Studies 1, 2A–2C)                                            |
+| `nlp_analyzer.py`              | NLP analysis utilities                                                              |
+| `dashboard_gen.py`             | Dashboard generation                                                                |
 
 ### Pruning primitives (`pruners/`)
 
-| Module | Role |
-|--------|------|
-| `layer_skipper.py` | Physical layer removal with DynamicCache-safe `layer_idx` reassignment |
+| Module                      | Role                                                                    |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `layer_skipper.py`          | Physical layer removal with DynamicCache-safe `layer_idx` reassignment  |
 | `structured_head_slicer.py` | GQA-safe structural head pruning (rebuilds q/k/v/o projection matrices) |
-| `head_pruner.py` | Legacy mask-based head pruner (kept for compatibility) |
+| `head_pruner.py`            | Legacy mask-based head pruner (kept for compatibility)                  |
 
 ### Checkpoints (`checkpoints/`)
 
-| Path | Content |
-|------|---------|
-| `minibert_lcr_backbone/` | Fine-tuned BERT-mini backbone (config, tokenizer, safetensors) |
-| `minibert_lcr_head.pt` | LCR regressor head + aux projector + ScalarMix + attn extractor |
-| `rl_policy.pt` | Trained DDQN policy checkpoint |
-| `rl_policy_v2.pt` | Alternative DDQN checkpoint |
+| Path                     | Content                                                         |
+| ------------------------ | --------------------------------------------------------------- |
+| `minibert_lcr_backbone/` | Fine-tuned BERT-mini backbone (config, tokenizer, safetensors)  |
+| `minibert_lcr_head.pt`   | LCR regressor head + aux projector + ScalarMix + attn extractor |
+| `rl_policy.pt`           | Trained DDQN policy checkpoint                                  |
+| `rl_policy_v2.pt`        | Alternative DDQN checkpoint                                     |
 
 ### Reports
 
-| Directory | Content |
-|-----------|---------|
-| `Training Report/Train N/` | RL training run artifacts (metrics JSON, report TXT, plots) |
-| `Training Report/MiniBERT Train N/` | LCR training run artifacts |
-| `Test Report/Test N/` | RL test run metrics, zero-shot accuracy, plots |
-| `Ablation Report/` | Ablation study results and unified summary |
+| Directory                           | Content                                                     |
+| ----------------------------------- | ----------------------------------------------------------- |
+| `Training Report/Train N/`          | RL training run artifacts (metrics JSON, report TXT, plots) |
+| `Training Report/MiniBERT Train N/` | LCR training run artifacts                                  |
+| `Test Report/Test N/`               | RL test run metrics, zero-shot accuracy, plots              |
+| `Ablation Report/`                  | Ablation study results and unified summary                  |
 
 ---
 
 ## F. Troubleshooting
 
 ### Hugging Face token issues
+
 If Llama-3.2-1B fails to load, confirm `.env` contains a valid `HUGGINGFACE_HUB_TOKEN` and that your account has been granted access to `meta-llama/Llama-3.2-1B`.
 
 ### Missing GPU telemetry
+
 If NVML is unavailable, GPU features fall back to `0.0`. The pipeline still runs but hardware telemetry is less informative.
 
 ### LCR checkpoint fallback
+
 If `checkpoints/minibert_lcr_backbone/` or `checkpoints/minibert_lcr_head.pt` are missing, the system falls back to a heuristic proxy. This keeps the pipeline operational but is not the reported model.
 
 ### Slow or unstable training
+
 - Reduce `--episodes` and `--max-new-tokens`
 - Use explicit dataset paths (`--train-dataset Oracle_dataset.csv`)
 - Ensure no other GPU workloads compete for VRAM
@@ -1048,47 +1062,48 @@ This project is licensed under the MIT License.
 
 ## References
 
-- Auer, P., Cesa-Bianchi, N., & Fischer, P. (2002). Finite-time Analysis of the Multiarmed Bandit Problem. *Machine Learning*, 47(2-3), 235–256.
-- Austin, J., et al. (2021). Program Synthesis with Large Language Models. *arXiv preprint arXiv:2108.07732*.
-- Brown, T. B., et al. (2020). Language Models are Few-Shot Learners. *NeurIPS 2020*.
-- Chawla, N. V., Bowyer, K. W., Hall, L. O., & Kegelmeyer, W. P. (2002). SMOTE: Synthetic Minority Over-sampling Technique. *JAIR*, 16, 321–357.
-- Clark, C., Lee, K., Chang, M.-W., Kwiatkowski, T., Collins, M., & Toutanova, K. (2019). BoolQ: Exploring the Surprising Difficulty of Natural Yes/No Questions. *NAACL 2019*.
-- Cobbe, K., et al. (2021). Training Verifiers to Solve Math Word Problems. *arXiv preprint arXiv:2110.14168*.
-- Dettmers, T., Lewis, M., Belkada, Y., & Zettlemoyer, L. (2022). LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale. *NeurIPS 2022*.
-- Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. *NAACL 2019*.
-- Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations? *EMNLP 2019*.
-- Frantar, E., & Alistarh, D. (2023). SparseGPT: Massive Language Models Can Be Accurately Pruned in One-Shot. *ICML 2023*.
-- Frantar, E., Ashkboos, S., Hoefler, T., & Alistarh, D. (2023). GPTQ: Accurate Post-Training Quantization for Generative Pre-Trained Transformers. *ICLR 2023*.
-- Han, S., Pool, J., Tung, J., & Dally, W. J. (2015). Learning both Weights and Connections for Efficient Neural Networks. *NeurIPS 2015*.
-- Hastie, T., Tibshirani, R., & Friedman, J. (2009). *The Elements of Statistical Learning*. Springer.
-- Hendrycks, D., & Gimpel, K. (2016). Gaussian Error Linear Units (GELUs). *arXiv preprint arXiv:1606.08415*.
-- Hendrycks, D., et al. (2021). Measuring Massive Multitask Language Understanding. *ICLR 2021*.
-- Hinton, G., Vinyals, O., & Dean, J. (2015). Distilling the Knowledge in a Neural Network. *NeurIPS Workshop 2015*.
-- Howard, J., & Ruder, S. (2018). Universal Language Model Fine-tuning for Text Classification. *ACL 2018*.
-- Huber, P. J. (1964). Robust Estimation of a Location Parameter. *Annals of Mathematical Statistics*, 35(1), 73–101.
-- Jelinek, F., Mercer, R. L., Bahl, L. R., & Baker, J. K. (1977). Perplexity—a Measure of the Difficulty of Speech Recognition Tasks. *JASA*, 62(S1).
-- Jiao, X., et al. (2020). TinyBERT: Distilling BERT for Natural Language Understanding. *EMNLP 2020 Findings*.
-- Kim, S., et al. (2024). Shortened LLaMA: A Simple Depth Pruning for Large Language Models. *ICLR 2024 Workshop*.
-- Lhoest, Q., et al. (2021). Datasets: A Community Library for Natural Language Processing. *EMNLP 2021 Demo*.
-- Lin, J., et al. (2024). AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration. *MLSys 2024*.
-- Loshchilov, I., & Hutter, F. (2017). SGDR: Stochastic Gradient Descent with Warm Restarts. *ICLR 2017*.
-- Loshchilov, I., & Hutter, F. (2019). Decoupled Weight Decay Regularization. *ICLR 2019*.
-- Manning, C. D., & Schütze, H. (1999). *Foundations of Statistical Natural Language Processing*. MIT Press.
-- Melis, G., Dyer, C., & Blunsom, P. (2018). On the State of the Art of Evaluation in Neural Language Models. *ICLR 2018*.
-- Merity, S., Xiong, C., Bradbury, J., & Socher, R. (2017). Pointer Sentinel Mixture Models. *ICLR 2017*.
-- Mihatsch, O., & Neuneier, R. (2002). Risk-Sensitive Reinforcement Learning. *Machine Learning*, 49(2-3), 267–290.
-- Mnih, V., et al. (2015). Human-level Control through Deep Reinforcement Learning. *Nature*, 518(7540), 529–533.
-- Müller, R., Kornblith, S., & Hinton, G. (2019). When Does Label Smoothing Help? *NeurIPS 2019*.
-- Peters, M. E., et al. (2018). Deep Contextualized Word Representations. *NAACL 2018*.
-- Pope, R., et al. (2023). Efficiently Scaling Transformer Inference. *MLSys 2023*.
-- Raffel, C., et al. (2020). Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer. *JMLR*, 21(140), 1–67.
-- Sanh, V., Debut, L., Chaumond, J., & Wolf, T. (2019). DistilBERT, a Distilled Version of BERT. *NeurIPS Workshop 2019*.
-- Sun, C., Qiu, X., Xu, Y., & Huang, X. (2019). How to Fine-Tune BERT for Text Classification. *CCL 2019*.
-- Sutton, R. S., & Barto, A. G. (2018). *Reinforcement Learning: An Introduction* (2nd ed.). MIT Press.
-- Touvron, H., et al. (2023). Llama 2: Open Foundation and Fine-Tuned Chat Models. *arXiv preprint arXiv:2307.09288*.
-- Turc, I., Chang, M.-W., Lee, K., & Toutanova, K. (2019). Well-Read Students Learn Better: On the Importance of Pre-training Compact Models. *arXiv preprint arXiv:1908.08962*.
-- van Hasselt, H., Guez, A., & Silver, D. (2016). Deep Reinforcement Learning with Double Q-learning. *AAAI 2016*.
-- Wolf, T., et al. (2020). Transformers: State-of-the-Art Natural Language Processing. *EMNLP 2020 Demo*.
+- Auer, P., Cesa-Bianchi, N., & Fischer, P. (2002). Finite-time Analysis of the Multiarmed Bandit Problem. _Machine Learning_, 47(2-3), 235–256.
+- Austin, J., et al. (2021). Program Synthesis with Large Language Models. _arXiv preprint arXiv:2108.07732_.
+- Brown, T. B., et al. (2020). Language Models are Few-Shot Learners. _NeurIPS 2020_.
+- Chawla, N. V., Bowyer, K. W., Hall, L. O., & Kegelmeyer, W. P. (2002). SMOTE: Synthetic Minority Over-sampling Technique. _JAIR_, 16, 321–357.
+- Clark, C., Lee, K., Chang, M.-W., Kwiatkowski, T., Collins, M., & Toutanova, K. (2019). BoolQ: Exploring the Surprising Difficulty of Natural Yes/No Questions. _NAACL 2019_.
+- Cobbe, K., et al. (2021). Training Verifiers to Solve Math Word Problems. _arXiv preprint arXiv:2110.14168_.
+- Dettmers, T., Lewis, M., Belkada, Y., & Zettlemoyer, L. (2022). LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale. _NeurIPS 2022_.
+- Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. _NAACL 2019_.
+- Ethayarajh, K. (2019). How Contextual are Contextualized Word Representations? _EMNLP 2019_.
+- Frantar, E., & Alistarh, D. (2023). SparseGPT: Massive Language Models Can Be Accurately Pruned in One-Shot. _ICML 2023_.
+- Frantar, E., Ashkboos, S., Hoefler, T., & Alistarh, D. (2023). GPTQ: Accurate Post-Training Quantization for Generative Pre-Trained Transformers. _ICLR 2023_.
+- Han, S., Pool, J., Tung, J., & Dally, W. J. (2015). Learning both Weights and Connections for Efficient Neural Networks. _NeurIPS 2015_.
+- Hastie, T., Tibshirani, R., & Friedman, J. (2009). _The Elements of Statistical Learning_. Springer.
+- Hendrycks, D., & Gimpel, K. (2016). Gaussian Error Linear Units (GELUs). _arXiv preprint arXiv:1606.08415_.
+- Hendrycks, D., et al. (2021). Measuring Massive Multitask Language Understanding. _ICLR 2021_.
+- Hinton, G., Vinyals, O., & Dean, J. (2015). Distilling the Knowledge in a Neural Network. _NeurIPS Workshop 2015_.
+- Howard, J., & Ruder, S. (2018). Universal Language Model Fine-tuning for Text Classification. _ACL 2018_.
+- Huber, P. J. (1964). Robust Estimation of a Location Parameter. _Annals of Mathematical Statistics_, 35(1), 73–101.
+- Jelinek, F., Mercer, R. L., Bahl, L. R., & Baker, J. K. (1977). Perplexity—a Measure of the Difficulty of Speech Recognition Tasks. _JASA_, 62(S1).
+- Jiao, X., et al. (2020). TinyBERT: Distilling BERT for Natural Language Understanding. _EMNLP 2020 Findings_.
+- Kim, S., et al. (2024). Shortened LLaMA: A Simple Depth Pruning for Large Language Models. _ICLR 2024 Workshop_.
+- Lhoest, Q., et al. (2021). Datasets: A Community Library for Natural Language Processing. _EMNLP 2021 Demo_.
+- Lin, J., et al. (2024). AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration. _MLSys 2024_.
+- Loshchilov, I., & Hutter, F. (2017). SGDR: Stochastic Gradient Descent with Warm Restarts. _ICLR 2017_.
+- Loshchilov, I., & Hutter, F. (2019). Decoupled Weight Decay Regularization. _ICLR 2019_.
+- Manning, C. D., & Schütze, H. (1999). _Foundations of Statistical Natural Language Processing_. MIT Press.
+- Melis, G., Dyer, C., & Blunsom, P. (2018). On the State of the Art of Evaluation in Neural Language Models. _ICLR 2018_.
+- Merity, S., Xiong, C., Bradbury, J., & Socher, R. (2017). Pointer Sentinel Mixture Models. _ICLR 2017_.
+- Mihatsch, O., & Neuneier, R. (2002). Risk-Sensitive Reinforcement Learning. _Machine Learning_, 49(2-3), 267–290.
+- Mnih, V., et al. (2015). Human-level Control through Deep Reinforcement Learning. _Nature_, 518(7540), 529–533.
+- Müller, R., Kornblith, S., & Hinton, G. (2019). When Does Label Smoothing Help? _NeurIPS 2019_.
+- Peters, M. E., et al. (2018). Deep Contextualized Word Representations. _NAACL 2018_.
+- Pope, R., et al. (2023). Efficiently Scaling Transformer Inference. _MLSys 2023_.
+- Raffel, C., et al. (2020). Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer. _JMLR_, 21(140), 1–67.
+- Sanh, V., Debut, L., Chaumond, J., & Wolf, T. (2019). DistilBERT, a Distilled Version of BERT. _NeurIPS Workshop 2019_.
+- Sun, C., Qiu, X., Xu, Y., & Huang, X. (2019). How to Fine-Tune BERT for Text Classification. _CCL 2019_.
+- Sutton, R. S., & Barto, A. G. (2018). _Reinforcement Learning: An Introduction_ (2nd ed.). MIT Press.
+- Touvron, H., et al. (2023). Llama 2: Open Foundation and Fine-Tuned Chat Models. _arXiv preprint arXiv:2307.09288_.
+- Turc, I., Chang, M.-W., Lee, K., & Toutanova, K. (2019). Well-Read Students Learn Better: On the Importance of Pre-training Compact Models. _arXiv preprint arXiv:1908.08962_.
+- van Hasselt, H., Guez, A., & Silver, D. (2016). Deep Reinforcement Learning with Double Q-learning. _AAAI 2016_.
+- Wolf, T., et al. (2020). Transformers: State-of-the-Art Natural Language Processing. _EMNLP 2020 Demo_.
+
 # CASRAP: Context-Aware Structured Runtime Adaptive Pruning
 
 **CASRAP** is a runtime adaptive pruning framework for local LLM inference that selects per-prompt pruning configurations using a learned prompt-sensitivity router, hardware telemetry, and a Double Deep Q-Network controller. Supported backbone models are `meta-llama/Llama-3.2-1B` (1B parameters, 16 transformer layers, GQA) and `meta-llama/Llama-2-7b-hf` (7B parameters, 32 transformer layers, MHA), selectable via the `--model` CLI flag.
@@ -1178,7 +1193,7 @@ flowchart LR
         L --> M[Pruning engine]
         M --> N["Physical layer removal<br/>or GQA-safe head pruning"]
         N --> O[Pruned inference]
-        G --> P["Reward: log-PPL bounded<br/>α=0.9 speed · β=0.1 quality"]
+        G --> P["Reward: normalized linear PPL<br/>α=0.9 speed · β=0.1 quality<br/>clamp [-1, 1]"]
         O --> P
         P --> Q[Replay update + model restoration]
         L -.->|UCB| R[Action visit counts]
@@ -1197,13 +1212,13 @@ This section follows the structure of the thesis methodology chapter.
 
 The project uses a five-source public benchmark mixture designed to cover diverse prompt types:
 
-| Source     |     Count | Rationale                                       |
-| ---------- | --------: | ----------------------------------------------- |
-| GSM8K      |     2,000 | Arithmetic and multi-step reasoning sensitivity |
-| MBPP       |     2,000 | Code-generation prompts with syntax sensitivity |
-| WikiText-2 |     2,000 | Redundancy-rich narrative language modeling     |
-| MMLU       |     2,000 | Mixed-domain reasoning and multiple choice      |
-| BoolQ      |     2,000 | Passage-grounded binary question answering      |
+| Source     |      Count | Rationale                                       |
+| ---------- | ---------: | ----------------------------------------------- |
+| GSM8K      |      2,000 | Arithmetic and multi-step reasoning sensitivity |
+| MBPP       |      2,000 | Code-generation prompts with syntax sensitivity |
+| WikiText-2 |      2,000 | Redundancy-rich narrative language modeling     |
+| MMLU       |      2,000 | Mixed-domain reasoning and multiple choice      |
+| BoolQ      |      2,000 | Passage-grounded binary question answering      |
 | **Total**  | **10,000** |                                                 |
 
 **Construction pipeline:**
@@ -1225,8 +1240,8 @@ Oracle labels are not generic "prompt difficulty" scores. They are **observed de
 
 For each prompt, the oracle pipeline (`oracle_labeler.py`) performs:
 
-1. One **dense teacher-forcing pass** → dense loss $\ell_D$, dense perplexity $PPL_D$.
-2. One or more **sparse teacher-forcing passes** under fixed pruning configurations → sparse loss $\ell_S$, sparse perplexity $PPL_S$.
+1. One **dense teacher-forcing pass** → dense loss $\ell_D$, dense perplexity $\text{PPL}_D$.
+2. One or more **sparse teacher-forcing passes** under fixed pruning configurations → sparse loss $\ell_S$, sparse perplexity $\text{PPL}_S$.
 
 The principal label is the **non-negative loss gap**:
 
@@ -1351,7 +1366,7 @@ flowchart TD
     H --> J[Apply pruning action]
     I --> J
     J --> K[Benchmark pruned run]
-    K --> L[Compute log-PPL reward]
+    K --> L[Compute normalized linear reward]
     L --> M[Store transition]
     M --> N[Replay training]
     N --> O[Target sync every 200 steps]
@@ -1426,13 +1441,13 @@ Each episode benchmarks the same prompt under both the dense and pruned model. M
 
 **Reward function:**
 
-The reward uses a **log-PPL formulation** to prevent catastrophic penalties from heavy-tailed perplexity spikes:
+The reward uses a **normalized linear PPL formulation** with $[-1, 1]$ clamping:
 
-$$R = \alpha \cdot \underbrace{\frac{tok/s_{pruned} - tok/s_{base}}{tok/s_{base} + \varepsilon}}_{\text{speed gain}} \;-\; \beta \cdot \underbrace{\max\!\bigl(0,\; \ln PPL_{pruned} - \ln PPL_{base}\bigr)}_{\text{log-PPL penalty}}$$
+$$R = \alpha \cdot \underbrace{\frac{\text{tok/s}_{\text{pruned}} - \text{tok/s}_{\text{base}}}{\text{tok/s}_{\text{base}} + \varepsilon}}_{\text{speed gain}} \;-\; \beta \cdot \underbrace{\frac{\text{PPL}_{\text{pruned}} - \text{PPL}_{\text{base}}}{\text{PPL}_{\text{base}} + \varepsilon}}_{\text{quality penalty}}$$
 
-with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-2, 2]$.
+with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-1, 1]$.
 
-**Why log-PPL?** Earlier versions used a linear PPL ratio ($\alpha=0.7, \beta=0.3$), which produced catastrophic penalties when pruning caused perplexity spikes (e.g., PPL 2 → 893 yielded a reward of −116). This caused the agent to converge on near-no-op actions. The log formulation compresses the penalty scale and the higher speed-weight ($\alpha=0.9$) encourages the agent to explore more aggressive pruning configurations.
+Both terms are ratio-normalized by baseline values, making them unit-free and bounded. The $[-1, 1]$ clamp ensures stable replay-buffer reward distributions. The higher speed-weight ($\alpha=0.9$) encourages the agent to explore aggressive pruning configurations while the proportional quality penalty preserves gradient-rich tradeoff learning.
 
 **Reporting pipeline:**
 
@@ -1477,7 +1492,7 @@ flowchart LR
         K --> L["6. DDQN action selection + UCB<br/>(~1ms overhead)"]
         L --> M["7. Apply physical pruning"]
         M --> N["8. Pruned inference"]
-        G --> P["9. Compute log-PPL reward"]
+        G --> P["9. Compute normalized reward"]
         N --> P
         P --> Q["10. Replay update + restore model"]
         L -.->|UCB bonus| F2["Track action visit counts"]
@@ -1804,7 +1819,7 @@ The Spearman correlation near 0.70 indicates the router learns meaningful **rank
 
 ### RL Controller Results
 
-With the corrected pruning engine (physical layer removal, log-PPL reward, updated action space), the controller now achieves measurable inference speedups:
+With the corrected pruning engine (physical layer removal, normalized linear PPL reward, updated action space), the controller now achieves measurable inference speedups:
 
 **Aggregate results (Train 37, 100 episodes → Test 19, 20 episodes):**
 
@@ -1924,7 +1939,7 @@ Results are saved to `Ablation Report/` with per-study subdirectories, JSON metr
 | 7-feature controller state                    | 10-feature state with LCR + early-Llama signals            |
 | Conceptual head pruning                       | GQA-safe structural head pruning                           |
 | Identity-forward layer skipping               | **Physical layer removal** with DynamicCache alignment     |
-| Linear PPL reward ($\alpha$=0.7, $\beta$=0.3) | **Log-PPL reward** ($\alpha$=0.9, $\beta$=0.1)             |
+| Log-PPL reward (over-compressed signal)        | **Normalized linear PPL reward** ($\alpha$=0.9, $\beta$=0.1, $[-1,1]$) |
 | Limited logging                               | Per-episode metrics, plots, JSON artifacts, organized runs |
 
 ### Runtime overhead

@@ -531,7 +531,7 @@ The framework automatically generates per-run reports and diagnostic visualizati
 - Inference time comparison with error bars
 - Perplexity comparison (token-weighted aggregates)
 - Prompt-length vs. perplexity correlation scatter plots
-- Controller overhead breakdown (stacked bar: LCR + RL agent + model generation)
+- Controller overhead breakdown (stacked bar for ≤500 episodes, stacked-area for larger runs: LCR + RL agent + model generation)
 - VRAM and model-size comparison (two-panel chart)
 - Reward progression with moving average trendline
 - Quality-vs-speed Pareto frontier scatter plot
@@ -1455,7 +1455,7 @@ The framework automatically produces per-run plots:
 - Inference time comparison
 - Perplexity comparison
 - Prompt-length vs perplexity correlation
-- Controller overhead breakdown (stacked bar)
+- Controller overhead breakdown (stacked bar / stacked-area for large runs)
 - VRAM / model-size comparison (two-panel chart: active model parameters before vs after pruning, and runtime peak VRAM)
 - Reward progression
 - Quality-vs-speed tradeoff scatter

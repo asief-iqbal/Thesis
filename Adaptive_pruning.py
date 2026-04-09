@@ -665,313 +665,365 @@ def generate_comparative_plots(metrics: List[Dict[str, Any]]):
     episodes = [m['episode'] for m in metrics]
 
     # 1) Token speed comparison
-    base_tok_s = [m['baseline_tok_s'] for m in metrics]
-    pruned_tok_s = [m['tok_s'] for m in metrics]
-    e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
-    e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
-    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-    ax.scatter(e_b, base_tok_s, color='red', alpha=alpha, label='Baseline Tok/s', s=ms)
-    ax.scatter(e_p, pruned_tok_s, color='blue', alpha=alpha, label='Pruned Tok/s', s=ms)
-    if len(e_b) > 1:
-        coeff = np.polyfit(e_b, base_tok_s, 1)
-        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
-    if len(e_p) > 1:
-        coeff = np.polyfit(e_p, pruned_tok_s, 1)
-        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    ax.set_title('Token Speed per Episode (Baseline vs Pruned)')
-    ax.set_xlabel('Episode'); ax.set_ylabel('Tokens/sec'); ax.grid(True, alpha=0.3); ax.legend()
-    _set_episode_xticks(ax, e_p or e_b, tick_step)
-    fig.tight_layout()
-    fig.savefig('token_speed_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
-    print('[Report] Saved token_speed_compare.png')
+    try:
+        base_tok_s = [m['baseline_tok_s'] for m in metrics]
+        pruned_tok_s = [m['tok_s'] for m in metrics]
+        e_b, base_tok_s = remove_outliers_xy(episodes, base_tok_s)
+        e_p, pruned_tok_s = remove_outliers_xy(episodes, pruned_tok_s)
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.scatter(e_b, base_tok_s, color='red', alpha=alpha, label='Baseline Tok/s', s=ms)
+        ax.scatter(e_p, pruned_tok_s, color='blue', alpha=alpha, label='Pruned Tok/s', s=ms)
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_tok_s, 1)
+            ax.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_tok_s, 1)
+            ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        ax.set_title('Token Speed per Episode (Baseline vs Pruned)')
+        ax.set_xlabel('Episode'); ax.set_ylabel('Tokens/sec'); ax.grid(True, alpha=0.3); ax.legend()
+        _set_episode_xticks(ax, e_p or e_b, tick_step)
+        fig.tight_layout()
+        fig.savefig('token_speed_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+        print('[Report] Saved token_speed_compare.png')
+    except Exception as e:
+        print(f"[Report] Warning: token_speed_compare chart failed: {e}")
 
     # 2) Inference time comparison
-    base_time = [m['baseline_time_ms'] for m in metrics]
-    pruned_time = [m['time_ms'] for m in metrics]
-    e_b, base_time = remove_outliers_xy(episodes, base_time)
-    e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
-    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-    ax.scatter(e_b, base_time, color='red', alpha=alpha, label='Baseline Time (ms)', s=ms)
-    ax.scatter(e_p, pruned_time, color='blue', alpha=alpha, label='Pruned Time (ms)', s=ms)
-    if len(e_b) > 1:
-        coeff = np.polyfit(e_b, base_time, 1)
-        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
-    if len(e_p) > 1:
-        coeff = np.polyfit(e_p, pruned_time, 1)
-        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    ax.set_title('Inference Time per Episode (Baseline vs Pruned)')
-    ax.set_xlabel('Episode'); ax.set_ylabel('Time (ms)'); ax.grid(True, alpha=0.3); ax.legend()
-    _set_episode_xticks(ax, e_p or e_b, tick_step)
-    fig.tight_layout()
-    fig.savefig('inference_time_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
-    print('[Report] Saved inference_time_compare.png')
+    try:
+        base_time = [m['baseline_time_ms'] for m in metrics]
+        pruned_time = [m['time_ms'] for m in metrics]
+        e_b, base_time = remove_outliers_xy(episodes, base_time)
+        e_p, pruned_time = remove_outliers_xy(episodes, pruned_time)
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.scatter(e_b, base_time, color='red', alpha=alpha, label='Baseline Time (ms)', s=ms)
+        ax.scatter(e_p, pruned_time, color='blue', alpha=alpha, label='Pruned Time (ms)', s=ms)
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_time, 1)
+            ax.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_time, 1)
+            ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        ax.set_title('Inference Time per Episode (Baseline vs Pruned)')
+        ax.set_xlabel('Episode'); ax.set_ylabel('Time (ms)'); ax.grid(True, alpha=0.3); ax.legend()
+        _set_episode_xticks(ax, e_p or e_b, tick_step)
+        fig.tight_layout()
+        fig.savefig('inference_time_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+        print('[Report] Saved inference_time_compare.png')
+    except Exception as e:
+        print(f"[Report] Warning: inference_time_compare chart failed: {e}")
 
     # 3) Perplexity comparison
-    base_ppl = [m['baseline_ppl'] for m in metrics]
-    pruned_ppl = [m['ppl'] for m in metrics]
-    e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
-    e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
-    fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-    ax.scatter(e_b, base_ppl, color='red', alpha=alpha, label='Baseline PPL', s=ms)
-    ax.scatter(e_p, pruned_ppl, color='blue', alpha=alpha, label='Pruned PPL', s=ms)
-    if len(e_b) > 1:
-        coeff = np.polyfit(e_b, base_ppl, 1)
-        ax.plot(e_b, np.polyval(coeff, e_b), color='red')
-    if len(e_p) > 1:
-        coeff = np.polyfit(e_p, pruned_ppl, 1)
-        ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
-    ax.set_title('Perplexity per Episode (Baseline vs Pruned)')
-    ax.set_xlabel('Episode'); ax.set_ylabel('Perplexity'); ax.grid(True, alpha=0.3); ax.legend()
-    _set_episode_xticks(ax, e_p or e_b, tick_step)
-    fig.tight_layout()
-    fig.savefig('perplexity_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
-    print('[Report] Saved perplexity_compare.png')
+    try:
+        base_ppl = [m['baseline_ppl'] for m in metrics]
+        pruned_ppl = [m['ppl'] for m in metrics]
+        e_b, base_ppl = remove_outliers_xy(episodes, base_ppl)
+        e_p, pruned_ppl = remove_outliers_xy(episodes, pruned_ppl)
+        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+        ax.scatter(e_b, base_ppl, color='red', alpha=alpha, label='Baseline PPL', s=ms)
+        ax.scatter(e_p, pruned_ppl, color='blue', alpha=alpha, label='Pruned PPL', s=ms)
+        if len(e_b) > 1:
+            coeff = np.polyfit(e_b, base_ppl, 1)
+            ax.plot(e_b, np.polyval(coeff, e_b), color='red')
+        if len(e_p) > 1:
+            coeff = np.polyfit(e_p, pruned_ppl, 1)
+            ax.plot(e_p, np.polyval(coeff, e_p), color='blue')
+        ax.set_title('Perplexity per Episode (Baseline vs Pruned)')
+        ax.set_xlabel('Episode'); ax.set_ylabel('Perplexity'); ax.grid(True, alpha=0.3); ax.legend()
+        _set_episode_xticks(ax, e_p or e_b, tick_step)
+        fig.tight_layout()
+        fig.savefig('perplexity_compare.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+        print('[Report] Saved perplexity_compare.png')
+    except Exception as e:
+        print(f"[Report] Warning: perplexity_compare chart failed: {e}")
 
     # 4) Token length vs prompt perplexity correlation
-    token_lens = [m['token_len'] for m in metrics]
-    prompt_ppls = [m['prompt_ppl'] for m in metrics]
-    x, y = remove_outliers_xy(token_lens, prompt_ppls)
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.scatter(x, y, color='purple', alpha=alpha, label='TokenLen vs Prompt PPL', s=ms)
-    if len(x) > 1:
-        coeff = np.polyfit(x, y, 1)
-        ax.plot(x, np.polyval(coeff, x), color='purple')
-    ax.set_title('Correlation: Token Length vs Prompt Perplexity')
-    ax.set_xlabel('Token Length'); ax.set_ylabel('Prompt PPL'); ax.grid(True, alpha=0.3); ax.legend()
-    fig.tight_layout()
-    fig.savefig('length_vs_ppl.png', dpi=300, bbox_inches='tight'); plt.close(fig)
-    print('[Report] Saved length_vs_ppl.png')
+    try:
+        token_lens = [m['token_len'] for m in metrics]
+        prompt_ppls = [m['prompt_ppl'] for m in metrics]
+        x, y = remove_outliers_xy(token_lens, prompt_ppls)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(x, y, color='purple', alpha=alpha, label='TokenLen vs Prompt PPL', s=ms)
+        if len(x) > 1:
+            coeff = np.polyfit(x, y, 1)
+            ax.plot(x, np.polyval(coeff, x), color='purple')
+        ax.set_title('Correlation: Token Length vs Prompt Perplexity')
+        ax.set_xlabel('Token Length'); ax.set_ylabel('Prompt PPL'); ax.grid(True, alpha=0.3); ax.legend()
+        fig.tight_layout()
+        fig.savefig('length_vs_ppl.png', dpi=300, bbox_inches='tight'); plt.close(fig)
+        print('[Report] Saved length_vs_ppl.png')
+    except Exception as e:
+        print(f"[Report] Warning: length_vs_ppl chart failed: {e}")
 
-    # 5) Time breakdown: LCR + RL Agent + Model Time per Episode (Stacked Bar Chart)
-    lcr_times = [m.get('lcr_inference_time_ms', 0) for m in metrics]
-    rl_times = [m.get('rl_inference_time_ms', 0) for m in metrics]
-    model_times = [m.get('model_time_ms', 0) for m in metrics]
-    total_times = [m['time_ms'] for m in metrics]
-    episodes = [m['episode'] for m in metrics]
+    # 5) Time breakdown: LCR + RL Agent + Model Time per Episode
+    #    Uses stacked bars for small runs; switches to stacked-area for large runs
+    #    to avoid OOM from tens-of-thousands of matplotlib patch objects.
+    try:
+        lcr_times = [m.get('lcr_inference_time_ms', 0) for m in metrics]
+        rl_times = [m.get('rl_inference_time_ms', 0) for m in metrics]
+        model_times = [m.get('model_time_ms', 0) for m in metrics]
+        total_times = [m['time_ms'] for m in metrics]
+        episodes = [m['episode'] for m in metrics]
 
-    # Remove outliers: compute bounds once, then filter by index (O(n))
-    def _outlier_bounds(data_list):
-        if not data_list:
-            return float('-inf'), float('inf')
-        q1, q3 = np.percentile(data_list, 25), np.percentile(data_list, 75)
-        iqr = q3 - q1
-        return q1 - 1.5 * iqr, q3 + 1.5 * iqr
+        # Remove outliers: compute bounds once, then filter by index (O(n))
+        def _outlier_bounds(data_list):
+            if not data_list:
+                return float('-inf'), float('inf')
+            q1, q3 = np.percentile(data_list, 25), np.percentile(data_list, 75)
+            iqr = q3 - q1
+            return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
-    # Since times are related, filter based on total time outliers
-    lb_t, ub_t = _outlier_bounds(total_times)
-    filtered_indices = [i for i, t in enumerate(total_times) if lb_t <= t <= ub_t]
-    episodes_filtered = [episodes[i] for i in filtered_indices]
-    lcr_times_filtered = [lcr_times[i] for i in filtered_indices]
-    rl_times_filtered = [rl_times[i] for i in filtered_indices]
-    model_times_filtered = [model_times[i] for i in filtered_indices]
-    total_times_filtered = [total_times[i] for i in filtered_indices]
+        # Since times are related, filter based on total time outliers
+        lb_t, ub_t = _outlier_bounds(total_times)
+        filtered_indices = [i for i, t in enumerate(total_times) if lb_t <= t <= ub_t]
+        episodes_filtered = [episodes[i] for i in filtered_indices]
+        lcr_times_filtered = np.array([lcr_times[i] for i in filtered_indices])
+        rl_times_filtered = np.array([rl_times[i] for i in filtered_indices])
+        model_times_filtered = np.array([model_times[i] for i in filtered_indices])
+        total_times_filtered = np.array([total_times[i] for i in filtered_indices])
+        baseline_times = [m.get('baseline_time_ms', 0) for m in metrics]
+        baseline_filtered = np.array([baseline_times[i] for i in filtered_indices])
 
-    n_bars = len(episodes_filtered)
-    fig_w = max(14, min(24, n_bars * 0.04))
-    fig, ax = plt.subplots(figsize=(fig_w, 8))
-    x_pos = np.arange(n_bars)
-    bar_w = max(0.3, min(1.0, 800 / max(n_bars, 1)))
-    bottom_lcr = np.array(lcr_times_filtered)
-    bottom_rl = bottom_lcr + np.array(rl_times_filtered)
-    ax.bar(x_pos, lcr_times_filtered, width=bar_w, color='green', label='LCR Inference (ms)', alpha=0.8)
-    ax.bar(x_pos, rl_times_filtered, width=bar_w, bottom=bottom_lcr, color='orange', label='RL Agent Time (ms)', alpha=0.8)
-    ax.bar(x_pos, model_times_filtered, width=bar_w, bottom=bottom_rl, color='blue', label='Model Inference (ms)', alpha=0.8)
-    line_ms_size = max(1, 4 - n_bars // 200)
-    ax.plot(x_pos, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=line_ms_size, label='Total Pruned Time (ms)')
-    baseline_times = [m.get('baseline_time_ms', 0) for m in metrics]
-    baseline_filtered = [baseline_times[i] for i in filtered_indices]
-    ax.plot(x_pos, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
-    ax.set_title('Inference Time Breakdown per Episode', fontsize=16, fontweight='bold')
-    ax.set_xlabel('Episode', fontsize=12)
-    ax.set_ylabel('Time (ms)', fontsize=12)
-    # X-axis: show round-number episode labels (100, 200, ...) instead of every episode
-    if tick_step and n_bars > 50:
-        tick_positions = list(range(tick_step - 1, n_bars, tick_step))
-        tick_labels = [str(episodes_filtered[p]) for p in tick_positions if p < n_bars]
-        tick_positions = [p for p in tick_positions if p < n_bars]
-        ax.set_xticks(tick_positions)
-        ax.set_xticklabels(tick_labels, fontsize=10)
-    else:
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(episodes_filtered, fontsize=max(6, 10 - n_bars // 30))
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig('time_breakdown.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print("[Report] Time breakdown plot saved to time_breakdown.png")
+        n_points = len(episodes_filtered)
+        _MAX_BARS = 500  # Above this, use stacked-area lines instead of bars
+
+        if n_points <= _MAX_BARS:
+            # Original stacked-bar implementation for small/medium runs
+            fig_w = max(14, min(24, n_points * 0.04))
+            fig, ax = plt.subplots(figsize=(fig_w, 8))
+            x_pos = np.arange(n_points)
+            bar_w = max(0.3, min(1.0, 800 / max(n_points, 1)))
+            bottom_lcr = lcr_times_filtered
+            bottom_rl = bottom_lcr + rl_times_filtered
+            ax.bar(x_pos, lcr_times_filtered, width=bar_w, color='green', label='LCR Inference (ms)', alpha=0.8)
+            ax.bar(x_pos, rl_times_filtered, width=bar_w, bottom=bottom_lcr, color='orange', label='RL Agent Time (ms)', alpha=0.8)
+            ax.bar(x_pos, model_times_filtered, width=bar_w, bottom=bottom_rl, color='blue', label='Model Inference (ms)', alpha=0.8)
+            line_ms_size = max(1, 4 - n_points // 200)
+            ax.plot(x_pos, total_times_filtered, color='red', marker='o', linestyle='-', linewidth=2, markersize=line_ms_size, label='Total Pruned Time (ms)')
+            ax.plot(x_pos, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
+            # X-axis: show round-number episode labels
+            if tick_step and n_points > 50:
+                tick_positions = list(range(tick_step - 1, n_points, tick_step))
+                tick_labels = [str(episodes_filtered[p]) for p in tick_positions if p < n_points]
+                tick_positions = [p for p in tick_positions if p < n_points]
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, fontsize=10)
+            else:
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels(episodes_filtered, fontsize=max(6, 10 - n_points // 30))
+        else:
+            # Stacked-area (fill_between) for large runs - avoids creating thousands of patches
+            fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 8))
+            ep_arr = np.array(episodes_filtered)
+            stack_lcr = lcr_times_filtered
+            stack_rl = stack_lcr + rl_times_filtered
+            stack_model = stack_rl + model_times_filtered
+            ax.fill_between(ep_arr, 0, stack_lcr, color='green', alpha=0.7, label='LCR Inference (ms)')
+            ax.fill_between(ep_arr, stack_lcr, stack_rl, color='orange', alpha=0.7, label='RL Agent Time (ms)')
+            ax.fill_between(ep_arr, stack_rl, stack_model, color='blue', alpha=0.5, label='Model Inference (ms)')
+            ax.plot(ep_arr, total_times_filtered, color='red', linewidth=1.5, label='Total Pruned Time (ms)')
+            ax.plot(ep_arr, baseline_filtered, color='gray', linestyle='--', linewidth=2, label='Baseline (Unpruned Model)')
+            _set_episode_xticks(ax, episodes_filtered, tick_step)
+
+        ax.set_title('Inference Time Breakdown per Episode', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Episode', fontsize=12)
+        ax.set_ylabel('Time (ms)', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig('time_breakdown.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print("[Report] Time breakdown plot saved to time_breakdown.png")
+    except Exception as e:
+        print(f"[Report] Warning: time_breakdown chart failed: {e}")
 
     # 6) Reward progression with moving average
-    rewards = [m.get('reward', 0) for m in metrics]
-    if rewards and any(r != 0 for r in rewards):
-        episodes_r = [m['episode'] for m in metrics]
-        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        ax.scatter(episodes_r, rewards, alpha=alpha, color='teal', label='Reward', s=ms)
-        window = min(max(5, n_episodes // 20), len(rewards))
-        if len(rewards) >= window:
-            ma = np.convolve(rewards, np.ones(window)/window, mode='valid')
-            ma_x = episodes_r[window-1:]
-            ax.plot(ma_x, ma, color='red', linewidth=2, label=f'Moving Avg (w={window})')
-        if len(episodes_r) > 1:
-            coeff = np.polyfit(episodes_r, rewards, 1)
-            ax.plot(episodes_r, np.polyval(coeff, episodes_r), color='purple', linestyle='--', label='Trendline')
-        ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        ax.set_title('Reward Progression per Episode', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Episode', fontsize=12)
-        ax.set_ylabel('Reward', fontsize=12)
-        ax.grid(True, alpha=0.3)
-        _set_episode_xticks(ax, episodes_r, tick_step)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig('reward_progression.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print("[Report] Reward progression plot saved to reward_progression.png")
+    try:
+        rewards = [m.get('reward', 0) for m in metrics]
+        if rewards and any(r != 0 for r in rewards):
+            episodes_r = [m['episode'] for m in metrics]
+            fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+            ax.scatter(episodes_r, rewards, alpha=alpha, color='teal', label='Reward', s=ms)
+            window = min(max(5, n_episodes // 20), len(rewards))
+            if len(rewards) >= window:
+                ma = np.convolve(rewards, np.ones(window)/window, mode='valid')
+                ma_x = episodes_r[window-1:]
+                ax.plot(ma_x, ma, color='red', linewidth=2, label=f'Moving Avg (w={window})')
+            if len(episodes_r) > 1:
+                coeff = np.polyfit(episodes_r, rewards, 1)
+                ax.plot(episodes_r, np.polyval(coeff, episodes_r), color='purple', linestyle='--', label='Trendline')
+            ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+            ax.set_title('Reward Progression per Episode', fontsize=16, fontweight='bold')
+            ax.set_xlabel('Episode', fontsize=12)
+            ax.set_ylabel('Reward', fontsize=12)
+            ax.grid(True, alpha=0.3)
+            _set_episode_xticks(ax, episodes_r, tick_step)
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig('reward_progression.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("[Report] Reward progression plot saved to reward_progression.png")
+    except Exception as e:
+        print(f"[Report] Warning: reward_progression chart failed: {e}")
 
     # 7) Quality vs Speed tradeoff (Pareto scatter)
-    speed_gains = []
-    ppl_ratios = []
-    action_labels_scatter = []
-    for m in metrics:
-        base_tok = m.get('baseline_tok_s', 0)
-        pruned_tok = m.get('tok_s', 0)
-        base_ppl_val = m.get('baseline_ppl', 1)
-        pruned_ppl_val = m.get('ppl', 1)
-        if base_tok > 0 and base_ppl_val > 0:
-            speed_gains.append((pruned_tok - base_tok) / base_tok * 100)
-            ppl_ratios.append((pruned_ppl_val - base_ppl_val) / base_ppl_val * 100)
-            action_labels_scatter.append(m.get('target', 'none'))
-    if speed_gains:
-        sg_arr, pr_arr = np.array(speed_gains), np.array(ppl_ratios)
-        sg_q1, sg_q3 = np.percentile(sg_arr, 10), np.percentile(sg_arr, 90)
-        pr_q1, pr_q3 = np.percentile(pr_arr, 10), np.percentile(pr_arr, 90)
-        sg_iqr, pr_iqr = sg_q3 - sg_q1, pr_q3 - pr_q1
-        sg_lb, sg_ub = sg_q1 - 2.0 * sg_iqr, sg_q3 + 2.0 * sg_iqr
-        pr_lb, pr_ub = pr_q1 - 2.0 * pr_iqr, pr_q3 + 2.0 * pr_iqr
-        inlier = [(sg_lb <= s <= sg_ub) and (pr_lb <= p <= pr_ub) for s, p in zip(speed_gains, ppl_ratios)]
-        sg_f = [s for s, m in zip(speed_gains, inlier) if m]
-        pr_f = [p for p, m in zip(ppl_ratios, inlier) if m]
-        al_f = [a for a, m in zip(action_labels_scatter, inlier) if m]
-        n_outliers = len(speed_gains) - len(sg_f)
-        if n_outliers > 0:
-            print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
+    try:
+        speed_gains = []
+        ppl_ratios = []
+        action_labels_scatter = []
+        for m in metrics:
+            base_tok = m.get('baseline_tok_s', 0)
+            pruned_tok = m.get('tok_s', 0)
+            base_ppl_val = m.get('baseline_ppl', 1)
+            pruned_ppl_val = m.get('ppl', 1)
+            if base_tok > 0 and base_ppl_val > 0:
+                speed_gains.append((pruned_tok - base_tok) / base_tok * 100)
+                ppl_ratios.append((pruned_ppl_val - base_ppl_val) / base_ppl_val * 100)
+                action_labels_scatter.append(m.get('target', 'none'))
+        if speed_gains:
+            sg_arr, pr_arr = np.array(speed_gains), np.array(ppl_ratios)
+            sg_q1, sg_q3 = np.percentile(sg_arr, 10), np.percentile(sg_arr, 90)
+            pr_q1, pr_q3 = np.percentile(pr_arr, 10), np.percentile(pr_arr, 90)
+            sg_iqr, pr_iqr = sg_q3 - sg_q1, pr_q3 - pr_q1
+            sg_lb, sg_ub = sg_q1 - 2.0 * sg_iqr, sg_q3 + 2.0 * sg_iqr
+            pr_lb, pr_ub = pr_q1 - 2.0 * pr_iqr, pr_q3 + 2.0 * pr_iqr
+            inlier = [(sg_lb <= s <= sg_ub) and (pr_lb <= p <= pr_ub) for s, p in zip(speed_gains, ppl_ratios)]
+            sg_f = [s for s, m in zip(speed_gains, inlier) if m]
+            pr_f = [p for p, m in zip(ppl_ratios, inlier) if m]
+            al_f = [a for a, m in zip(action_labels_scatter, inlier) if m]
+            n_outliers = len(speed_gains) - len(sg_f)
+            if n_outliers > 0:
+                print(f"[Report] Quality vs Speed: filtered {n_outliers} extreme outlier(s) from plot")
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
-        for label in set(al_f):
-            idx = [j for j, a in enumerate(al_f) if a == label]
-            ax.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
-                       alpha=alpha, label=label, color=colors_map.get(label, 'purple'), s=ms)
-        ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        ax.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-        ax.set_title('Quality vs Speed Tradeoff', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Speed Change (%)', fontsize=12)
-        ax.set_ylabel('PPL Change (%)', fontsize=12)
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig('quality_vs_speed.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print("[Report] Quality vs speed plot saved to quality_vs_speed.png")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            colors_map = {'attention_heads': 'blue', 'transformer_layers': 'green', 'none': 'gray'}
+            for label in set(al_f):
+                idx = [j for j, a in enumerate(al_f) if a == label]
+                ax.scatter([sg_f[j] for j in idx], [pr_f[j] for j in idx],
+                           alpha=alpha, label=label, color=colors_map.get(label, 'purple'), s=ms)
+            ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+            ax.axvline(x=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+            ax.set_title('Quality vs Speed Tradeoff', fontsize=16, fontweight='bold')
+            ax.set_xlabel('Speed Change (%)', fontsize=12)
+            ax.set_ylabel('PPL Change (%)', fontsize=12)
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig('quality_vs_speed.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("[Report] Quality vs speed plot saved to quality_vs_speed.png")
+    except Exception as e:
+        print(f"[Report] Warning: quality_vs_speed chart failed: {e}")
 
     # 8) Epsilon decay (if tracked)
-    epsilons = [m.get('epsilon', None) for m in metrics]
-    if epsilons and any(e is not None for e in epsilons):
-        eps_vals = [e for e in epsilons if e is not None]
-        eps_episodes = [m['episode'] for m, e in zip(metrics, epsilons) if e is not None]
-        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        ax.plot(eps_episodes, eps_vals, color='darkorange', linewidth=2)
-        ax.set_title('Epsilon Decay During Training', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Episode', fontsize=12)
-        ax.set_ylabel('Epsilon', fontsize=12)
-        ax.grid(True, alpha=0.3)
-        _set_episode_xticks(ax, eps_episodes, tick_step)
-        fig.tight_layout()
-        fig.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print("[Report] Epsilon decay plot saved to epsilon_decay.png")
+    try:
+        epsilons = [m.get('epsilon', None) for m in metrics]
+        if epsilons and any(e is not None for e in epsilons):
+            eps_vals = [e for e in epsilons if e is not None]
+            eps_episodes = [m['episode'] for m, e in zip(metrics, epsilons) if e is not None]
+            fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+            ax.plot(eps_episodes, eps_vals, color='darkorange', linewidth=2)
+            ax.set_title('Epsilon Decay During Training', fontsize=16, fontweight='bold')
+            ax.set_xlabel('Episode', fontsize=12)
+            ax.set_ylabel('Epsilon', fontsize=12)
+            ax.grid(True, alpha=0.3)
+            _set_episode_xticks(ax, eps_episodes, tick_step)
+            fig.tight_layout()
+            fig.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("[Report] Epsilon decay plot saved to epsilon_decay.png")
+    except Exception as e:
+        print(f"[Report] Warning: epsilon_decay chart failed: {e}")
 
     # 9) Cumulative reward over episodes
-    if rewards and any(r != 0 for r in rewards):
-        cumulative = np.cumsum(rewards)
-        fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
-        ax.plot(episodes_r, cumulative, color='darkgreen', linewidth=2)
-        ax.fill_between(episodes_r, cumulative, alpha=0.2, color='green')
-        ax.set_title('Cumulative Reward Over Episodes', fontsize=16, fontweight='bold')
-        ax.set_xlabel('Episode', fontsize=12)
-        ax.set_ylabel('Cumulative Reward', fontsize=12)
-        ax.grid(True, alpha=0.3)
-        _set_episode_xticks(ax, episodes_r, tick_step)
-        fig.tight_layout()
-        fig.savefig('cumulative_reward.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print("[Report] Cumulative reward plot saved to cumulative_reward.png")
+    try:
+        rewards = [m.get('reward', 0) for m in metrics]
+        if rewards and any(r != 0 for r in rewards):
+            episodes_r = [m['episode'] for m in metrics]
+            cumulative = np.cumsum(rewards)
+            fig, ax = plt.subplots(figsize=(max(10, min(18, n_episodes * 0.03)), 6))
+            ax.plot(episodes_r, cumulative, color='darkgreen', linewidth=2)
+            ax.fill_between(episodes_r, cumulative, alpha=0.2, color='green')
+            ax.set_title('Cumulative Reward Over Episodes', fontsize=16, fontweight='bold')
+            ax.set_xlabel('Episode', fontsize=12)
+            ax.set_ylabel('Cumulative Reward', fontsize=12)
+            ax.grid(True, alpha=0.3)
+            _set_episode_xticks(ax, episodes_r, tick_step)
+            fig.tight_layout()
+            fig.savefig('cumulative_reward.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("[Report] Cumulative reward plot saved to cumulative_reward.png")
+    except Exception as e:
+        print(f"[Report] Warning: cumulative_reward chart failed: {e}")
 
     # 10) VRAM / Model Size comparison: baseline vs pruned
-    baseline_param = [m.get('baseline_param_mb', 0) for m in metrics]
-    pruned_param = [m.get('pruned_param_mb', 0) for m in metrics]
-    baseline_vram = [m.get('baseline_vram_peak_gb', 0) for m in metrics]
-    pruned_vram = [m.get('pruned_vram_peak_gb', 0) for m in metrics]
-    has_params = any(v > 0 for v in baseline_param)
-    has_vram = any(v > 0 for v in baseline_vram)
-    if has_params or has_vram:
-        episodes_v = [m['episode'] for m in metrics]
-        ms = max(2, 6 - n_episodes // 100)
-        n_panels = int(has_params) + int(has_vram)
-        fig, axes = plt.subplots(n_panels, 1, figsize=(max(10, min(18, n_episodes * 0.03)), 5 * n_panels))
-        if n_panels == 1:
-            axes = [axes]
-        panel_idx = 0
+    try:
+        baseline_param = [m.get('baseline_param_mb', 0) for m in metrics]
+        pruned_param = [m.get('pruned_param_mb', 0) for m in metrics]
+        baseline_vram = [m.get('baseline_vram_peak_gb', 0) for m in metrics]
+        pruned_vram = [m.get('pruned_vram_peak_gb', 0) for m in metrics]
+        has_params = any(v > 0 for v in baseline_param)
+        has_vram = any(v > 0 for v in baseline_vram)
+        if has_params or has_vram:
+            episodes_v = [m['episode'] for m in metrics]
+            ms = max(2, 6 - n_episodes // 100)
+            n_panels = int(has_params) + int(has_vram)
+            fig, axes = plt.subplots(n_panels, 1, figsize=(max(10, min(18, n_episodes * 0.03)), 5 * n_panels))
+            if n_panels == 1:
+                axes = [axes]
+            panel_idx = 0
 
-        # Panel A: Active Model Parameters (the real structural saving)
-        if has_params:
-            ax = axes[panel_idx]; panel_idx += 1
-            ax.plot(episodes_v, baseline_param, color='#E53935', linewidth=2, marker='o',
-                    markersize=ms, label='Baseline (Unpruned)')
-            ax.plot(episodes_v, pruned_param, color='#43A047', linewidth=2, marker='s',
-                    markersize=ms, label='Pruned Model')
-            ax.fill_between(episodes_v, pruned_param, baseline_param,
-                            where=[p < b for p, b in zip(pruned_param, baseline_param)],
-                            alpha=0.20, color='#66BB6A', label='Params Reduced')
-            param_savings = [b - p for b, p in zip(baseline_param, pruned_param)]
-            avg_ps = sum(param_savings) / len(param_savings) if param_savings else 0
-            avg_bp = sum(baseline_param) / len(baseline_param) if baseline_param else 1
-            pct_ps = (avg_ps / avg_bp * 100) if avg_bp > 0 else 0
-            ax.set_title(f'Active Model Parameters: Baseline vs Pruned (Avg Reduction: {avg_ps:.1f} MB / {pct_ps:.1f}%)',
-                         fontsize=13, fontweight='bold')
-            ax.set_xlabel('Episode', fontsize=11)
-            ax.set_ylabel('Model Parameters (MB)', fontsize=11)
-            ax.set_ylim(bottom=0)
-            ax.grid(True, alpha=0.3)
-            _set_episode_xticks(ax, episodes_v, tick_step)
-            ax.legend(loc='upper right', fontsize=9)
+            # Panel A: Active Model Parameters (the real structural saving)
+            if has_params:
+                ax = axes[panel_idx]; panel_idx += 1
+                ax.plot(episodes_v, baseline_param, color='#E53935', linewidth=2, marker='o',
+                        markersize=ms, label='Baseline (Unpruned)')
+                ax.plot(episodes_v, pruned_param, color='#43A047', linewidth=2, marker='s',
+                        markersize=ms, label='Pruned Model')
+                ax.fill_between(episodes_v, pruned_param, baseline_param,
+                                where=[p < b for p, b in zip(pruned_param, baseline_param)],
+                                alpha=0.20, color='#66BB6A', label='Params Reduced')
+                param_savings = [b - p for b, p in zip(baseline_param, pruned_param)]
+                avg_ps = sum(param_savings) / len(param_savings) if param_savings else 0
+                avg_bp = sum(baseline_param) / len(baseline_param) if baseline_param else 1
+                pct_ps = (avg_ps / avg_bp * 100) if avg_bp > 0 else 0
+                ax.set_title(f'Active Model Parameters: Baseline vs Pruned (Avg Reduction: {avg_ps:.1f} MB / {pct_ps:.1f}%)',
+                             fontsize=13, fontweight='bold')
+                ax.set_xlabel('Episode', fontsize=11)
+                ax.set_ylabel('Model Parameters (MB)', fontsize=11)
+                ax.set_ylim(bottom=0)
+                ax.grid(True, alpha=0.3)
+                _set_episode_xticks(ax, episodes_v, tick_step)
+                ax.legend(loc='upper right', fontsize=9)
 
-        # Panel B: Peak VRAM during inference (runtime measurement)
-        if has_vram:
-            ax = axes[panel_idx]; panel_idx += 1
-            ax.plot(episodes_v, baseline_vram, color='#E53935', linewidth=2, marker='o',
-                    markersize=ms, label='Baseline Peak VRAM')
-            ax.plot(episodes_v, pruned_vram, color='#43A047', linewidth=2, marker='s',
-                    markersize=ms, label='Pruned Peak VRAM')
-            ax.fill_between(episodes_v, pruned_vram, baseline_vram,
-                            where=[p < b for p, b in zip(pruned_vram, baseline_vram)],
-                            alpha=0.18, color='#66BB6A', label='VRAM Saved')
-            vram_savings = [b - p for b, p in zip(baseline_vram, pruned_vram)]
-            avg_vs = sum(vram_savings) / len(vram_savings) if vram_savings else 0
-            avg_bv = sum(baseline_vram) / len(baseline_vram) if baseline_vram else 1
-            pct_vs = (avg_vs / avg_bv * 100) if avg_bv > 0 else 0
-            ax.set_title(f'Runtime VRAM: Baseline vs Pruned (Avg Saving: {avg_vs:.3f} GB / {pct_vs:.1f}%)',
-                         fontsize=13, fontweight='bold')
-            ax.set_xlabel('Episode', fontsize=11)
-            ax.set_ylabel('Peak VRAM (GB)', fontsize=11)
-            ax.set_ylim(bottom=0)
-            ax.grid(True, alpha=0.3)
-            _set_episode_xticks(ax, episodes_v, tick_step)
-            ax.legend(loc='upper right', fontsize=9)
+            # Panel B: Peak VRAM during inference (runtime measurement)
+            if has_vram:
+                ax = axes[panel_idx]; panel_idx += 1
+                ax.plot(episodes_v, baseline_vram, color='#E53935', linewidth=2, marker='o',
+                        markersize=ms, label='Baseline Peak VRAM')
+                ax.plot(episodes_v, pruned_vram, color='#43A047', linewidth=2, marker='s',
+                        markersize=ms, label='Pruned Peak VRAM')
+                ax.fill_between(episodes_v, pruned_vram, baseline_vram,
+                                where=[p < b for p, b in zip(pruned_vram, baseline_vram)],
+                                alpha=0.18, color='#66BB6A', label='VRAM Saved')
+                vram_savings = [b - p for b, p in zip(baseline_vram, pruned_vram)]
+                avg_vs = sum(vram_savings) / len(vram_savings) if vram_savings else 0
+                avg_bv = sum(baseline_vram) / len(baseline_vram) if baseline_vram else 1
+                pct_vs = (avg_vs / avg_bv * 100) if avg_bv > 0 else 0
+                ax.set_title(f'Runtime VRAM: Baseline vs Pruned (Avg Saving: {avg_vs:.3f} GB / {pct_vs:.1f}%)',
+                             fontsize=13, fontweight='bold')
+                ax.set_xlabel('Episode', fontsize=11)
+                ax.set_ylabel('Peak VRAM (GB)', fontsize=11)
+                ax.set_ylim(bottom=0)
+                ax.grid(True, alpha=0.3)
+                _set_episode_xticks(ax, episodes_v, tick_step)
+                ax.legend(loc='upper right', fontsize=9)
 
-        fig.tight_layout()
-        fig.savefig('vram_usage.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        print("[Report] VRAM/model-size comparison plot saved to vram_usage.png")
+            fig.tight_layout()
+            fig.savefig('vram_usage.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("[Report] VRAM/model-size comparison plot saved to vram_usage.png")
+    except Exception as e:
+        print(f"[Report] Warning: vram_usage chart failed: {e}")
 
 # =========================================================================
 # PER-SOURCE-DATASET BAR CHARTS (BASELINE VS PRUNED)
@@ -1727,13 +1779,26 @@ def main(num_episodes: int = 50,
         if checkpoint_path:
             rl_agent.save(checkpoint_path)
 
-        generate_report(metrics_list)
-        generate_comparative_plots(metrics_list)
-        generate_per_source_charts(metrics_list)
+        # Wrap report/chart generation so failures never block the test run
+        try:
+            generate_report(metrics_list)
+        except Exception as e:
+            print(f"[System] Warning: generate_report failed: {e}")
+        try:
+            generate_comparative_plots(metrics_list)
+        except Exception as e:
+            print(f"[System] Warning: generate_comparative_plots failed: {e}")
+        try:
+            generate_per_source_charts(metrics_list)
+        except Exception as e:
+            print(f"[System] Warning: generate_per_source_charts failed: {e}")
 
-        import json
-        with open('training_metrics.json', 'w') as f:
-            json.dump(metrics_list, f)
+        try:
+            import json
+            with open('training_metrics.json', 'w') as f:
+                json.dump(metrics_list, f)
+        except Exception as e:
+            print(f"[System] Warning: saving training_metrics.json failed: {e}")
 
     if test_prompts_split:
         test_cap = min(len(test_prompts_split), test_samples)
@@ -2007,12 +2072,21 @@ def test_agent(model_engine, rl_agent, benchmark, num_test_episodes=10, max_new_
             'pruned_param_mb': pruned_param_mb,
         })
     
-    # Generate test reports
-    generate_report(metrics_list, report_filename='test_report.txt', header='Test Report')
-    generate_comparative_plots(metrics_list)
+    # Generate test reports (wrapped so failures don't block metrics/organize)
+    try:
+        generate_report(metrics_list, report_filename='test_report.txt', header='Test Report')
+    except Exception as e:
+        print(f"[Test] Warning: generate_report failed: {e}")
+    try:
+        generate_comparative_plots(metrics_list)
+    except Exception as e:
+        print(f"[Test] Warning: generate_comparative_plots failed: {e}")
 
     # Generate per-dataset-source bar charts (baseline vs pruned)
-    generate_per_source_charts(metrics_list)
+    try:
+        generate_per_source_charts(metrics_list)
+    except Exception as e:
+        print(f"[Test] Warning: generate_per_source_charts failed: {e}")
 
     import json
     with open('test_metrics.json', 'w') as f:
@@ -3431,8 +3505,14 @@ if __name__ == "__main__":
         import json
         with open('training_metrics.json', 'r') as f:
             metrics_list = json.load(f)
-        generate_report(metrics_list)
-        generate_comparative_plots(metrics_list)
+        try:
+            generate_report(metrics_list)
+        except Exception as e:
+            print(f"[Report] Warning: generate_report failed: {e}")
+        try:
+            generate_comparative_plots(metrics_list)
+        except Exception as e:
+            print(f"[Report] Warning: generate_comparative_plots failed: {e}")
         # Organize training reports into folders
         organize_training_reports(is_report_mode=True)
     else:

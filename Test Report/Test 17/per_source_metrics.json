@@ -1,0 +1,22 @@
+{
+  "gsm8k": {
+    "n_episodes": 1,
+    "baseline_ppl": 1.4751737117767334,
+    "pruned_ppl": 77.36504364013672,
+    "baseline_time_s": 1.2820191383361816,
+    "pruned_time_s": 0.8980257511138916,
+    "speedup": 1.4275973007967677,
+    "baseline_tok_s": 39.00097783632976,
+    "pruned_tok_s": 55.67769068757893
+  },
+  "mmlu": {
+    "n_episodes": 1,
+    "baseline_ppl": 2.150874137878418,
+    "pruned_ppl": 39.11460876464844,
+    "baseline_time_s": 1.246000051498413,
+    "pruned_time_s": 0.9519228935241699,
+    "speedup": 1.3089295992089471,
+    "baseline_tok_s": 40.1284092563809,
+    "pruned_tok_s": 52.52526264484726
+  }
+}

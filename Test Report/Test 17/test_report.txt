@@ -1,0 +1,21 @@
+Test Report
+============================================================
+Episodes: 2
+Overall Avg Total Time (LCR+RL+Model): 940.48ms
+  Avg LCR Inference: 14.50ms
+  Avg RL Agent: 1.00ms
+  Avg Model Inference (pruned): 924.97ms
+  Avg Baseline Inference (unpruned): 1264.01ms
+  VRAM total: 8.00 GB | Avg model: 4.61 GB | Avg pruning+inference: 0.132 GB | Avg free: 0.97 GB
+  Avg Baseline Peak VRAM: 4.747 GB | Avg Pruned Peak VRAM: 4.745 GB | VRAM Saved: 0.003 GB (0.1%)
+  Avg Baseline Params: 4714.3 MB | Avg Pruned Params: 3438.2 MB | Params Reduced: 1276.1 MB (27.1%)
+Overall Avg PPL (pruned, arithmetic): 58.24
+Overall PPL (pruned, token-weighted): 55.01
+Overall Avg PPL (baseline, arithmetic): 1.81
+Overall PPL (baseline, token-weighted): 1.78
+
+Overall Avg Reward: -1.0000
+
+Averages by Prune Type and Intensity:
+  transformer_layers 0.31: Avg Time 969.93ms, Avg PPL 39.11, TW-PPL 39.11, Avg Reward -1.0000 (1 samples)
+  transformer_layers 0.38: Avg Time 911.03ms, Avg PPL 77.37, TW-PPL 77.37, Avg Reward -1.0000 (1 samples)

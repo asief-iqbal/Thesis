@@ -1,0 +1,207 @@
+{
+  "charts": [
+    {
+      "file_name": "inference_time_per_action.png",
+      "title": "Average Inference Time per Pruning Action",
+      "x_axis_label": "Pruning Action",
+      "y_axis_label": "Average Time (ms)",
+      "data": [
+        {
+          "pruning_action": "transformer_layers 0.12",
+          "value": 1300
+        },
+        {
+          "pruning_action": "transformer_layers 0.19",
+          "value": 1140
+        },
+        {
+          "pruning_action": "transformer_layers 0.44",
+          "value": 870
+        },
+        {
+          "pruning_action": "transformer_layers 0.5",
+          "value": 820
+        },
+        {
+          "pruning_action": "attention_heads 0.25",
+          "value": 1470
+        }
+      ],
+      "note": "Values are visually approximated from the chart."
+    },
+    {
+      "file_name": "per_source_inference_time.png",
+      "title": "Inference time per prompt (lower is better)",
+      "x_axis_label": "Source",
+      "y_axis_label": "Seconds",
+      "series": ["baseline", "pruned"],
+      "data": {
+        "wikitext2": {
+          "baseline": 1.315,
+          "pruned": 0.891
+        },
+        "gsm8k": {
+          "baseline": 1.277,
+          "pruned": 0.873
+        },
+        "boolq": {
+          "baseline": 1.314,
+          "pruned": 0.890
+        },
+        "mmlu": {
+          "baseline": 1.270,
+          "pruned": 0.866
+        },
+        "mbpp": {
+          "baseline": 1.262,
+          "pruned": 0.856
+        }
+      }
+    },
+    {
+      "file_name": "per_source_perplexity.png",
+      "title": "Perplexity (lower is better)",
+      "x_axis_label": "Source",
+      "y_axis_label": "PPL",
+      "series": ["baseline", "pruned"],
+      "data": {
+        "wikitext2": {
+          "baseline": 2.86,
+          "pruned": 7.03
+        },
+        "gsm8k": {
+          "baseline": 2.45,
+          "pruned": 5.97
+        },
+        "boolq": {
+          "baseline": 1.74,
+          "pruned": 3.73
+        },
+        "mmlu": {
+          "baseline": 3.05,
+          "pruned": 5.88
+        },
+        "mbpp": {
+          "baseline": 1.77,
+          "pruned": 4.91
+        }
+      }
+    },
+    {
+      "file_name": "per_source_speedup.png",
+      "title": "Speedup (dense_time / model_time; higher is better)",
+      "x_axis_label": "Source",
+      "y_axis_label": "Speedup",
+      "series": ["baseline", "pruned"],
+      "data": {
+        "wikitext2": {
+          "baseline": 1.00,
+          "pruned": 1.48
+        },
+        "gsm8k": {
+          "baseline": 1.00,
+          "pruned": 1.46
+        },
+        "boolq": {
+          "baseline": 1.00,
+          "pruned": 1.48
+        },
+        "mmlu": {
+          "baseline": 1.00,
+          "pruned": 1.47
+        },
+        "mbpp": {
+          "baseline": 1.00,
+          "pruned": 1.47
+        }
+      }
+    },
+    {
+      "file_name": "per_source_token_throughput.png",
+      "title": "Token throughput (higher is better)",
+      "x_axis_label": "Source",
+      "y_axis_label": "New tokens / second",
+      "series": ["baseline", "pruned"],
+      "data": {
+        "wikitext2": {
+          "baseline": 38.22,
+          "pruned": 57.64
+        },
+        "gsm8k": {
+          "baseline": 39.34,
+          "pruned": 58.79
+        },
+        "boolq": {
+          "baseline": 38.21,
+          "pruned": 57.85
+        },
+        "mmlu": {
+          "baseline": 39.52,
+          "pruned": 59.20
+        },
+        "mbpp": {
+          "baseline": 39.80,
+          "pruned": 58.93
+        }
+      }
+    },
+    {
+      "file_name": "perplexity_per_action_test.png",
+      "title": "Average Perplexity per Pruning Action",
+      "x_axis_label": "Pruning Action",
+      "y_axis_label": "Average PPL",
+      "data": [
+        {
+          "pruning_action": "transformer_layers 0.12",
+          "value": 1.7
+        },
+        {
+          "pruning_action": "transformer_layers 0.19",
+          "value": 2.4
+        },
+        {
+          "pruning_action": "transformer_layers 0.44",
+          "value": 5.7
+        },
+        {
+          "pruning_action": "transformer_layers 0.5",
+          "value": 11.2
+        },
+        {
+          "pruning_action": "attention_heads 0.25",
+          "value": 4.1
+        }
+      ],
+      "note": "Values are visually approximated from the chart."
+    },
+    {
+      "file_name": "pruning_action_usage.png",
+      "title": "Pruning Action Usage Counts",
+      "x_axis_label": "Pruning Action",
+      "y_axis_label": "Usage Count",
+      "data": [
+        {
+          "pruning_action": "transformer_layers 0.12",
+          "value": 180
+        },
+        {
+          "pruning_action": "transformer_layers 0.19",
+          "value": 70
+        },
+        {
+          "pruning_action": "transformer_layers 0.44",
+          "value": 780
+        },
+        {
+          "pruning_action": "transformer_layers 0.5",
+          "value": 975
+        },
+        {
+          "pruning_action": "attention_heads 0.25",
+          "value": 0
+        }
+      ],
+      "note": "Values are visually approximated from the chart."
+    }
+  ]
+}

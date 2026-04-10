@@ -1,0 +1,128 @@
+{
+  "performance_benchmarks_by_dataset": {
+    "inference_time_per_prompt": {
+      "title": "Inference time per prompt (lower is better)",
+      "unit": "Seconds",
+      "data": {
+        "wikitext2": { "baseline": 1.653, "pruned": 1.326 },
+        "gsm8k": { "baseline": 1.596, "pruned": 1.309 },
+        "boolq": { "baseline": 1.616, "pruned": 1.322 },
+        "mmlu": { "baseline": 1.599, "pruned": 1.304 },
+        "mbpp": { "baseline": 1.608, "pruned": 1.324 }
+      }
+    },
+    "perplexity": {
+      "title": "Perplexity (lower is better)",
+      "unit": "PPL",
+      "data": {
+        "wikitext2": { "baseline": 2.61, "pruned": 5.64 },
+        "gsm8k": { "baseline": 2.23, "pruned": 2.47 },
+        "boolq": { "baseline": 1.87, "pruned": 3.10 },
+        "mmlu": { "baseline": 2.99, "pruned": 3.36 },
+        "mbpp": { "baseline": 1.82, "pruned": 3.38 }
+      }
+    },
+    "speedup": {
+      "title": "Speedup (dense_time / model_time; higher is better)",
+      "data": {
+        "wikitext2": { "baseline": 1.00, "pruned": 1.25 },
+        "gsm8k": { "baseline": 1.00, "pruned": 1.22 },
+        "boolq": { "baseline": 1.00, "pruned": 1.22 },
+        "mmlu": { "baseline": 1.00, "pruned": 1.23 },
+        "mbpp": { "baseline": 1.00, "pruned": 1.21 }
+      }
+    },
+    "token_throughput": {
+      "title": "Token throughput (higher is better)",
+      "unit": "New tokens / second",
+      "data": {
+        "wikitext2": { "baseline": 32.42, "pruned": 41.08 },
+        "gsm8k": { "baseline": 33.23, "pruned": 41.79 },
+        "boolq": { "baseline": 32.69, "pruned": 41.57 },
+        "mmlu": { "baseline": 33.21, "pruned": 42.08 },
+        "mbpp": { "baseline": 33.42, "pruned": 42.01 }
+      }
+    }
+  },
+  "pruning_action_metrics": {
+    "average_inference_time_per_action": {
+      "title": "Average Inference Time per Pruning Action",
+      "unit": "ms",
+      "estimated_data": {
+        "none 0.0": 1625,
+        "transformer_layers 0.06": 1540,
+        "transformer_layers 0.12": 1480,
+        "transformer_layers 0.19": 1410,
+        "transformer_layers 0.25": 1330,
+        "transformer_layers 0.31": 1205,
+        "transformer_layers 0.38": 1125,
+        "transformer_layers 0.44": 1145,
+        "transformer_layers 0.5": 1015,
+        "transformer_layers 0.56": 1065,
+        "transformer_layers 0.62": 905,
+        "attention_heads 0.125": 1555,
+        "attention_heads 0.25": 1510,
+        "attention_heads 0.375": 1495,
+        "attention_heads 0.5": 1630,
+        "attention_heads 0.625": 1560,
+        "attention_heads 0.75": 1505
+      }
+    },
+    "average_perplexity_per_action": {
+      "title": "Average Perplexity per Pruning Action",
+      "unit": "Average PPL",
+      "estimated_data": {
+        "none 0.0": 2.1,
+        "transformer_layers 0.06": 1.7,
+        "transformer_layers 0.12": 1.7,
+        "transformer_layers 0.19": 2.8,
+        "transformer_layers 0.25": 4.6,
+        "transformer_layers 0.31": 9.6,
+        "transformer_layers 0.38": 12.2,
+        "transformer_layers 0.44": 15.5,
+        "transformer_layers 0.5": 17.2,
+        "transformer_layers 0.56": 14.8,
+        "transformer_layers 0.62": 28.2,
+        "attention_heads 0.125": 2.6,
+        "attention_heads 0.25": 3.1,
+        "attention_heads 0.375": 3.3,
+        "attention_heads 0.5": 3.8,
+        "attention_heads 0.625": 9.2,
+        "attention_heads 0.75": 5.4
+      }
+    },
+    "pruning_action_usage_counts": {
+      "title": "Pruning Action Usage Counts",
+      "unit": "Usage Count",
+      "estimated_data": {
+        "none 0.0": 270,
+        "transformer_layers 0.06": 710,
+        "transformer_layers 0.12": 1650,
+        "transformer_layers 0.19": 650,
+        "transformer_layers 0.25": 455,
+        "transformer_layers 0.31": 200,
+        "transformer_layers 0.38": 160,
+        "transformer_layers 0.44": 1070,
+        "transformer_layers 0.5": 580,
+        "transformer_layers 0.56": 855,
+        "transformer_layers 0.62": 180,
+        "attention_heads 0.125": 195,
+        "attention_heads 0.25": 210,
+        "attention_heads 0.375": 220,
+        "attention_heads 0.5": 170,
+        "attention_heads 0.625": 215,
+        "attention_heads 0.75": 170
+      }
+    }
+  },
+  "baseline_performance": {
+    "zero_shot_accuracy": {
+      "title": "Pre-Training Zero-Shot Accuracy (Dense Model)",
+      "unit": "Percentage (%)",
+      "data": {
+        "BOOLQ": 54.5,
+        "MMLU": 38.5
+      }
+    }
+  }
+}

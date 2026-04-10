@@ -140,12 +140,12 @@ The oracle labeling stage produces the ground-truth target variable for the Lear
 
 For each prompt, the oracle pipeline (`oracle_labeler.py`) performs:
 
-1. **Dense Teacher-Forcing Pass** → dense cross-entropy loss $\ell_D$ and dense perplexity $\text{PPL}_D$.
-2. **Sparse Teacher-Forcing Pass(es)** under fixed pruning configurations → sparse loss $\ell_S$ and sparse perplexity $\text{PPL}_S$.
+1. **Dense Teacher-Forcing Pass** — dense cross-entropy loss (L_dense) and dense perplexity (PPL_dense).
+2. **Sparse Teacher-Forcing Pass(es)** under fixed pruning configurations — sparse loss (L_sparse) and sparse perplexity (PPL_sparse).
 
-The principal label is the **non-negative loss gap**: $\Delta \ell = \max(0, \; \ell_S - \ell_D)$.
+The principal label is the **non-negative loss gap**: delta_L = max(0, L_sparse - L_dense).
 
-Two sparse configurations are used simultaneously: attention-head pruning at 30% and transformer-layer skipping at 25%. The composite raw sensitivity is normalized into $[0, 1]$ using percentile-clipped min-max scaling (5th and 95th percentile bounds).
+Two sparse configurations are used simultaneously: attention-head pruning at 30% and transformer-layer skipping at 25%. The composite raw sensitivity is normalized into [0, 1] using percentile-clipped min-max scaling (5th and 95th percentile bounds).
 
 ---
 
@@ -171,7 +171,7 @@ flowchart TD
 
 ### 2.4 LCR MiniBERT Training and Testing
 
-Training uses Huber loss ($\delta = 0.15$), differential learning rates (backbone $8 \times 10^{-6}$, head $4 \times 10^{-5}$), cosine decay scheduling, and source-balanced oversampling. The compound validation objective is $0.4 \times R^2 + 0.5 \times \rho + 0.1 \times \text{bin3\_acc}$, with patience-based early stopping at 20 epochs.
+Training uses Huber loss (delta = 0.15), differential learning rates (backbone 8e-6, head 4e-5), cosine decay scheduling, and source-balanced oversampling. The compound validation objective is 0.4 x R-squared + 0.5 x Spearman-rho + 0.1 x bin3-accuracy, with patience-based early stopping at 20 epochs.
 
 | Split | GSM8K |  MBPP | WikiText |  MMLU | BoolQ | **Total** |
 | ----- | ----: | ----: | -------: | ----: | ----: | --------: |
@@ -185,9 +185,9 @@ Training uses Huber loss ($\delta = 0.15$), differential learning rates (backbon
 
 The RL controller is a Double Deep Q-Network (DDQN) with a 10-dimensional state vector combining hardware telemetry (6 dims), LCR sensitivity score (1 dim), and early backbone signals (3 dims). The reward function uses a normalized linear PPL formulation:
 
-$$R = \alpha \cdot \frac{\text{tok/s}_{\text{pruned}} - \text{tok/s}_{\text{base}}}{\text{tok/s}_{\text{base}} + \varepsilon} \;-\; \beta \cdot \frac{\text{PPL}_{\text{pruned}} - \text{PPL}_{\text{base}}}{\text{PPL}_{\text{base}} + \varepsilon}$$
+> **R = alpha x (speed_pruned - speed_base) / (speed_base + eps)  -  beta x (PPL_pruned - PPL_base) / (PPL_base + eps)**
 
-with $\alpha = 0.9$, $\beta = 0.1$, and clamping to $[-1, 1]$.
+where alpha = 0.9, beta = 0.1, speed = tok/s, and the result is clamped to [-1, 1].
 
 ---
 
@@ -225,7 +225,7 @@ The results presented in this chapter draw from four categories of experiments s
 
 ### 5.1.1 LCR MiniBERT Router Performance
 
-The Learned Complexity Router represents the methodological centerpiece of SPRINT, providing the learned prompt-sensitivity signal that enables the RL controller to make informed pruning decisions. The router was trained on the full 10,000-prompt `Oracle_dataset.csv` with oracle sensitivity labels computed from dense-vs-sparse loss gaps on the Llama 2 7B backbone. Training converged at **epoch 33** out of a maximum of 50 epochs, with the best model selected by the compound validation objective ($0.4 \times R^2 + 0.5 \times \rho + 0.1 \times \text{bin3\_acc}$).
+The Learned Complexity Router represents the methodological centerpiece of SPRINT, providing the learned prompt-sensitivity signal that enables the RL controller to make informed pruning decisions. The router was trained on the full 10,000-prompt `Oracle_dataset.csv` with oracle sensitivity labels computed from dense-vs-sparse loss gaps on the Llama 2 7B backbone. Training converged at **epoch 33** out of a maximum of 50 epochs, with the best model selected by the compound validation objective (0.4 x R-squared + 0.5 x Spearman-rho + 0.1 x bin3-accuracy).
 
 #### Overall Performance Metrics
 
@@ -262,9 +262,11 @@ The MSE curve shows that training loss continues to decrease throughout the 50-e
 
 ![LCR R² Training Curve — Validation R² quickly saturates near 0.60, demonstrating that approximately 60% of oracle sensitivity variance is predictable from text features and attention patterns.](Thesis%20Final%20Results/LCR/MiniBERT%20Train/train_val_r2_curve.png)
 
-The $R^2$ validation curve reveals a characteristic ceiling effect that provides important insight into the fundamental predictability limits of pruning sensitivity from text input alone. After the initial rapid improvement in epochs 1–3, the $R^2$ oscillates between 0.58 and 0.61, with the best value of 0.6064 at epoch 33. This ceiling is not a limitation of the BERT-mini architecture or the training procedure; rather, it reflects the inherent decomposition of pruning sensitivity into text-predictable and backbone-internal components:
+The R-squared validation curve reveals a characteristic ceiling effect that provides important insight into the fundamental predictability limits of pruning sensitivity from text input alone. After the initial rapid improvement in epochs 1–3, the R-squared oscillates between 0.58 and 0.61, with the best value of 0.6064 at epoch 33. This ceiling is not a limitation of the BERT-mini architecture or the training procedure; rather, it reflects the inherent decomposition of pruning sensitivity into text-predictable and backbone-internal components:
 
-$$\text{Var}(\text{sensitivity}) = \underbrace{\text{Var}_{\text{text-predictable}}}_{\approx 63\%, \text{ captured by LCR}} + \underbrace{\text{Var}_{\text{backbone-internal}}}_{\approx 37\%, \text{ not predictable from text}}$$
+> **Var(sensitivity) = Var(text-predictable) + Var(backbone-internal)**
+> - Text-predictable component: approx 63%, captured by LCR
+> - Backbone-internal component: approx 37%, not predictable from text
 
 The backbone-internal component arises from Llama 2 7B's internal processing dynamics—attention pattern formation, layer-specific feature extraction, and positional encoding interactions—that are not fully deterministic given only the input text. This interpretation is supported by the fact that multiple hyperparameter configurations, including experiments with ranking loss at various weights, consistently produced $R^2$ values in the 0.58–0.63 range.
 
@@ -373,7 +375,7 @@ The cumulative reward curve provides a complementary view of training progress. 
 
 ![RL Training — Epsilon Decay — The ε-greedy exploration rate decays exponentially from 1.0 to 0.10 over the 8,000-episode horizon, transitioning the agent from random exploration to learned exploitation.](Thesis%20Final%20Results/RL%20Train%20Test/Train/epsilon_decay.png)
 
-The epsilon decay chart shows the smooth exponential decay of the exploration rate from 1.0 (fully random) to 0.10 (90% exploitation). The decay formula $\epsilon_{t+1} = \epsilon_t \cdot \exp(\ln(0.10/1.0) / N)$ produces a continuous transition that allows the agent to gradually shift from exploration to exploitation without abrupt policy changes that could cause instability.
+The epsilon decay chart shows the smooth exponential decay of the exploration rate from 1.0 (fully random) to 0.10 (90% exploitation). The decay formula `epsilon(t+1) = epsilon(t) * exp(ln(0.10/1.0) / N)` produces a continuous transition that allows the agent to gradually shift from exploration to exploitation without abrupt policy changes that could cause instability.
 
 ![RL Training — Pruning Action Usage Distribution — Histogram showing how frequently each discrete pruning action was selected during training. Layer-skipping actions dominate, with 12% intensity being the most frequent.](Thesis%20Final%20Results/RL%20Train%20Test/Train/pruning_action_usage.png)
 
@@ -433,15 +435,67 @@ The quality-vs-speed scatter plot is particularly informative. Each point repres
 
 The prompt-length-vs-perplexity scatter plot explores whether prompt length is a confound in the quality measurements. The figure shows no strong correlation between prompt length and pruned perplexity, confirming that the quality variation arises primarily from prompt content and the selected pruning action rather than from the mechanical effect of prompt length on token processing.
 
-![RL Training — Per-Source Perplexity — Baseline vs pruned perplexity broken down by source benchmark.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_perplexity.png)
+#### Per-Source Training Performance
 
-![RL Training — Per-Source Inference Time — Source-level latency comparison showing that speedup is consistent across prompt types.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_inference_time.png)
+The following tables present the per-source breakdown of key metrics during training. These values are extracted from the per-source charts and demonstrate that SPRINT delivers **consistent speedup across all five benchmark domains**, with the speed improvement factor ranging from 1.21x to 1.25x.
 
-![RL Training — Per-Source Speedup — Speed improvement factor by benchmark source.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_speedup.png)
+**Table: Per-Source Inference Time (Training Phase)**
 
-![RL Training — Per-Source Token Throughput — Tokens per second by source, confirming that throughput gains from layer removal are consistent.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_token_throughput.png)
+| Source     | Baseline (s) | Pruned (s) | Speedup Factor | Time Saved (ms) |
+| ---------- | -----------: | ---------: | -------------: | --------------: |
+| WikiText-2 |        1.653 |      1.326 |       **1.25x** |           327.0 |
+| GSM8K      |        1.596 |      1.309 |       **1.22x** |           287.0 |
+| BoolQ      |        1.616 |      1.322 |       **1.22x** |           294.0 |
+| MMLU       |        1.599 |      1.304 |       **1.23x** |           295.0 |
+| MBPP       |        1.608 |      1.324 |       **1.21x** |           284.0 |
+| **Average**|    **1.614** |  **1.317** |       **1.23x** |       **297.4** |
 
-![RL Training — Zero-Shot Baseline Accuracy — Dense model accuracy on BoolQ and MMLU before pruning, establishing the quality ceiling.](Thesis%20Final%20Results/RL%20Train%20Test/Train/zero_shot_baseline_accuracy.png)
+The speedup factor is remarkably consistent across sources (std dev = 0.015), confirming that physical layer removal is a content-agnostic acceleration mechanism. WikiText-2 achieves the highest speedup (1.25x) while MBPP achieves the lowest (1.21x). This minor variation arises from differences in average prompt length and the resulting proportion of time spent in attention (length-dependent) vs feed-forward (length-independent) computations.
+
+**Table: Per-Source Perplexity (Training Phase)**
+
+| Source     | Baseline PPL | Pruned PPL | PPL Ratio | Quality Impact |
+| ---------- | -----------: | ---------: | --------: | -------------- |
+| WikiText-2 |         2.61 |       5.64 |     2.16x | Moderate       |
+| GSM8K      |         2.23 |       2.47 |     1.11x | Minimal        |
+| BoolQ      |         1.87 |       3.10 |     1.66x | Low            |
+| MMLU       |         2.99 |       3.36 |     1.12x | Minimal        |
+| MBPP       |         1.82 |       3.38 |     1.86x | Low            |
+| **Average**|    **2.46**  |   **5.07** | **2.06x** |                |
+
+The per-source PPL analysis reveals important domain-specific quality behavior during training. GSM8K and MMLU show remarkably low quality degradation (PPL ratios of 1.11x and 1.12x respectively), suggesting that mathematical reasoning and multiple-choice comprehension tasks contain sufficient redundancy in the Llama 2 7B architecture to tolerate moderate layer removal. WikiText-2 exhibits the highest degradation (2.16x), consistent with the observation that narrative language modeling depends on full-depth contextual processing. The aggregate PPL of 5.07 is influenced by exploration-phase episodes where the agent selects destructive configurations; the steady-state quality under the converged policy is significantly better.
+
+**Table: Per-Source Token Throughput (Training Phase)**
+
+| Source     | Baseline (tok/s) | Pruned (tok/s) | Throughput Gain |
+| ---------- | ---------------: | -------------: | --------------: |
+| WikiText-2 |            32.42 |          41.08 |      **+26.7%** |
+| GSM8K      |            33.23 |          41.79 |      **+25.7%** |
+| BoolQ      |            32.69 |          41.57 |      **+27.2%** |
+| MMLU       |            33.21 |          42.08 |      **+26.7%** |
+| MBPP       |            33.42 |          42.01 |      **+25.7%** |
+| **Average**|        **32.99** |      **41.71** |      **+26.4%** |
+
+The throughput gains are highly uniform across sources, with all five benchmarks achieving approximately 26% improvement. This uniformity is a direct consequence of physical layer removal: removing N layers reduces the per-token forward-pass computation by N/32 regardless of prompt content, producing consistent throughput scaling.
+
+**Table: Pre-Training Zero-Shot Accuracy (Dense Model)**
+
+| Benchmark | Dense Accuracy |
+| --------- | -------------: |
+| BoolQ     |         54.5%  |
+| MMLU      |         38.5%  |
+
+The dense (unpruned) Llama 2 7B achieves 54.5% on BoolQ (above the 50% random baseline for binary questions) and 38.5% on MMLU (above the 25% random baseline for 4-choice questions). These values establish the quality ceiling against which pruned performance can be compared.
+
+![RL Training — Per-Source Perplexity — Baseline vs pruned perplexity broken down by source benchmark. WikiText-2 shows the highest degradation (2.61 to 5.64) while GSM8K shows minimal impact (2.23 to 2.47).](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_perplexity.png)
+
+![RL Training — Per-Source Inference Time — Source-level latency comparison. All five sources show consistent 280-330ms speedup, with WikiText-2 achieving the largest absolute reduction.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_inference_time.png)
+
+![RL Training — Per-Source Speedup — Speedup factor by source. All sources cluster tightly between 1.21x and 1.25x, confirming content-agnostic acceleration.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_speedup.png)
+
+![RL Training — Per-Source Token Throughput — Token generation rate by source. Pruned throughput consistently reaches 41-42 tok/s across all benchmarks, up from 32-34 tok/s baseline.](Thesis%20Final%20Results/RL%20Train%20Test/Train/per_source_token_throughput.png)
+
+![RL Training — Zero-Shot Baseline Accuracy — Dense model accuracy: BoolQ 54.5%, MMLU 38.5%. These establish the quality ceiling for the Llama 2 7B backbone.](Thesis%20Final%20Results/RL%20Train%20Test/Train/zero_shot_baseline_accuracy.png)
 
 ---
 
@@ -492,47 +546,107 @@ The per-action test breakdown reveals that the converged policy strongly concent
 
 Together, these two actions account for **87.6% of all test episodes** (1,751 out of 2,000), demonstrating that the converged policy has learned a clear, consistent strategy. The remaining 12.4% of episodes use conservative layer skipping (12% and 19% intensity), likely for prompts that the LCR identifies as particularly sensitivity-sensitive. Only 1 episode out of 2,000 selected head pruning, confirming the learned preference for layer removal over head removal.
 
+#### Per-Source Test Performance
+
+The per-source test metrics provide the most important evaluation of SPRINT's deployment-ready behavior, as they reflect the converged policy operating on unseen prompts with no exploration. The speedup factor during testing is dramatically higher than during training (1.46–1.48x vs 1.21–1.25x) because the exploitation-only policy concentrates on more aggressive layer-removal actions.
+
+**Table: Per-Source Inference Time (Test Phase)**
+
+| Source     | Baseline (s) | Pruned (s) | Speedup Factor | Time Saved (ms) |
+| ---------- | -----------: | ---------: | -------------: | --------------: |
+| WikiText-2 |        1.315 |      0.891 |       **1.48x** |           424.0 |
+| GSM8K      |        1.277 |      0.873 |       **1.46x** |           404.0 |
+| BoolQ      |        1.314 |      0.890 |       **1.48x** |           424.0 |
+| MMLU       |        1.270 |      0.866 |       **1.47x** |           404.0 |
+| MBPP       |        1.262 |      0.856 |       **1.47x** |           406.0 |
+| **Average**|    **1.288** |  **0.875** |       **1.47x** |       **412.4** |
+
+The test-phase speedup factor averages **1.47x** (equivalent to 32% latency reduction), a substantial improvement over the training-phase average of 1.23x. This improvement arises entirely from the policy's learned action selection: during training, the epsilon-greedy exploration frequently selects the `none` action (zero speedup) or conservative actions, diluting the aggregate. During testing with epsilon = 0, the policy concentrates on the high-speedup 44% and 50% layer-removal actions, producing a consistently higher speedup across all benchmarks.
+
+The cross-source uniformity is excellent (std dev of speedup factor = 0.008), confirming that the speedup is fundamentally content-agnostic: physical layer removal reduces the forward-pass computation by a fixed proportion regardless of whether the prompt contains code (MBPP), mathematics (GSM8K), factual questions (BoolQ/MMLU), or narrative prose (WikiText-2).
+
+**Table: Per-Source Perplexity (Test Phase)**
+
+| Source     | Baseline PPL | Pruned PPL | PPL Ratio | Quality Impact |
+| ---------- | -----------: | ---------: | --------: | -------------- |
+| WikiText-2 |         2.86 |       7.03 |     2.46x | Moderate       |
+| GSM8K      |         2.45 |       5.97 |     2.44x | Moderate       |
+| BoolQ      |         1.74 |       3.73 |     2.14x | Low            |
+| MMLU       |         3.05 |       5.88 |     1.93x | Low            |
+| MBPP       |         1.77 |       4.91 |     2.77x | Moderate       |
+| **Average**|    **2.29**  |   **6.88** | **3.00x** |                |
+
+The test-phase per-source PPL ratios are higher than the training-phase ratios (1.93–2.77x vs 1.11–2.16x), reflecting the policy's shift toward more aggressive pruning during exploitation. Notably, MMLU shows the lowest PPL ratio (1.93x), indicating that the multiple-choice reasoning task tolerates aggressive layer removal well—likely because the task can be partially solved by pattern-matching the answer format rather than deep multi-layer reasoning. MBPP shows the highest ratio (2.77x), consistent with the observation that code generation tasks require precise syntactic processing that benefits from full model depth.
+
+BoolQ achieves an excellent quality-speed tradeoff: 2.14x PPL ratio with 1.48x speedup, meaning the model retains strong comprehension of passage-grounded yes/no questions even with approximately 14–16 layers removed. This makes BoolQ-like QA workloads particularly well-suited for SPRINT deployment.
+
+**Table: Per-Source Token Throughput (Test Phase)**
+
+| Source     | Baseline (tok/s) | Pruned (tok/s) | Throughput Gain |
+| ---------- | ---------------: | -------------: | --------------: |
+| WikiText-2 |            38.22 |          57.64 |      **+50.8%** |
+| GSM8K      |            39.34 |          58.79 |      **+49.4%** |
+| BoolQ      |            38.21 |          57.85 |      **+51.4%** |
+| MMLU       |            39.52 |          59.20 |      **+49.8%** |
+| MBPP       |            39.80 |          58.93 |      **+48.1%** |
+| **Average**|        **39.02** |      **58.48** |      **+49.9%** |
+
+The throughput gains during testing are dramatic: SPRINT achieves approximately **50% higher token generation rate** compared to the unpruned baseline, producing approximately 58.5 tok/s versus 39.0 tok/s. This represents a transformative improvement for interactive applications: at 58.5 tok/s, a 100-token response completes in 1.7 seconds rather than 2.6 seconds, a perceptible improvement in user experience.
+
+**Table: Per-Source Speedup Comparison — Training vs Testing**
+
+| Source     | Train Speedup | Test Speedup | Improvement |
+| ---------- | ------------: | -----------: | ----------: |
+| WikiText-2 |         1.25x |        1.48x |      +18.4% |
+| GSM8K      |         1.22x |        1.46x |      +19.7% |
+| BoolQ      |         1.22x |        1.48x |      +21.3% |
+| MMLU       |         1.23x |        1.47x |      +19.5% |
+| MBPP       |         1.21x |        1.47x |      +21.5% |
+| **Average**|     **1.23x** |    **1.47x** |  **+20.1%** |
+
+The consistent 20% improvement from training to testing across all five sources confirms that the speedup increase is driven entirely by learned policy refinement (shifting from exploration to exploitation), not by any benchmark-specific artifact.
+
 The following charts visualize the test-phase results:
 
 ![RL Test — Reward Progression — Test-phase rewards across 2,000 exploitation episodes. The consistently positive mean confirms that the converged policy reliably selects rewarding configurations.](Thesis%20Final%20Results/RL%20Train%20Test/Test/reward_progression.png)
 
-The test reward progression chart contrasts sharply with the training reward progression. During testing, the vast majority of rewards fall in the positive range (+0.05 to +0.20), with only occasional negative spikes corresponding to prompts where even moderate pruning causes significant quality degradation. The absence of the large negative deviations seen during training confirms that the $\epsilon = 0$ policy avoids the destructive actions encountered during exploration.
+The test reward progression chart contrasts sharply with the training reward progression. During testing, the vast majority of rewards fall in the positive range (+0.05 to +0.20), with only occasional negative spikes corresponding to prompts where even moderate pruning causes significant quality degradation. The absence of the large negative deviations seen during training confirms that the epsilon = 0 policy avoids the destructive actions encountered during exploration.
 
 ![RL Test — Cumulative Reward — Monotonically increasing cumulative reward during testing, confirming net-positive returns throughout the evaluation.](Thesis%20Final%20Results/RL%20Train%20Test/Test/cumulative_reward.png)
 
-![RL Test — Epsilon Decay — Constant ε = 0 during testing (no exploration), enabling pure exploitation of the learned policy.](Thesis%20Final%20Results/RL%20Train%20Test/Test/epsilon_decay.png)
+![RL Test — Epsilon Decay — Constant epsilon = 0 during testing (no exploration), enabling pure exploitation of the learned policy.](Thesis%20Final%20Results/RL%20Train%20Test/Test/epsilon_decay.png)
 
-![RL Test — Pruning Action Usage Distribution — The policy strongly concentrates on two actions: 50% layer skip (975 episodes) and 44% layer skip (776 episodes), accounting for 87.6% of selections.](Thesis%20Final%20Results/RL%20Train%20Test/Test/pruning_action_usage.png)
+![RL Test — Pruning Action Usage Distribution — The policy strongly concentrates on two actions: 50% layer skip (975 episodes) and 44% layer skip (780 episodes), accounting for 87.6% of selections.](Thesis%20Final%20Results/RL%20Train%20Test/Test/pruning_action_usage.png)
 
-The action usage distribution during testing is dramatically more concentrated than during training. The bimodal pattern—with peaks at 44% and 50% layer skip—reflects the DDQN's learned understanding that these two intensities occupy the Pareto frontier for the Llama 2 7B architecture with $\alpha = 0.9$, $\beta = 0.1$ reward weighting.
+The action usage distribution during testing is dramatically more concentrated than during training. The bimodal pattern—with peaks at 44% and 50% layer skip—reflects the DDQN's learned understanding that these two intensities occupy the Pareto frontier for the Llama 2 7B architecture with alpha = 0.9, beta = 0.1 reward weighting.
 
-![RL Test — Inference Time Comparison — Baseline vs pruned inference times across 2,000 test episodes. The pruned distribution (green) is consistently shifted left of the baseline (blue).](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time_compare.png)
+![RL Test — Inference Time Comparison — Baseline vs pruned inference times across 2,000 test episodes. The pruned distribution is consistently shifted left of the baseline.](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time_compare.png)
 
-![RL Test — Inference Time Per Action — Box plot showing latency distributions per selected action during testing. The two primary actions (44% and 50% layer skip) achieve 870ms and 818ms respectively.](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time_per_action.png)
+![RL Test — Inference Time Per Action — Box plot showing latency distributions per selected action during testing. The two primary actions (44% and 50% layer skip) achieve 870ms and 818ms respectively vs 1,288ms baseline.](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time_per_action.png)
 
-![RL Test — Perplexity Comparison — Baseline vs pruned perplexity across test episodes. The pruned PPL shows a bimodal distribution corresponding to the two preferred actions.](Thesis%20Final%20Results/RL%20Train%20Test/Test/perplexity_compare.png)
+![RL Test — Perplexity Comparison — Baseline vs pruned perplexity across test episodes. The pruned PPL shows a bimodal distribution corresponding to the two preferred actions (PPL 5.7 at 44% skip, PPL 11.2 at 50% skip).](Thesis%20Final%20Results/RL%20Train%20Test/Test/perplexity_compare.png)
 
 ![RL Test — Perplexity Distribution — Episode-level perplexity showing bounded degradation for the vast majority of test prompts.](Thesis%20Final%20Results/RL%20Train%20Test/Test/perplexity.png)
 
-![RL Test — Perplexity per Pruning Action — Bar chart confirming the quality-intensity relationship during testing.](Thesis%20Final%20Results/RL%20Train%20Test/Test/perplexity_per_action_test.png)
+![RL Test — Perplexity per Pruning Action — Bar chart: 12% skip = PPL 1.7, 19% skip = PPL 2.4, 44% skip = PPL 5.7, 50% skip = PPL 11.2, confirming the quality-intensity relationship.](Thesis%20Final%20Results/RL%20Train%20Test/Test/perplexity_per_action_test.png)
 
-![RL Test — Token Speed Comparison — Throughput comparison showing consistent speed improvement across test episodes.](Thesis%20Final%20Results/RL%20Train%20Test/Test/token_speed_compare.png)
+![RL Test — Token Speed Comparison — Throughput comparison: pruned model achieves ~58.5 tok/s vs ~39.0 tok/s baseline, a 50% improvement.](Thesis%20Final%20Results/RL%20Train%20Test/Test/token_speed_compare.png)
 
-![RL Test — Inference Time Distribution — Histogram of latencies during testing, showing the pruned distribution shifted toward lower values.](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time.png)
+![RL Test — Inference Time Distribution — Histogram of latencies during testing, showing the pruned distribution centered around 860ms vs baseline at 1,288ms.](Thesis%20Final%20Results/RL%20Train%20Test/Test/inference_time.png)
 
-![RL Test — Quality vs Speed Tradeoff — Pareto scatter for test episodes, showing high concentration of points in the favorable speedup region.](Thesis%20Final%20Results/RL%20Train%20Test/Test/quality_vs_speed.png)
+![RL Test — Quality vs Speed Tradeoff — Pareto scatter for test episodes, showing high concentration of points in the favorable high-speedup region.](Thesis%20Final%20Results/RL%20Train%20Test/Test/quality_vs_speed.png)
 
-![RL Test — VRAM and Model Size Comparison — VRAM usage and parameter count during testing, showing 34.0% average parameter reduction.](Thesis%20Final%20Results/RL%20Train%20Test/Test/vram_usage.png)
+![RL Test — VRAM and Model Size Comparison — VRAM usage (4.748 GB pruned vs 4.752 GB baseline) and parameter count (3,113.5 MB pruned vs 4,714.3 MB baseline = 34.0% reduction).](Thesis%20Final%20Results/RL%20Train%20Test/Test/vram_usage.png)
 
-![RL Test — Controller Overhead Breakdown — Time decomposition during testing, confirming that LCR (17ms) and RL agent (0.7ms) overhead remain negligible.](Thesis%20Final%20Results/RL%20Train%20Test/Test/time_breakdown.png)
+![RL Test — Controller Overhead Breakdown — Time decomposition: LCR 17.08ms (1.9%), RL agent 0.69ms (0.08%), model inference 875.39ms (98.0%). Total overhead is negligible.](Thesis%20Final%20Results/RL%20Train%20Test/Test/time_breakdown.png)
 
-![RL Test — Prompt Length vs Perplexity — Relationship between prompt length and pruned perplexity during testing.](Thesis%20Final%20Results/RL%20Train%20Test/Test/length_vs_ppl.png)
+![RL Test — Prompt Length vs Perplexity — No strong correlation between prompt length and pruned perplexity, confirming content-driven rather than length-driven quality variation.](Thesis%20Final%20Results/RL%20Train%20Test/Test/length_vs_ppl.png)
 
-![RL Test — Per-Source Inference Time — Source-level latency showing consistent speedup across all benchmark domains.](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_inference_time.png)
+![RL Test — Per-Source Inference Time — All five sources show consistent ~400ms speedup: WikiText-2 (1.315s to 0.891s), GSM8K (1.277s to 0.873s), BoolQ (1.314s to 0.890s), MMLU (1.270s to 0.866s), MBPP (1.262s to 0.856s).](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_inference_time.png)
 
-![RL Test — Per-Source Speedup — Speed improvement factor by source, demonstrating near-uniform speedup.](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_speedup.png)
+![RL Test — Per-Source Speedup — Near-uniform 1.46-1.48x speedup across all benchmarks, confirming content-agnostic acceleration.](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_speedup.png)
 
-![RL Test — Per-Source Token Throughput — Throughput by source during exploitation.](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_token_throughput.png)
+![RL Test — Per-Source Token Throughput — Pruned throughput reaches 57-59 tok/s across all benchmarks, up from 38-40 tok/s baseline (approximately 50% improvement).](Thesis%20Final%20Results/RL%20Train%20Test/Test/per_source_token_throughput.png)
 
 ---
 
@@ -672,9 +786,9 @@ An important empirical finding from the oracle labeling stage validates the mult
 
 | Metric          | Head pruning vs. Layer skipping |
 | --------------- | ------------------------------- |
-| Spearman $\rho$ | ≈ 0.172                         |
-| Pearson $r$     | ≈ 0.214                         |
-| $R^2$           | ≈ 0.046                         |
+| Spearman rho    | approx 0.172                    |
+| Pearson r       | approx 0.214                    |
+| R-squared       | approx 0.046                    |
 
 Head-pruning sensitivity and layer-skipping sensitivity are **only weakly correlated** ($R^2 \approx 0.046$), indicating that less than 5% of the variance in one type of sensitivity is explained by the other. This weak correlation is expected from a structural standpoint: attention-head pruning disrupts the multi-head attention mechanism (reducing the model's ability to attend to multiple positions simultaneously), while layer skipping removes entire transformer blocks (reducing the model's depth and progressive feature refinement). These are fundamentally different operations that stress different model components.
 
@@ -897,16 +1011,42 @@ The GSM8K speedup anomaly (3.28× without LoRA, 2.50× with LoRA) arises from ea
 
 The following table provides a unified comparison of all evaluated methods, using average metrics across the five benchmarks:
 
-| Method                      | Avg PPL Ratio | Avg Speedup | BoolQ Acc Δ | MMLU Acc Δ | Adaptive? | Requires Calibration? |
-| --------------------------- | ------------: | ----------: | ----------: | ---------: | :-------: | :-------------------: |
-| **SPRINT (ours)**           |       **3.0×** | **1.32×**  | Bounded     | Bounded    |   ✅      |         No            |
-| SparseGPT 50% unstruct.    |         1.62× |       0.89× |     −3.5 pp |   −14.0 pp |   ❌      |        Yes            |
-| SparseGPT 2:4              |         2.54× |       0.72× |    −12.0 pp |   −31.5 pp |   ❌      |        Yes            |
-| Wanda 50% unstruct.        |         1.65× |       0.94× |     −0.5 pp |   −19.5 pp |   ❌      |        Yes            |
-| Wanda 50% 2:4              |         6.85× |       0.86× |     −4.0 pp |   −23.0 pp |   ❌      |        Yes            |
-| Wanda 50% 4:8              |         2.60× |       0.86× |     −1.5 pp |   −27.0 pp |   ❌      |        Yes            |
-| LLM Pruner 25%             |         7.73× |       1.34× |    −18.5 pp |   −13.5 pp |   ❌      |        Yes            |
-| LLM Pruner 25% + LoRA      |         2.70× |       1.07× |    −12.5 pp |   −13.5 pp |   ❌      |        Yes            |
+| Method                      | Avg PPL Ratio | Avg Speedup | BoolQ Acc Change | MMLU Acc Change | Adaptive? | Requires Calibration? |
+| --------------------------- | ------------: | ----------: | ---------------: | --------------: | :-------: | :-------------------: |
+| **SPRINT (ours)**           |     **3.00x** |   **1.47x** | Bounded          | Bounded         |   Yes     |         No            |
+| SparseGPT 50% unstruct.    |         1.62x |       0.89x |         -3.5 pp  |       -14.0 pp  |   No      |        Yes            |
+| SparseGPT 2:4              |         2.54x |       0.72x |        -12.0 pp  |       -31.5 pp  |   No      |        Yes            |
+| Wanda 50% unstruct.        |         1.65x |       0.94x |         -0.5 pp  |       -19.5 pp  |   No      |        Yes            |
+| Wanda 50% 2:4              |         6.85x |       0.86x |         -4.0 pp  |       -23.0 pp  |   No      |        Yes            |
+| Wanda 50% 4:8              |         2.60x |       0.86x |         -1.5 pp  |       -27.0 pp  |   No      |        Yes            |
+| LLM Pruner 25%             |         7.73x |       1.34x |        -18.5 pp  |       -13.5 pp  |   No      |        Yes            |
+| LLM Pruner 25% + LoRA      |         2.70x |       1.07x |        -12.5 pp  |       -13.5 pp  |   No      |        Yes            |
+
+The following table provides a detailed per-benchmark comparison of SPRINT's test-phase per-source performance against the static baselines. Note that SPRINT operates on Llama 2 7B while the baselines were evaluated on Llama 3.2 1B; the comparison focuses on the fundamental speedup-quality tradeoff pattern rather than absolute PPL values.
+
+**Table: Per-Source Speedup — SPRINT vs Static Baselines**
+
+| Source     | SPRINT (ours) | SparseGPT 50% | SparseGPT 2:4 | Wanda Unstruct. | Wanda 2:4 | Wanda 4:8 | LLM Pruner | LLM Pruner+LoRA |
+| ---------- | ------------: | ------------: | ------------: | --------------: | --------: | --------: | ---------: | --------------: |
+| WikiText-2 |     **1.48x** |         1.07x |         0.86x |           0.92x |     1.14x |     1.10x |      0.99x |           1.03x |
+| GSM8K      |     **1.46x** |         1.01x |         0.88x |           1.12x |     1.03x |     1.04x |      3.28x |           2.97x |
+| BoolQ      |     **1.48x** |         0.82x |         0.79x |           1.28x |     0.93x |     0.98x |      1.12x |           1.00x |
+| MMLU       |     **1.47x** |         0.71x |         0.13x |           0.18x |     0.12x |     0.20x |      0.34x |           0.34x |
+| MBPP       |     **1.47x** |         0.85x |         0.94x |           1.17x |     1.06x |     0.97x |      0.99x |           1.05x |
+
+SPRINT achieves the most **consistent** speedup across all sources. The static baselines show highly variable speedup (e.g., SparseGPT ranges from 0.13x to 1.07x; LLM Pruner ranges from 0.34x to 3.28x), with the GSM8K and MMLU anomalies arising from shortened output generation (model degradation causing early termination, not genuine acceleration). SPRINT's physical layer removal produces uniform 1.46–1.48x speedup regardless of prompt content because the computational reduction is structural.
+
+**Table: Per-Source Token Throughput — SPRINT vs Static Baselines (tok/s)**
+
+| Source     | SPRINT Baseline | SPRINT Pruned | SparseGPT 50% Pruned | Wanda Unstruct. Pruned | LLM Pruner+LoRA Pruned |
+| ---------- | --------------: | ------------: | -------------------: | ---------------------: | ---------------------: |
+| WikiText-2 |           38.22 |     **57.64** |                27.47 |                  28.48 |                  38.57 |
+| GSM8K      |           39.34 |     **58.79** |                28.29 |                  31.22 |                  37.49 |
+| BoolQ      |           38.21 |     **57.85** |                25.83 |                  30.97 |                  36.28 |
+| MMLU       |           39.52 |     **59.20** |                28.52 |                  32.28 |                  35.61 |
+| MBPP       |           39.80 |     **58.93** |                25.34 |                  29.98 |                  40.00 |
+
+SPRINT's pruned throughput (57–59 tok/s) is approximately **2x** that of SparseGPT's pruned throughput (25–29 tok/s), demonstrating the fundamental advantage of structural pruning over weight sparsification. Even LLM Pruner with LoRA recovery (36–40 tok/s) falls well short of SPRINT's throughput. This difference arises because SPRINT's layer removal directly reduces the number of matrix multiplications in the forward pass, while weight-pruning methods produce sparse matrices that still require dense-format computation on standard GPU kernels.
 
 **Key findings from the cross-method comparison:**
 

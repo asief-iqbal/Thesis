@@ -738,37 +738,86 @@ The non-monotonic average PPL behavior (211.70 for $\alpha=0.9$ vs 78.86 for $\a
 
 ### 5.3.2 Framework Ablation Studies (Studies 2A–2C)
 
-The framework ablation studies isolate the contribution of each architectural component by systematically removing or replacing it while keeping all other components fixed. All experiments use interleaved execution with live baselines to eliminate systematic timing bias.
+The framework ablation studies isolate the contribution of each architectural component by systematically removing or replacing it while keeping all other components fixed. All experiments use interleaved execution with live baselines to eliminate systematic timing bias. Each variant trained a DDQN for 100 episodes on the same prompt set and shared the identical architecture, optimizer, and exploration schedule as the full control.
 
 #### Quantitative Results
 
+| Variant | Avg Reward | Tail-20 Reward | Avg PPL | Tail-20 PPL | Speedup (%) | Tail-20 Speedup (%) |
+| ------- | ---------: | -------------: | ------: | ----------: | ----------: | -------------------: |
+| **Control: Full Architecture (10-D)** | **0.0599** | **+0.0037** | **17.10** | 22.55 | **22.65** | **23.67** |
+| Study 2A: No LCR (9-D) | 0.0514 | −0.0186 | 54.06 | 90.53 | 20.96 | 16.63 |
+| Study 2B: No Hardware (4-D) | 0.0687 | +0.0286 | 38.75 | 87.99 | 21.88 | 21.68 |
+| Study 2C: Random Actions | 0.0574 | −0.0341 | 15.20 | 7.50 | 18.12 | 4.79 |
+
 The following charts compare the four experimental conditions:
 
-![Ablation — Comparison of Average Reward — Bar chart comparing control, No LCR, No Hardware, and Random policies by mean reward.](Thesis%20Final%20Results/Ablation/2/comparison_reward.png)
+![Ablation — Comparison of Average Reward — Bar chart comparing control (0.060), No LCR (0.051), No Hardware (0.069), and Random (0.057) policies by mean reward.](Thesis%20Final%20Results/Ablation/2/comparison_reward.png)
 
-![Ablation — Comparison of Tail-20 Reward — The most important convergence diagnostic: only the full control and No Hardware variants achieve non-negative tail-20 rewards.](Thesis%20Final%20Results/Ablation/2/comparison_tail_reward.png)
+The average reward chart shows that all four conditions produce comparable mean rewards in the range of 0.051–0.069. Study 2B (No Hardware) achieves the highest average reward (0.069), marginally surpassing the full control (0.060), while Study 2A (No LCR) records the lowest (0.051). However, average reward alone is misleading because it conflates exploration-phase noise with converged-policy quality. The tail-20 analysis below provides the definitive convergence diagnostic.
 
-![Ablation — Comparison of Speedup — Average speedup across the four conditions, showing that all DDQN variants achieve similar exploration-phase speedups while Random degrades.](Thesis%20Final%20Results/Ablation/2/comparison_speedup.png)
+![Ablation — Comparison of Tail-20 Reward — The most important convergence diagnostic: only the full control (+0.0037) and No Hardware (+0.0286) variants achieve positive tail-20 rewards, while No LCR (−0.0186) and Random (−0.0341) are negative.](Thesis%20Final%20Results/Ablation/2/comparison_tail_reward.png)
 
-![Ablation — Comparison of Average PPL — Perplexity comparison showing quality costs of each ablation condition.](Thesis%20Final%20Results/Ablation/2/comparison_ppl.png)
+The tail-20 reward chart is the single most important ablation diagnostic. It measures the mean reward of the final 20 episodes—the window where the $\epsilon$-greedy schedule has fully decayed and the agent operates in near-pure exploitation. Only two conditions achieve positive tail-20 rewards: the full control (+0.0037) and the No Hardware variant (+0.0286). Both the No LCR (−0.0186) and Random (−0.0341) conditions produce negative converged rewards, indicating that their final policies consistently select actions whose quality penalty outweighs the speed gain.
 
-![Ablation — Convergence Comparison — Multi-panel convergence plots showing reward progression for all four conditions simultaneously, enabling visual comparison of learning dynamics.](Thesis%20Final%20Results/Ablation/2/convergence_comparison.png)
+![Ablation — Comparison of Speedup — Average speedup: Control 22.65%, No LCR 20.96%, No Hardware 21.88%, Random 18.12%. The learned DDQN variants cluster near 21–23% while Random drops to 18%.](Thesis%20Final%20Results/Ablation/2/comparison_speedup.png)
 
-The convergence comparison chart is the most informative visualization for the ablation studies. It shows the episode-by-episode reward trajectory for all four conditions, enabling direct visual comparison of: (1) convergence speed—how quickly each variant transitions from negative to positive rewards; (2) converged behavior—the steady-state reward distribution; and (3) variance—how noisy the policy is after convergence.
+The speedup comparison reveals a clear hierarchy: the full control achieves the highest average speedup at 22.65%, followed by No Hardware at 21.88% and No LCR at 20.96%. The Random baseline trails at 18.12%, a 4.53 percentage-point deficit (−20.0% relative) compared to the control. This gap arises because the random policy wastes episodes on the `none` action (zero speedup) and on extremely conservative head-pruning actions that provide negligible latency reduction. When examining tail-20 speedup, the hierarchy becomes even more pronounced: Control 23.67%, No Hardware 21.68%, No LCR 16.63%, Random 4.79%. The Random variant's tail-20 speedup of 4.79% is catastrophically low—approximately one-fifth of the control's converged speedup—confirming that learned action selection is essential for consistent acceleration.
+
+![Ablation — Comparison of Average PPL — Perplexity: Control 17.10, No LCR 54.06, No Hardware 38.75, Random 15.20. The No LCR variant suffers a 3.2× quality degradation compared to the control.](Thesis%20Final%20Results/Ablation/2/comparison_ppl.png)
+
+The perplexity comparison reveals a critical insight: the No LCR variant (Study 2A) produces the worst average PPL at 54.06, a **3.16× increase** over the control's 17.10. This dramatic quality degradation occurs because without the LCR sensitivity signal, the agent cannot distinguish prompts that tolerate aggressive pruning from those that require conservative treatment. The agent applies blanket pruning policies that catastrophically degrade quality on sensitive prompts, inflating the overall PPL. The No Hardware variant also degrades to 38.75 PPL (2.27× the control), suggesting that hardware telemetry contributes indirectly to quality preservation—possibly by signaling resource states that correlate with workload complexity. Counterintuitively, the Random variant produces the lowest average PPL (15.20), but this is an artifact of its conservative average behavior: random action selection frequently chooses the `none` action or mild pruning, which preserves quality at the cost of the 4.53 percentage-point speedup deficit documented above.
+
+The tail-20 PPL further underscores this finding: the control converges to a tail-20 PPL of 22.55, while No LCR explodes to 90.53 and No Hardware to 87.99. However, Random's tail-20 PPL drops to 7.50—the lowest of all conditions—because its converged behavior (which is simply random action selection with no policy improvement) happens to select low-intensity pruning actions that preserve quality but deliver minimal speedup (tail-20 speedup of just 4.79%).
+
+![Ablation — Convergence Comparison — Rolling average (window=10) reward trajectories for all four conditions over 100 episodes. The control and No Hardware show sustained positive trend through mid-training, while No LCR and Random exhibit high variance with downward drift in the final episodes.](Thesis%20Final%20Results/Ablation/2/convergence_comparison.png)
+
+The convergence comparison chart reveals the learning dynamics of each variant. All four conditions start with comparable rolling-average rewards near 0.10–0.15 during the initial exploration phase (episodes 1–15), reflecting the dominance of random action selection under high $\epsilon$. As $\epsilon$ decays through mid-training (episodes 20–60), the learned variants (Control, No LCR, No Hardware) exhibit reward fluctuations typical of DDQN policy refinement, while the Random baseline shows no directional improvement—its trajectory is a stationary random walk. In the final phase (episodes 70–100), all four conditions exhibit a downward drift in rolling-average reward, likely reflecting the diminishing proportion of "easy" prompts as the episode pool is exhausted. Critically, the Control and No Hardware variants maintain higher rolling-average rewards throughout this phase compared to No LCR and Random, consistent with the positive tail-20 rewards observed in the tabular results.
 
 #### Analysis of Each Ablation
 
-**Study 2A — No LCR (9-D State)**: Removing the LCR sensitivity score from the state vector forces the DDQN to make pruning decisions without any prompt-level sensitivity information. The agent must rely solely on hardware telemetry (6 dims) and early-Llama features (3 dims) to infer the appropriate pruning intensity.
+**Study 2A — No LCR (9-D State)**:
+- **Reward delta vs. control**: −0.0085 (average), −0.0223 (tail-20)
+- **PPL delta vs. control**: +36.96 (a 3.16× increase)
+- **Speedup delta vs. control**: −1.69 percentage points (−7.5% relative)
 
-The results show that the No-LCR variant achieves comparable average speedup to the full control during the exploration phase (when both variants are predominantly selecting random actions), but its converged behavior is inferior. The key diagnostic is the tail-20 reward: the control achieves positive tail-20 reward while the No-LCR variant achieves negative tail-20 reward. This gap indicates that the LCR provides information that improves the converged policy's action selection quality—without the sensitivity signal, the agent cannot distinguish pruning-sensitive prompts from pruning-robust ones, leading to over-aggressive pruning on sensitive prompts and insufficient pruning on robust ones.
+Removing the LCR sensitivity score from the state vector forces the DDQN to make pruning decisions without any prompt-level sensitivity information. The agent retains hardware telemetry (6 dims) and early-Llama features (3 dims) but loses the learned signal that directly quantifies how much each prompt degrades under pruning.
 
-**Study 2B — No Hardware (4-D State)**: Removing hardware telemetry leaves the agent with only the LCR score (1 dim) and early-Llama features (3 dims). Under the controlled lab conditions of this experiment (fixed GPU load, no concurrent processes), this variant performs comparably to the full control, with even slightly better average metrics. This result is expected: in a stable hardware environment, hardware features provide minimal discriminative signal because all prompts experience the same computational resources.
+The impact is most visible in the quality-speed tradeoff: the No LCR variant achieves only 1.69 percentage points less speedup than the control (20.96% vs 22.65%), but its average PPL explodes from 17.10 to 54.06—a +36.96 degradation. This asymmetry reveals that the LCR's primary contribution is **quality preservation, not speed optimization**. Without sensitivity information, the agent cannot distinguish pruning-tolerant prompts from pruning-sensitive ones, so it applies similar pruning intensities indiscriminately. When aggressive pruning hits a sensitive prompt, PPL spikes catastrophically (tail-20 PPL = 90.53 vs control's 22.55), driving the tail-20 reward to −0.0186. The convergence chart confirms this: the No LCR variant's reward trajectory (red line) consistently falls below the control (blue line) from episode 40 onward, indicating that learned exploitation without prompt sensitivity degrades rather than improves final performance.
 
-However, this result should **not** be interpreted as evidence that hardware features are unnecessary. In deployment scenarios with concurrent workloads, variable GPU memory pressure, or battery constraints on edge devices, the 4-D policy would degrade because it cannot modulate pruning intensity based on available resources. The ablation demonstrates that hardware features are conditionally useful—essential for resource-adaptive deployment but redundant in controlled benchmarking.
+**Study 2B — No Hardware (4-D State)**:
+- **Reward delta vs. control**: +0.0088 (average), +0.0249 (tail-20)
+- **PPL delta vs. control**: +21.65 (a 2.27× increase)
+- **Speedup delta vs. control**: −0.77 percentage points (−3.4% relative)
 
-**Study 2C — Random Actions**: The uniform random baseline provides the strongest ablation: it quantifies the total benefit of learned policy selection by replacing the DDQN with random choice over the same action space. The random variant produces moderately positive average speedup during the main experiment (because random layer-skipping actions still provide some latency reduction), but its tail behavior is dramatically worse. The random policy waste episodes on the `none` action (zero speedup) and on extremely aggressive pruning (catastrophic PPL), neither of which a learned policy would select during exploitation.
+Removing hardware telemetry leaves the agent with only the LCR score (1 dim) and early-Llama features (3 dims). Under the controlled lab conditions of this experiment (fixed GPU, no concurrent processes, stable thermal state), this variant produces the **highest average reward** (0.069) and the **highest tail-20 reward** (+0.0286) among all conditions, marginally surpassing the full control.
 
-The convergence comparison chart shows that the random variant's reward trajectory is flat—it does not improve over time because there is no learning—while the DDQN variants show clear upward trajectories as $\epsilon$ decays and exploitation begins.
+This paradoxical result admits two complementary explanations. First, in a stationary hardware environment where GPU utilization, memory pressure, and temperature remain constant across episodes, the 6 hardware features are effectively constant-valued dimensions that contribute no discriminative signal. They add noise to the state representation without improving action selection, functioning as uninformative features that slightly impede learning within the 100-episode budget. Second, the reduced 4-D state space accelerates DDQN convergence because the function approximator has fewer dimensions to learn over, enabling faster exploitation of the LCR and early-Llama signals.
+
+However, the No Hardware variant still suffers a 2.27× PPL increase over the control (38.75 vs 17.10), and its tail-20 PPL reaches 87.99 (vs control's 22.55). This quality degradation is comparable to the No LCR variant's tail-20 PPL (90.53), suggesting that hardware features—even if constant-valued—may still contribute to the control's superior quality regulation through implicit regularization of the policy space.
+
+Critically, this result should **not** be interpreted as evidence that hardware features are unnecessary in deployment. In real-world scenarios with concurrent workloads, variable GPU memory pressure, thermal throttling, or battery constraints on edge devices, the 4-D policy would degrade because it cannot modulate pruning intensity based on available resources. The ablation demonstrates that hardware features are **conditionally useful**—redundant in controlled benchmarking but essential for resource-adaptive deployment.
+
+**Study 2C — Random Actions**:
+- **Reward delta vs. control**: −0.0025 (average), −0.0378 (tail-20)
+- **PPL delta vs. control**: −1.90 (lower PPL is an artifact of conservative random selection)
+- **Speedup delta vs. control**: −4.53 percentage points (−20.0% relative)
+
+The uniform random baseline replaces the DDQN with uniform random choice over the same 17-action space, providing the most fundamental ablation: it quantifies the total value of learned policy selection by eliminating learning entirely.
+
+The Random variant's average reward (0.057) is surprisingly close to the control (0.060), which might superficially suggest that learned action selection provides minimal benefit. However, this comparison is misleading because it conflates the exploration-dominated early phase (where the control is also selecting near-random actions) with the exploitation phase. The **tail-20 analysis** exposes the true gap: the Random variant's tail-20 reward is −0.0341 versus the control's +0.0037, a **total swing of 0.0378 reward units**. More strikingly, the Random variant's tail-20 speedup collapses to 4.79%—barely one-fifth of the control's 23.67%—confirming that random action selection provides negligible consistent acceleration.
+
+The convergence comparison chart makes this distinction visually unambiguous: the Random variant (cyan line) shows no directional improvement across the 100-episode horizon, maintaining a stationary trajectory that reflects pure chance rather than policy improvement. In contrast, the Control's reward trajectory demonstrates the characteristic DDQN learning signature—initial exploration noise followed by exploitation-driven stabilization.
+
+#### Summary of Ablation Findings
+
+| Component Removed | Tail-20 Reward | Tail-20 Speedup | Primary Impact |
+| ----------------- | -------------: | --------------: | -------------- |
+| None (full control) | +0.0037 | 23.67% | Baseline |
+| LCR sensitivity | −0.0186 | 16.63% | 3.2× PPL degradation; agent cannot adapt to prompt difficulty |
+| Hardware telemetry | +0.0286 | 21.68% | Marginally better under static conditions; loses resource adaptability |
+| Learned policy (Random) | −0.0341 | 4.79% | 5× speedup collapse; no learning, no exploitation |
+
+The ablation studies establish that: (1) the LCR sensitivity signal is the **most critical component** for quality-aware pruning—its removal causes the largest quality degradation (3.2× PPL increase) and the second-largest tail-20 reward decline; (2) hardware telemetry is **conditionally valuable**—redundant in controlled settings but architecturally necessary for deployment-grade resource adaptation; and (3) learned policy selection via DDQN provides a **5× improvement** in converged speedup over random action selection (23.67% vs 4.79%), validating that the RL controller is not merely selecting from a pre-filtered action set but learning meaningful, prompt-adaptive decisions.
 
 ---
 

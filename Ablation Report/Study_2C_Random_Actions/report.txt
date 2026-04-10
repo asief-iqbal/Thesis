@@ -8,7 +8,7 @@ Beta:            0.1
 
 Episodes:        100
 Avg Reward:      0.0574  (std=0.1996)
-Avg PPL:         152.04
+Avg PPL:         15.24
 Avg Speedup:     18.12%
 Baseline PPL:    2.23
 

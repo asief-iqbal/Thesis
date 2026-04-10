@@ -1,17 +1,34 @@
-Architecture Ablation Studies — Summary Report
+Architecture Ablation Studies -- Summary Report
 ======================================================================
 
-STUDY 1: Reward Function Ablation
+STUDIES 2A-2D: Framework Ablation
 ----------------------------------------
-Sweep: 5 normalized pairs (alpha+beta=1.0), 200 episodes each
-Best:   alpha=0.9, beta=0.1 (avg_R=-0.0151, PPL=211.70, speedup=27.37%)
-Chosen: alpha=0.9, beta=0.1 (avg_R=-0.0151, PPL=211.70, speedup=27.37%)
-Rank of chosen: #1/5
+Variant                        |   Avg R  Tail R |     PPL   T-PPL |  Speed%   T-Sp%
+-----------------------------------------------------------------------------------------------
+Control: Full Architecture     |  0.0599  0.0037 |   17.10   22.55 |   22.65   23.67
+Study 2A: No LCR (9-D)         |  0.0514 -0.0186 |   54.06   90.53 |   20.96   16.63
+Study 2B: No Hardware (4-D)    |  0.0687  0.0286 |   38.75   87.99 |   21.88   21.68
+Study 2C: Random Actions       |  0.0574 -0.0341 |   15.20   7.50 |   18.12    4.79
 
-Conclusion: alpha=0.9, beta=0.1 sits on the optimal speed-quality
-ridge.  Reducing alpha or increasing beta causes the agent to become
-conservative, avoiding beneficial pruning and sacrificing speedup.
+Interpretation (vs Control):
 
-STUDIES 2A–2D: Framework Ablation
-----------------------------------------
-(Skipped)
+  Study 2A: No LCR (9-D):
+    Reward delta:  -0.0085
+    PPL delta:     +36.96
+    Speedup delta: -3.69%
+    -> Removing the LCR score reduces the agent's ability to
+       adapt pruning intensity to prompt sensitivity.
+
+  Study 2B: No Hardware (4-D):
+    Reward delta:  +0.0088
+    PPL delta:     +21.65
+    Speedup delta: -3.27%
+    -> Without hardware telemetry, the agent cannot react to
+       resource constraints, hurting performance on constrained devices.
+
+  Study 2C: Random Actions:
+    Reward delta:  -0.0025
+    PPL delta:     -1.90
+    Speedup delta: -6.53%
+    -> Random action selection confirms that the RL controller provides
+       meaningful decision-making beyond chance.

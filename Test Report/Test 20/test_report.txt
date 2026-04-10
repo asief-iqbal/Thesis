@@ -1,0 +1,24 @@
+Test Report
+============================================================
+Episodes: 100
+Overall Avg Total Time (LCR+RL+Model): 1533.46ms
+  Avg LCR Inference: 17.87ms
+  Avg RL Agent: 0.69ms
+  Avg Model Inference (pruned): 1514.89ms
+  Avg Baseline Inference (unpruned): 1632.86ms
+  VRAM total: 8.00 GB | Avg model: 4.61 GB | Avg pruning+inference: 0.178 GB | Avg free: 0.13 GB
+  Avg Baseline Peak VRAM: 4.753 GB | Avg Pruned Peak VRAM: 4.791 GB | VRAM Saved: -0.038 GB (-0.8%)
+  Avg Baseline Params: 4714.3 MB | Avg Pruned Params: 4380.7 MB | Params Reduced: 333.5 MB (7.1%)
+Overall Avg PPL (pruned, arithmetic): 1.91
+Overall PPL (pruned, token-weighted): 1.79
+Overall Avg PPL (baseline, arithmetic): 2.42
+Overall PPL (baseline, token-weighted): 2.19
+
+Overall Avg Reward: 0.0848
+
+Averages by Prune Type and Intensity:
+  none 0.0: Avg Time 1757.08ms, Avg PPL 2.15, TW-PPL 2.00, Avg Reward 0.1620 (12 samples)
+  transformer_layers 0.06: Avg Time 1676.23ms, Avg PPL 1.62, TW-PPL 1.58, Avg Reward 0.0278 (21 samples)
+  transformer_layers 0.12: Avg Time 1452.10ms, Avg PPL 1.86, TW-PPL 1.75, Avg Reward 0.0985 (60 samples)
+  attention_heads 0.125: Avg Time 1452.44ms, Avg PPL 2.38, TW-PPL 2.32, Avg Reward 0.0391 (6 samples)
+  attention_heads 0.25: Avg Time 1219.52ms, Avg PPL 5.08, TW-PPL 5.08, Avg Reward -0.1874 (1 samples)

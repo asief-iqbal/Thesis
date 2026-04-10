@@ -1,0 +1,24 @@
+{
+  "config": {
+    "base_model": "meta-llama/Llama-3.2-1B",
+    "pruned_ckpt": null,
+    "lora_ckpt": null,
+    "device": "cuda",
+    "acc_samples": 200,
+    "max_seq_len": 512,
+    "batch_size": 8,
+    "seed": 42
+  },
+  "baseline": {
+    "accuracy": {
+      "boolq": 0.605,
+      "mmlu": 0.47
+    }
+  },
+  "pruned": {
+    "accuracy": {
+      "boolq": 0.59,
+      "mmlu": 0.2
+    }
+  }
+}

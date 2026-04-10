@@ -226,32 +226,23 @@ class ActionSpace:
     def __init__(self):
         self.actions = [
             PruningAction(level=0, intensity=0.0,   target="none",               action_index=0),
-            # Transformer layer skipping — each intensity removes a distinct
-            # number of layers from the 16-layer backbone:
-            #   0.06→1L  0.12→2L  0.19→3L  0.25→4L  0.31→5L
-            #   0.38→6L  0.44→7L  0.50→8L  0.56→9L  0.62→10L
+            # Transformer layer skipping — capped at ≤2 layers for 1B model
+            # to prevent catastrophic quality collapse:
+            #   0.06→1L  0.12→2L
             PruningAction(level=3, intensity=0.06,  target="transformer_layers", action_index=1),
             PruningAction(level=3, intensity=0.12,  target="transformer_layers", action_index=2),
-            PruningAction(level=3, intensity=0.19,  target="transformer_layers", action_index=3),
-            PruningAction(level=3, intensity=0.25,  target="transformer_layers", action_index=4),
-            PruningAction(level=3, intensity=0.31,  target="transformer_layers", action_index=5),
-            PruningAction(level=3, intensity=0.38,  target="transformer_layers", action_index=6),
-            PruningAction(level=3, intensity=0.44,  target="transformer_layers", action_index=7),
-            PruningAction(level=3, intensity=0.50,  target="transformer_layers", action_index=8),
-            PruningAction(level=3, intensity=0.56,  target="transformer_layers", action_index=9),
-            PruningAction(level=3, intensity=0.62,  target="transformer_layers", action_index=10),
             # Structural attention-head pruning (GQA-safe) — each intensity
             # removes a distinct number of KV groups from the 8 KV heads:
             #   0.125→1KV  0.25→2KV  0.375→3KV  0.50→4KV  0.625→5KV  0.75→6KV
-            PruningAction(level=2, intensity=0.125, target="attention_heads",    action_index=11),
-            PruningAction(level=2, intensity=0.25,  target="attention_heads",    action_index=12),
-            PruningAction(level=2, intensity=0.375, target="attention_heads",    action_index=13),
-            PruningAction(level=2, intensity=0.50,  target="attention_heads",    action_index=14),
-            PruningAction(level=2, intensity=0.625, target="attention_heads",    action_index=15),
-            PruningAction(level=2, intensity=0.75,  target="attention_heads",    action_index=16),
+            PruningAction(level=2, intensity=0.125, target="attention_heads",    action_index=3),
+            PruningAction(level=2, intensity=0.25,  target="attention_heads",    action_index=4),
+            PruningAction(level=2, intensity=0.375, target="attention_heads",    action_index=5),
+            PruningAction(level=2, intensity=0.50,  target="attention_heads",    action_index=6),
+            PruningAction(level=2, intensity=0.625, target="attention_heads",    action_index=7),
+            PruningAction(level=2, intensity=0.75,  target="attention_heads",    action_index=8),
         ]
         print(f"[RL Agent] Action space initialized with {len(self.actions)} actions "
-              f"(1 none + 10 layer-skip + 6 head).")
+              f"(1 none + 2 layer-skip + 6 head).")
 
     def get_action(self, index: int) -> PruningAction:
         return self.actions[index]
@@ -1729,7 +1720,7 @@ def main(num_episodes: int = 50,
             _pruned_peak = _vram_peak if torch.cuda.is_available() else 0.0
             print(f"[Pruned] Action: {pruning_action.target} ({pruning_action.intensity}) | LCR Time: {lcr_inference_time_ms:.2f}ms | RL Time: {rl_inference_time_ms:.2f}ms | Model Time: {pruned_metrics['time_ms']:.2f}ms | Total Time: {total_pruned_time:.2f}ms | Tok/s: {pruned_metrics['tok_s']:.2f} | PPL: {pruned_metrics['perplexity']:.2f} | GenTokens: {pruned_metrics.get('gen_tokens', 0)} | Params: {pruned_param_mb:.1f}/{baseline_param_mb:.1f} MB | Peak VRAM: {_pruned_peak:.2f} GB | free:{vram_free_gb:.2f} total:{vram_total_gb:.2f} GB")
 
-            alpha, beta = 0.9, 0.1
+            alpha, beta = 0.7, 0.3
             eps = 1e-8
             speed_gain = (pruned_metrics['tok_s'] - base_metrics['tok_s']) / (base_metrics['tok_s'] + eps)
             ppl_penalty = (pruned_metrics['perplexity'] - base_metrics['perplexity']) / (base_metrics['perplexity'] + eps)

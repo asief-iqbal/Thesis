@@ -1,0 +1,17 @@
+Architecture Ablation Studies — Summary Report
+======================================================================
+
+STUDY 1: Reward Function Ablation
+----------------------------------------
+Sweep: 5 normalized pairs (alpha+beta=1.0), 200 episodes each
+Best:   alpha=0.9, beta=0.1 (avg_R=-0.0151, PPL=211.70, speedup=27.37%)
+Chosen: alpha=0.9, beta=0.1 (avg_R=-0.0151, PPL=211.70, speedup=27.37%)
+Rank of chosen: #1/5
+
+Conclusion: alpha=0.9, beta=0.1 sits on the optimal speed-quality
+ridge.  Reducing alpha or increasing beta causes the agent to become
+conservative, avoiding beneficial pruning and sacrificing speedup.
+
+STUDIES 2A–2D: Framework Ablation
+----------------------------------------
+(Skipped)

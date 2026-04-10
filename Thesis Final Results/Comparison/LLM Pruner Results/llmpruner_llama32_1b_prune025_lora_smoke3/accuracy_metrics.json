@@ -1,0 +1,30 @@
+{
+  "config": {
+    "base_model": "meta-llama/Llama-3.2-1B",
+    "pruned_ckpt": "prune_log\\llama32_1b_prune_025\\pytorch_model.bin",
+    "lora_ckpt": "tune_log\\llama32_1b_prune025_lora_smoke",
+    "device": "cuda",
+    "acc_samples": 200,
+    "max_seq_len": 512,
+    "batch_size": 2,
+    "seed": 42
+  },
+  "baseline": {
+    "accuracy": {
+      "boolq": 0.67,
+      "mmlu": 0.33
+    }
+  },
+  "pruned": {
+    "accuracy": {
+      "boolq": 0.485,
+      "mmlu": 0.195
+    }
+  },
+  "pruned_lora": {
+    "accuracy": {
+      "boolq": 0.545,
+      "mmlu": 0.195
+    }
+  }
+}

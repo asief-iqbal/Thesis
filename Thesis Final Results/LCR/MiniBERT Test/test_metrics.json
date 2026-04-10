@@ -1,0 +1,90 @@
+{
+  "test_run_dir": "Test Report\\MiniBERT Test 3",
+  "training_run_dir": "Training Report\\MiniBERT Train 33",
+  "data": "C:\\Users\\T2510559\\Desktop\\Thesis code\\Oracle_dataset.csv",
+  "labels_file": "C:\\Users\\T2510559\\Desktop\\Thesis code\\oracle_lcr_labels.csv",
+  "test_samples": 2000,
+  "config": {
+    "model_name": "prajjwal1/bert-mini",
+    "max_length": 128,
+    "dropout": 0.2,
+    "n_outputs": 1,
+    "output_names": [
+      "composite"
+    ],
+    "use_aux_features": true,
+    "hidden_size": 256,
+    "input_dim": 304,
+    "epochs": 50,
+    "batch_size": 48,
+    "lr": 4e-05,
+    "backbone_lr_factor": 0.2,
+    "weight_decay": 0.03,
+    "freeze_backbone": false,
+    "balance_sources": true,
+    "label_smooth": 0.01,
+    "seed": 42,
+    "patience": 20,
+    "objective": "0.4*r2 + 0.5*spearman + 0.1*bin3_acc",
+    "loss": "huber",
+    "huber_delta": 0.15
+  },
+  "best_epoch": 33,
+  "test": {
+    "avg": {
+      "mse": 0.027801634428109293,
+      "r2": 0.632581769789555,
+      "spearman": 0.7971633059025531,
+      "bin3_acc": 0.6955
+    },
+    "per_output": [
+      {
+        "name": "composite",
+        "mse": 0.027801634428109293,
+        "mae": 0.12314828156114212,
+        "r2": 0.632581769789555,
+        "spearman": 0.7971633059025531,
+        "bin3_acc": 0.6955,
+        "spearman_ci_low": 0.7787321859443807,
+        "spearman_ci_high": 0.8167334489575034,
+        "by_source": {
+          "gsm8k": {
+            "mse": 0.03352777860142523,
+            "mae": 0.14418433575211734,
+            "r2": 0.257291449242642,
+            "spearman": 0.5605280951860578,
+            "bin3_acc": 0.605
+          },
+          "wikitext": {
+            "mse": 0.03778143142638217,
+            "mae": 0.15081641211736144,
+            "r2": 0.3731242182157687,
+            "spearman": 0.6253799875165373,
+            "bin3_acc": 0.6525
+          },
+          "cais/mmlu:all": {
+            "mse": 0.031949980480575145,
+            "mae": 0.1379793725566233,
+            "r2": 0.6397502603714509,
+            "spearman": 0.7656120893692299,
+            "bin3_acc": 0.6175
+          },
+          "boolq": {
+            "mse": 0.022738289517582624,
+            "mae": 0.10970311596698501,
+            "r2": 0.6216998570030469,
+            "spearman": 0.7959103481139583,
+            "bin3_acc": 0.76
+          },
+          "mbpp": {
+            "mse": 0.013010692114581295,
+            "mae": 0.07305817141262352,
+            "r2": 0.7939244788188113,
+            "spearman": 0.8857323085346093,
+            "bin3_acc": 0.8425
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "config": {
+    "base_model": "meta-llama/Llama-3.2-1B",
+    "pruned_ckpt": "prune_log/llama32_1b_prune_025/pytorch_model.bin",
+    "lora_ckpt": null,
+    "device": "cuda",
+    "ppl_max_seq_len": 512,
+    "ppl_batch_size": 2,
+    "ppl_samples": 50,
+    "ppl_max_chunks": 64,
+    "max_input_tokens": 256,
+    "max_new_tokens": 50,
+    "gen_samples": 20,
+    "seed": 42
+  },
+  "baseline": {
+    "ppl": {
+      "wikitext2": 17.70623238878762,
+      "gsm8k": 4.612285543632477,
+      "boolq": 15.360463069208185,
+      "mmlu": 3.5023274540990363,
+      "mbpp": 3.434685485319886
+    },
+    "generation": {
+      "wikitext2": {
+        "n_prompts": 20,
+        "total_new_tokens": 1000,
+        "total_time_s": 26.608183400001508,
+        "avg_time_s": 1.3304091700000753,
+        "tok_per_s": 37.58242285717045
+      },
+      "gsm8k": {
+        "n_prompts": 20,
+        "total_new_tokens": 903,
+        "total_time_s": 22.763754299998254,
+        "avg_time_s": 1.1381877149999127,
+        "tok_per_s": 39.66832483339839
+      },
+      "boolq": {
+        "n_prompts": 20,
+        "total_new_tokens": 1000,
+        "total_time_s": 26.440749799992773,
+        "avg_time_s": 1.3220374899996385,
+        "tok_per_s": 37.820410070227034
+      },
+      "mmlu": {
+        "n_prompts": 20,
+        "total_new_tokens": 213,
+        "total_time_s": 5.370285799996054,
+        "avg_time_s": 0.2685142899998027,
+        "tok_per_s": 39.66269355723237
+      },
+      "mbpp": {
+        "n_prompts": 20,
+        "total_new_tokens": 984,
+        "total_time_s": 25.372719700000744,
+        "avg_time_s": 1.2686359850000373,
+        "tok_per_s": 38.78181021327293
+      }
+    }
+  },
+  "pruned": {
+    "ppl": {
+      "wikitext2": 52.826420938552204,
+      "gsm8k": 27.416635635535286,
+      "boolq": 71.42112900440621,
+      "mmlu": 74.81526731603378,
+      "mbpp": 12.77745524098397
+    },
+    "generation": {
+      "wikitext2": {
+        "n_prompts": 20,
+        "total_new_tokens": 1000,
+        "total_time_s": 26.83060210000076,
+        "avg_time_s": 1.341530105000038,
+        "tok_per_s": 37.27087436476022
+      },
+      "gsm8k": {
+        "n_prompts": 20,
+        "total_new_tokens": 277,
+        "total_time_s": 6.947825200004445,
+        "avg_time_s": 0.34739126000022225,
+        "tok_per_s": 39.86859082174704
+      },
+      "boolq": {
+        "n_prompts": 20,
+        "total_new_tokens": 945,
+        "total_time_s": 23.652523099992322,
+        "avg_time_s": 1.1826261549996162,
+        "tok_per_s": 39.95345426806947
+      },
+      "mmlu": {
+        "n_prompts": 20,
+        "total_new_tokens": 579,
+        "total_time_s": 15.69609070000115,
+        "avg_time_s": 0.7848045350000575,
+        "tok_per_s": 36.88816604506226
+      },
+      "mbpp": {
+        "n_prompts": 20,
+        "total_new_tokens": 962,
+        "total_time_s": 25.721465799993894,
+        "avg_time_s": 1.2860732899996947,
+        "tok_per_s": 37.40066788885058
+      }
+    }
+  },
+  "comparison": {
+    "speedup": {
+      "wikitext2": 0.9917102605759545,
+      "gsm8k": 3.2763855803372386,
+      "boolq": 1.1178828443888658,
+      "mmlu": 0.34214161364368645,
+      "mbpp": 0.9864414375640586
+    },
+    "throughput_ratio": {
+      "wikitext2": 0.9917102605759546,
+      "gsm8k": 1.005048511354834,
+      "boolq": 1.0563992879474782,
+      "mmlu": 0.9300469215948097,
+      "mbpp": 0.9643868525778702
+    }
+  }
+}
